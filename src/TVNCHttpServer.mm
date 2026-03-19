@@ -192,8 +192,16 @@
         return [self handleScreenshot:query];
     } else if ([path isEqualToString:@"/api/writefile"]) {
         return [self handleWriteFile:query body:body];
+    } else if ([path isEqualToString:@"/api/writefile_text"]) {
+        return [self handleWriteFileText:query body:body];
     } else if ([path isEqualToString:@"/api/clipboard"]) {
         return [self handleClipboard:query body:body];
+    } else if ([path isEqualToString:@"/api/clipboard_text"]) {
+        return [self handleClipboardText:query body:body];
+    } else if ([path isEqualToString:@"/api/input"]) {
+        return [self handleInput:query body:body];
+    } else if ([path isEqualToString:@"/api/key"]) {
+        return [self handleKey:query];
     } else if ([path isEqualToString:@"/api/clients"]) {
         return [self handleClients];
     } else if ([path isEqualToString:@"/api/status"]) {
@@ -291,6 +299,45 @@
     return response;
 }
 
+// POST /api/writefile_text?path=/xxx&append=true
+// Body: plain text (UTF-8)
+- (TVNCHttpResponse *)handleWriteFileText:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = query[@"path"];
+    if (!filePath || filePath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    BOOL append = [query[@"append"] isEqualToString:@"true"];
+    
+    // 直接使用 body 作为文本内容
+    NSError *error = nil;
+    BOOL success = [[TVNCApiManager sharedManager] writeContent:body
+                                                      toFilePath:filePath
+                                                          append:append
+                                                           error:&error];
+    
+    if (success) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"path": filePath, @"bytes": @(body.length)};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSString *errMsg = error ? error.localizedDescription : @"Unknown error";
+        NSDictionary *result = @{@"success": @NO, @"error": errMsg};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
 // POST /api/clipboard
 // Body: base64 encoded text
 - (TVNCHttpResponse *)handleClipboard:(NSDictionary *)query body:(NSData *)body {
@@ -310,6 +357,31 @@
     }
     
     NSString *text = [[NSString alloc] initWithData:decodedData encoding:NSUTF8StringEncoding];
+    if (!text) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Invalid UTF-8 text"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    BOOL success = [[TVNCApiManager sharedManager] setClipboardText:text];
+    
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{@"success": @(success), @"text": text};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/clipboard_text
+// Body: plain text (UTF-8)
+- (TVNCHttpResponse *)handleClipboardText:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    // 直接解析 body 为 UTF-8 文本
+    NSString *text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
     if (!text) {
         response.statusCode = 400;
         response.contentType = @"application/json";
@@ -358,6 +430,66 @@
     return response;
 }
 
+// POST /api/input
+// Body: 要输入的文本（UTF-8）
+- (TVNCHttpResponse *)handleInput:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    // 解析 body 为 UTF-8 文本
+    NSString *text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    if (!text) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Invalid UTF-8 text"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 检查是否有输入框焦点
+    BOOL hasFocus = [[TVNCApiManager sharedManager] inputText:text];
+    
+    if (hasFocus) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"text": text, @"length": @(text.length)};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"No active text input field found. Please focus an input field first."};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
+// POST /api/key?code=13
+// 发送单个按键
+- (TVNCHttpResponse *)handleKey:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *codeStr = query[@"code"];
+    if (!codeStr) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Missing code parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    NSInteger keyCode = [codeStr integerValue];
+    BOOL success = [[TVNCApiManager sharedManager] sendKeyCode:keyCode];
+    
+    response.statusCode = success ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = success ? 
+        @{@"success": @YES, @"keyCode": @(keyCode)} :
+        @{@"success": @NO, @"error": @"Failed to send key or no active input field"};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
 // GET /
 - (TVNCHttpResponse *)handleRoot {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -368,7 +500,11 @@
         "<h2>Endpoints:</h2><ul>"
         "<li><b>GET /api/screenshot?format=png|jpeg</b> - 获取截图</li>"
         "<li><b>POST /api/writefile?path=/xxx&append=true|false</b> - 写入文件（body: base64）</li>"
+        "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
+        "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
+        "<li><b>POST /api/input</b> - 输入文本到当前焦点输入框（body: 纯文本）</li>"
+        "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
         "</ul></body></html>";

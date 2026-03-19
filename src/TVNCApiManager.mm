@@ -310,4 +310,340 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     return pasteboard.string;
 }
 
+#pragma mark - 键盘输入 API
+
+- (BOOL)inputText:(NSString *)text {
+    if (!text || text.length == 0) {
+        return NO;
+    }
+    
+    // 在主线程执行
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self inputText:text];
+        });
+        return result;
+    }
+    
+    // 查找当前第一响应者
+    UIView *firstResponder = [self findFirstResponder];
+    if (!firstResponder) {
+        TVLog(@"No first responder found for text input");
+        return NO;
+    }
+    
+    TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
+    
+    // 处理不同类型的输入框
+    if ([firstResponder isKindOfClass:[UITextField class]]) {
+        UITextField *textField = (UITextField *)firstResponder;
+        NSString *currentText = textField.text ?: @"";
+        NSRange selectedRange = textField.selectedRange;
+        
+        // 在光标位置插入文本
+        NSMutableString *newText = [currentText mutableCopy];
+        [newText replaceCharactersInRange:selectedRange withString:text];
+        textField.text = newText;
+        
+        // 更新光标位置
+        textField.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
+        
+        // 发送编辑事件
+        [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+        
+        return YES;
+        
+    } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+        UITextView *textView = (UITextView *)firstResponder;
+        NSRange selectedRange = textView.selectedRange;
+        
+        // 在光标位置插入文本
+        NSMutableString *newText = [textView.text mutableCopy] ?: [NSMutableString string];
+        [newText replaceCharactersInRange:selectedRange withString:text];
+        textView.text = newText;
+        
+        // 更新光标位置
+        textView.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
+        
+        // 通知代理
+        if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+            [textView.delegate textViewDidChange:textView];
+        }
+        
+        return YES;
+        
+    } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+        // 通用 UITextInput 协议支持
+        id<UITextInput> textInput = (id<UITextInput>)firstResponder;
+        
+        // 获取当前选中的文本范围
+        UITextRange *selectedRange = textInput.selectedTextRange;
+        if (!selectedRange) {
+            // 如果没有选中范围，使用文档末尾
+            selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument 
+                                                  toPosition:textInput.endOfDocument];
+        }
+        
+        // 替换选中的文本
+        [textInput replaceRange:selectedRange withText:text];
+        
+        return YES;
+    }
+    
+    TVLog(@"First responder does not support text input: %@", NSStringFromClass([firstResponder class]));
+    return NO;
+}
+
+- (BOOL)sendKeyCode:(NSInteger)keyCode {
+    // 在主线程执行
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self sendKeyCode:keyCode];
+        });
+        return result;
+    }
+    
+    UIView *firstResponder = [self findFirstResponder];
+    if (!firstResponder) {
+        return NO;
+    }
+    
+    // 处理特殊按键
+    switch (keyCode) {
+        case 13: // 回车键
+        case 0x24: // 回车 (Mac)
+            if ([firstResponder isKindOfClass:[UITextField class]]) {
+                UITextField *textField = (UITextField *)firstResponder;
+                [textField sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
+                return YES;
+            }
+            // 插入换行
+            return [self inputText:@"\n"];
+            
+        case 8:  // 退格键
+        case 0x33: // 退格 (Mac)
+        case 127: // Delete
+            return [self deleteBackward:firstResponder];
+            
+        case 9:  // Tab
+        case 0x30: // Tab (Mac)
+            return [self inputText:@"\t"];
+            
+        case 27: // ESC
+            [firstResponder resignFirstResponder];
+            return YES;
+            
+        default:
+            // 尝试转换为字符
+            NSString *charStr = [self stringForKeyCode:keyCode];
+            if (charStr.length > 0) {
+                return [self inputText:charStr];
+            }
+            return NO;
+    }
+}
+
+- (BOOL)sendKeyCombination:(NSArray<NSNumber *> *)keyCodes {
+    if (!keyCodes || keyCodes.count == 0) {
+        return NO;
+    }
+    
+    // 在主线程执行
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self sendKeyCombination:keyCodes];
+        });
+        return result;
+    }
+    
+    // 解析组合键
+    BOOL hasCommand = NO;
+    BOOL hasControl = NO;
+    BOOL hasOption = NO;
+    BOOL hasShift = NO;
+    NSInteger mainKey = -1;
+    
+    for (NSNumber *keyCode in keyCodes) {
+        NSInteger code = [keyCode integerValue];
+        
+        // 检查修饰键
+        if (code == 0x100000 || code == 55) { // Command
+            hasCommand = YES;
+        } else if (code == 0x200000 || code == 59 || code == 62) { // Shift
+            hasShift = YES;
+        } else if (code == 0x400000 || code == 58 || code == 61) { // Option/Alt
+            hasOption = YES;
+        } else if (code == 0x800000 || code == 60) { // Control
+            hasControl = YES;
+        } else {
+            mainKey = code;
+        }
+    }
+    
+    // 处理常见的组合键
+    if (hasCommand && mainKey == 0x56) { // Cmd+V (粘贴)
+        UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+        NSString *text = pasteboard.string;
+        if (text) {
+            return [self inputText:text];
+        }
+        return NO;
+        
+    } else if (hasCommand && mainKey == 0x43) { // Cmd+C (复制)
+        // 复制当前选中的文本到剪贴板
+        UIView *firstResponder = [self findFirstResponder];
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)firstResponder;
+            [UIPasteboard generalPasteboard].string = textField.text ?: @"";
+            return YES;
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)firstResponder;
+            [UIPasteboard generalPasteboard].string = textView.text ?: @"";
+            return YES;
+        }
+        return NO;
+        
+    } else if (hasCommand && mainKey == 0x41) { // Cmd+A (全选)
+        UIView *firstResponder = [self findFirstResponder];
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)firstResponder;
+            textField.selectedRange = NSMakeRange(0, textField.text.length);
+            return YES;
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)firstResponder;
+            textView.selectedRange = NSMakeRange(0, textView.text.length);
+            return YES;
+        }
+        return NO;
+        
+    } else if ((hasCommand || hasControl) && mainKey == 0x58) { // Cmd+X / Ctrl+X (剪切)
+        UIView *firstResponder = [self findFirstResponder];
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)firstResponder;
+            [UIPasteboard generalPasteboard].string = textField.text ?: @"";
+            textField.text = @"";
+            return YES;
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)firstResponder;
+            [UIPasteboard generalPasteboard].string = textView.text ?: @"";
+            textView.text = @"";
+            return YES;
+        }
+        return NO;
+    }
+    
+    return NO;
+}
+
+#pragma mark - 私有方法
+
+- (UIView *)findFirstResponder {
+    for (UIWindow *window in [UIApplication sharedApplication].windows) {
+        UIView *firstResponder = [self findFirstResponderInView:window];
+        if (firstResponder) {
+            return firstResponder;
+        }
+    }
+    return nil;
+}
+
+- (UIView *)findFirstResponderInView:(UIView *)view {
+    if (view.isFirstResponder) {
+        return view;
+    }
+    
+    for (UIView *subview in view.subviews) {
+        UIView *firstResponder = [self findFirstResponderInView:subview];
+        if (firstResponder) {
+            return firstResponder;
+        }
+    }
+    
+    return nil;
+}
+
+- (BOOL)deleteBackward:(UIView *)firstResponder {
+    if ([firstResponder isKindOfClass:[UITextField class]]) {
+        UITextField *textField = (UITextField *)firstResponder;
+        NSRange selectedRange = textField.selectedRange;
+        NSString *currentText = textField.text ?: @"";
+        
+        if (selectedRange.length > 0) {
+            // 删除选中的文本
+            NSMutableString *newText = [currentText mutableCopy];
+            [newText deleteCharactersInRange:selectedRange];
+            textField.text = newText;
+            textField.selectedRange = NSMakeRange(selectedRange.location, 0);
+        } else if (selectedRange.location > 0) {
+            // 删除光标前一个字符
+            NSMutableString *newText = [currentText mutableCopy];
+            [newText deleteCharactersInRange:NSMakeRange(selectedRange.location - 1, 1)];
+            textField.text = newText;
+            textField.selectedRange = NSMakeRange(selectedRange.location - 1, 0);
+        }
+        
+        [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+        return YES;
+        
+    } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+        UITextView *textView = (UITextView *)firstResponder;
+        NSRange selectedRange = textView.selectedRange;
+        NSString *currentText = textView.text ?: @"";
+        
+        if (selectedRange.length > 0) {
+            NSMutableString *newText = [currentText mutableCopy];
+            [newText deleteCharactersInRange:selectedRange];
+            textView.text = newText;
+            textView.selectedRange = NSMakeRange(selectedRange.location, 0);
+        } else if (selectedRange.location > 0) {
+            NSMutableString *newText = [currentText mutableCopy];
+            [newText deleteCharactersInRange:NSMakeRange(selectedRange.location - 1, 1)];
+            textView.text = newText;
+            textView.selectedRange = NSMakeRange(selectedRange.location - 1, 0);
+        }
+        
+        if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+            [textView.delegate textViewDidChange:textView];
+        }
+        return YES;
+        
+    } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+        id<UITextInput> textInput = (id<UITextInput>)firstResponder;
+        [textInput deleteBackward];
+        return YES;
+    }
+    
+    return NO;
+}
+
+- (NSString *)stringForKeyCode:(NSInteger)keyCode {
+    // 简单的键码到字符映射
+    static NSDictionary *keyMap = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        keyMap = @{
+            @(0x00): @"a", @(0x01): @"s", @(0x02): @"d", @(0x03): @"f",
+            @(0x04): @"h", @(0x05): @"g", @(0x06): @"z", @(0x07): @"x",
+            @(0x08): @"c", @(0x09): @"v", @(0x0B): @"b", @(0x0C): @"q",
+            @(0x0D): @"w", @(0x0E): @"e", @(0x0F): @"r",
+            @(0x10): @"y", @(0x11): @"t", @(0x12): @"1", @(0x13): @"2",
+            @(0x14): @"3", @(0x15): @"4", @(0x16): @"6", @(0x17): @"5",
+            @(0x18): @"=", @(0x19): @"9", @(0x1A): @"7", @(0x1B): @"-",
+            @(0x1C): @"8", @(0x1D): @"0", @(0x1E): @"]", @(0x1F): @"o",
+            @(0x20): @"u", @(0x21): @"[", @(0x22): @"i", @(0x23): @"p",
+            @(0x24): @"\n", @(0x25): @"l", @(0x26): @"j", @(0x27): @"'",
+            @(0x28): @"k", @(0x29): @";", @(0x2A): @"\\", @(0x2B): @",",
+            @(0x2C): @"/", @(0x2D): @"n", @(0x2E): @"m", @(0x2F): @".",
+            @(0x30): @"\t", @(0x31): @" ", @(0x32): @"`", @(0x33): @"\b",
+            @(0x35): @"ESC", @(0x37): @"CMD", @(0x38): @"SHIFT",
+            @(0x3A): @"OPTION", @(0x3B): @"CONTROL",
+        };
+    });
+    
+    return keyMap[@(keyCode)] ?: @"";
+}
+
 @end

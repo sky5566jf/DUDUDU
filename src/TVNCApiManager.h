@@ -30,6 +30,7 @@ NS_ASSUME_NONNULL_BEGIN
  1. 获取截图原图
  2. 指定位置写入文件内容
  3. 粘贴支持中文
+ 4. 模拟键盘输入
  */
 @interface TVNCApiManager : NSObject
 
@@ -78,6 +79,29 @@ NS_ASSUME_NONNULL_BEGIN
  @return 剪贴板文本，如果没有内容返回 nil
  */
 - (nullable NSString *)getClipboardText;
+
+#pragma mark - 键盘输入 API
+
+/**
+ 模拟键盘输入文本到当前焦点输入框
+ @param text 要输入的文本内容
+ @return 是否成功
+ */
+- (BOOL)inputText:(NSString *)text;
+
+/**
+ 模拟按键事件
+ @param keyCode 按键码（如回车键 13，退格键 8 等）
+ @return 是否成功
+ */
+- (BOOL)sendKeyCode:(NSInteger)keyCode;
+
+/**
+ 模拟组合键（如 Ctrl+C, Ctrl+V 等）
+ @param keyCodes 按键码数组
+ @return 是否成功
+ */
+- (BOOL)sendKeyCombination:(NSArray<NSNumber *> *)keyCodes;
 
 @end
 
