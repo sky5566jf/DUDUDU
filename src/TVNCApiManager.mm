@@ -230,6 +230,8 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     NSString *directory = [filePath stringByDeletingLastPathComponent];
     const char *dirPath = [directory UTF8String];
     
+    TVLog(@"WriteFile: target path: %@, directory: %@", filePath, directory);
+    
     // 递归创建目录
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof(tmp), "%s", dirPath);
@@ -241,20 +243,53 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     for (char *p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
-            mkdir(tmp, 0755);
+            int ret = mkdir(tmp, 0755);
+            if (ret != 0 && errno != EEXIST) {
+                TVLog(@"WriteFile: mkdir failed for '%s': %s", tmp, strerror(errno));
+            }
             *p = '/';
         }
     }
-    mkdir(tmp, 0755);
+    int finalRet = mkdir(tmp, 0755);
+    if (finalRet != 0 && errno != EEXIST) {
+        TVLog(@"WriteFile: final mkdir failed for '%s': %s", tmp, strerror(errno));
+    }
     
     // 检查目录是否创建成功
     struct stat st;
     if (stat(dirPath, &st) != 0) {
+        TVLog(@"WriteFile: stat failed for directory '%s': %s", dirPath, strerror(errno));
         if (error) {
             *error = [NSError errorWithDomain:@"TVNCApiManager"
                                         code:1005
                                     userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Failed to create directory: %s", strerror(errno)]}];
+                                        [NSString stringWithFormat:@"Failed to create directory '%@': %s", directory, strerror(errno)]}];
+        }
+        return NO;
+    }
+    
+    TVLog(@"WriteFile: directory exists, mode: %o, uid: %d, gid: %d", st.st_mode, st.st_uid, st.st_gid);
+    
+    // 检查目录是否是目录
+    if (!S_ISDIR(st.st_mode)) {
+        TVLog(@"WriteFile: path exists but is not a directory: %@", directory);
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:1008
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Path exists but is not a directory: %@", directory]}];
+        }
+        return NO;
+    }
+    
+    // 检查目录是否可写
+    if (access(dirPath, W_OK) != 0) {
+        TVLog(@"WriteFile: directory not writable '%s': %s", dirPath, strerror(errno));
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:1009
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Directory not writable '%@': %s", directory, strerror(errno)]}];
         }
         return NO;
     }
@@ -264,11 +299,12 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     int fd = open(path, flags, 0644);
     
     if (fd < 0) {
+        TVLog(@"WriteFile: open failed for '%s': %s", path, strerror(errno));
         if (error) {
             *error = [NSError errorWithDomain:@"TVNCApiManager"
                                         code:1006
                                     userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Failed to open file: %s", strerror(errno)]}];
+                                        [NSString stringWithFormat:@"Failed to open file '%@': %s", filePath, strerror(errno)]}];
         }
         return NO;
     }
@@ -278,6 +314,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     close(fd);
     
     if (written < 0 || (size_t)written != data.length) {
+        TVLog(@"WriteFile: write failed: %s", strerror(errno));
         if (error) {
             *error = [NSError errorWithDomain:@"TVNCApiManager"
                                         code:1007
@@ -287,6 +324,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return NO;
     }
     
+    TVLog(@"WriteFile: success, wrote %lu bytes to %@", (unsigned long)data.length, filePath);
     return YES;
 }
 
