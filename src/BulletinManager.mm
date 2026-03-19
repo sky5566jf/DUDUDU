@@ -47,7 +47,7 @@
     if (self) {
 #if !TARGET_IPHONE_SIMULATOR
 #ifdef THEBOOTSTRAP
-        mSectionIdentifier = @"com.82flex.TrollVNCApp";
+        mSectionIdentifier = @"com.matisu.vnc";
 #else
         mSectionIdentifier = @"com.apple.Preferences";
 #endif
