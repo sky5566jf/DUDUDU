@@ -1,261 +1,371 @@
-# TrollVNC 扩展 API 文档
+# TrollVNC HTTP API 文档
 
-本文档描述了 TrollVNC 新增的 API 接口功能。
+TrollVNC 现在提供 HTTP REST API 接口，默认在 **8080 端口**启动。
 
-## 概述
+## 服务器信息
 
-新增的三个 API 功能：
-1. **截图 API** - 获取设备屏幕截图原图
-2. **文件写入 API** - 向指定路径写入文件内容
-3. **剪贴板 API** - 支持中文的粘贴功能
+- **默认端口**: 8080
+- **协议**: HTTP/1.1
+- **编码**: UTF-8
+- **CORS**: 已启用（支持跨域访问）
 
-## 控制套接字命令
+## API 端点
 
-通过控制套接字（使用 `-c` 参数启用）可以访问这些 API。
+### 1. 获取截图
 
-### 1. 截图命令
+获取当前屏幕截图。
 
-获取设备屏幕截图，支持 PNG 和 JPEG 格式。
-
-**命令格式：**
+**请求:**
 ```
-screenshot [format] [path]
+GET /api/screenshot?format=png
 ```
 
-**参数：**
-- `format` - 可选，图片格式：`png` 或 `jpeg`（默认：`png`）
-- `path` - 可选，保存路径。如果不指定，返回 base64 编码的图片数据
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
 
-**示例：**
+**响应:**
+- 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
+- 失败: 返回 JSON 错误信息
 
-1. 获取 PNG 格式的 base64 编码图片：
-```
-echo "screenshot png" | nc 127.0.0.1 5555
-```
+**示例:**
+```bash
+# 获取 PNG 截图
+curl -o screenshot.png "http://192.168.1.100:8080/api/screenshot?format=png"
 
-2. 保存截图到文件：
-```
-echo "screenshot png /var/mobile/screenshot.png" | nc 127.0.0.1 5555
-```
-
-3. 获取 JPEG 格式（质量 90%）：
-```
-echo "screenshot jpeg /var/mobile/screenshot.jpg" | nc 127.0.0.1 5555
+# 获取 JPEG 截图
+curl -o screenshot.jpg "http://192.168.1.100:8080/api/screenshot?format=jpeg"
 ```
 
-**响应：**
-- 成功（无路径）：`OK png\n<base64-encoded-image>`
-- 成功（有路径）：`OK 12345 bytes written to /path/to/file.png`
-- 失败：`ERR ScreenshotFailed` 或 `ERR WriteFailed: <reason>`
+```python
+import requests
 
-### 2. 文件写入命令
+response = requests.get("http://192.168.1.100:8080/api/screenshot?format=png")
+with open("screenshot.png", "wb") as f:
+    f.write(response.content)
+```
+
+---
+
+### 2. 写入文件
 
 将内容写入指定文件路径。
 
-**命令格式：**
+**请求:**
 ```
-writefile <path> [append]
+POST /api/writefile?path=/var/mobile/test.txt&append=false
+Content-Type: text/plain
+
 <base64-encoded-content>
 ```
 
-**参数：**
-- `path` - 必需，目标文件路径
-- `append` - 可选，追加模式。如果指定，内容将追加到文件末尾
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 目标文件路径 |
+| append | boolean | 否 | 是否追加模式，默认 `false` |
 
-**示例：**
+**请求体:**
+- base64 编码的文件内容
 
-1. 写入新文件：
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/test.txt",
+  "bytes": 1024
+}
+```
+
+**示例:**
 ```bash
-CONTENT=$(echo -n "Hello World" | base64)
-echo -e "writefile /var/mobile/test.txt\n${CONTENT}" | nc 127.0.0.1 5555
+# 写入文本文件（中文支持）
+echo -n "你好，世界！" | base64 | curl -X POST \
+  "http://192.168.1.100:8080/api/writefile?path=/var/mobile/test.txt" \
+  -H "Content-Type: text/plain" \
+  --data-binary @-
+
+# 追加内容
+echo -n "追加的内容" | base64 | curl -X POST \
+  "http://192.168.1.100:8080/api/writefile?path=/var/mobile/test.txt&append=true" \
+  -H "Content-Type: text/plain" \
+  --data-binary @-
 ```
-
-2. 追加到现有文件：
-```bash
-CONTENT=$(echo -n "追加的内容" | base64)
-echo -e "writefile /var/mobile/test.txt append\n${CONTENT}" | nc 127.0.0.1 5555
-```
-
-**响应：**
-- 成功：`OK`
-- 失败：`ERR MissingPath`、`ERR InvalidBase64` 或 `ERR <error-message>`
-
-### 3. 剪贴板命令
-
-设置设备剪贴板内容，支持中文。
-
-**命令格式：**
-```
-clipboard <base64-encoded-text>
-```
-
-**参数：**
-- `base64-encoded-text` - 必需，base64 编码的文本内容
-
-**示例：**
-
-1. 设置英文文本：
-```bash
-TEXT=$(echo -n "Hello World" | base64)
-echo "clipboard ${TEXT}" | nc 127.0.0.1 5555
-```
-
-2. 设置中文文本：
-```bash
-TEXT=$(echo -n "你好，世界！" | base64)
-echo "clipboard ${TEXT}" | nc 127.0.0.1 5555
-```
-
-**响应：**
-- 成功：`OK`
-- 失败：`ERR MissingContent`、`ERR InvalidBase64`、`ERR InvalidUTF8` 或 `ERR ClipboardSetFailed`
-
-## 编程语言示例
-
-### Python 示例
 
 ```python
-import socket
+import requests
 import base64
 
-def send_command(cmd, host="127.0.0.1", port=5555):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((host, port))
-        s.sendall(cmd.encode() + b"\n")
-        response = s.recv(65536).decode()
-        return response
+content = "你好，世界！Hello World!"
+encoded = base64.b64encode(content.encode()).decode()
 
-# 截图并保存
-def capture_screenshot(output_path):
-    # 保存到文件
-    response = send_command(f"screenshot png {output_path}")
-    print(response)
-    
-    # 或者获取 base64 数据
-    response = send_command("screenshot png")
-    lines = response.strip().split("\n")
-    if lines[0].startswith("OK"):
-        img_data = base64.b64decode(lines[1])
-        with open(output_path, "wb") as f:
-            f.write(img_data)
-        print(f"Screenshot saved to {output_path}")
-
-# 写入文件
-def write_file(path, content, append=False):
-    encoded = base64.b64encode(content.encode()).decode()
-    cmd = f"writefile {path}"
-    if append:
-        cmd += " append"
-    response = send_command(f"{cmd}\n{encoded}")
-    print(response)
-
-# 设置剪贴板
-def set_clipboard(text):
-    encoded = base64.b64encode(text.encode()).decode()
-    response = send_command(f"clipboard {encoded}")
-    print(response)
-
-# 使用示例
-if __name__ == "__main__":
-    # 截图
-    capture_screenshot("/var/mobile/screenshot.png")
-    
-    # 写入文件
-    write_file("/var/mobile/test.txt", "Hello, 中文测试！")
-    
-    # 设置剪贴板（支持中文）
-    set_clipboard("这是中文粘贴测试")
+response = requests.post(
+    "http://192.168.1.100:8080/api/writefile?path=/var/mobile/test.txt",
+    data=encoded,
+    headers={"Content-Type": "text/plain"}
+)
+print(response.json())
 ```
 
-### Shell/Bash 示例
+---
 
+### 3. 设置剪贴板
+
+设置系统剪贴板内容（支持中文）。
+
+**请求:**
+```
+POST /api/clipboard
+Content-Type: text/plain
+
+<base64-encoded-text>
+```
+
+**请求体:**
+- base64 编码的文本内容
+
+**响应:**
+```json
+{
+  "success": true,
+  "text": "你好，世界！"
+}
+```
+
+**示例:**
 ```bash
-#!/bin/bash
-
-TVNC_HOST="127.0.0.1"
-TVNC_PORT="5555"
-
-# 截图函数
-screenshot() {
-    local format=${1:-png}
-    local path=$2
-    
-    if [ -n "$path" ]; then
-        echo "screenshot $format $path" | nc $TVNC_HOST $TVNC_PORT
-    else
-        echo "screenshot $format" | nc $TVNC_HOST $TVNC_PORT
-    fi
-}
-
-# 写入文件函数
-writefile() {
-    local path=$1
-    local content=$2
-    local append=$3
-    
-    local encoded=$(echo -n "$content" | base64)
-    local cmd="writefile $path"
-    [ "$append" = "append" ] && cmd="$cmd append"
-    
-    printf "%s\n%s\n" "$cmd" "$encoded" | nc $TVNC_HOST $TVNC_PORT
-}
-
-# 设置剪贴板函数
-set_clipboard() {
-    local text=$1
-    local encoded=$(echo -n "$text" | base64)
-    echo "clipboard $encoded" | nc $TVNC_HOST $TVNC_PORT
-}
-
-# 使用示例
-screenshot png /var/mobile/screenshot.png
-writefile /var/mobile/notes.txt "这是一条笔记"
-set_clipboard "中文粘贴测试"
+# 设置剪贴板（中文）
+echo -n "复制的文本内容" | base64 | curl -X POST \
+  "http://192.168.1.100:8080/api/clipboard" \
+  -H "Content-Type: text/plain" \
+  --data-binary @-
 ```
 
-## 中文支持说明
+```python
+import requests
+import base64
 
-### 剪贴板中文支持
+text = "你好，世界！Hello World! 🎉"
+encoded = base64.b64encode(text.encode()).decode()
 
-TrollVNC 现在完全支持中文剪贴板操作：
+response = requests.post(
+    "http://192.168.1.100:8080/api/clipboard",
+    data=encoded,
+    headers={"Content-Type": "text/plain"}
+)
+print(response.json())
+```
 
-1. **接收中文** - 当 VNC 客户端发送中文到设备时，系统会自动检测以下编码：
-   - UTF-8（标准编码）
-   - UTF-16
-   - GB18030（中文国标）
-   - EUC-CN（中文扩展 Unix 编码）
-   - Latin-1（回退编码）
+---
 
-2. **发送中文** - 当设备剪贴板内容同步到 VNC 客户端时，使用 UTF-8 编码
+### 4. 获取客户端列表
 
-### 文件写入中文支持
+获取当前连接的 VNC 客户端列表。
 
-文件写入 API 使用 UTF-8 编码处理所有文本内容，确保中文文件名和内容都能正确处理。
+**请求:**
+```
+GET /api/clients
+```
 
-## 错误处理
+**响应:**
+```json
+{
+  "clients": [
+    {
+      "id": "A1B2C3D4",
+      "host": "192.168.1.50",
+      "viewOnly": false,
+      "connectedAt": 1699123456,
+      "durationSec": 3600
+    }
+  ],
+  "count": 1
+}
+```
 
-所有 API 命令在失败时都会返回以 `ERR` 开头的错误消息。常见错误：
+---
 
-| 错误代码 | 说明 |
-|---------|------|
-| `ERR Empty` | 命令为空 |
-| `ERR Unknown` | 未知命令 |
-| `ERR ScreenshotFailed` | 截图失败 |
-| `ERR WriteFailed` | 文件写入失败 |
-| `ERR MissingPath` | 缺少文件路径参数 |
-| `ERR MissingContent` | 缺少内容参数 |
-| `ERR InvalidBase64` | Base64 编码无效 |
-| `ERR InvalidUTF8` | UTF-8 编码无效 |
-| `ERR ClipboardSetFailed` | 剪贴板设置失败 |
+### 5. 获取服务器状态
+
+获取 TrollVNC 服务器状态信息。
+
+**请求:**
+```
+GET /api/status
+```
+
+**响应:**
+```json
+{
+  "status": "running",
+  "httpPort": 8080,
+  "version": "3.1"
+}
+```
+
+---
+
+### 6. API 文档页面
+
+在浏览器中查看 API 文档。
+
+**请求:**
+```
+GET /
+```
+
+**响应:**
+- 返回 HTML 格式的 API 文档页面
+
+---
+
+## Lua 使用示例
+
+```lua
+local http = require("socket.http")
+local ltn12 = require("ltn12")
+local base64 = require("base64")
+
+local API_BASE = "http://192.168.1.100:8080"
+
+-- 获取截图
+local function downloadScreenshot(savePath)
+    local response = {}
+    http.request{
+        url = API_BASE .. "/api/screenshot?format=png",
+        sink = ltn12.sink.table(response)
+    }
+    
+    local file = io.open(savePath, "wb")
+    file:write(table.concat(response))
+    file:close()
+    print("截图已保存到: " .. savePath)
+end
+
+-- 写入文件
+local function writeFile(path, content, append)
+    local encoded = base64.encode(content)
+    local url = API_BASE .. "/api/writefile?path=" .. path
+    if append then
+        url = url .. "&append=true"
+    end
+    
+    local response = {}
+    http.request{
+        url = url,
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "text/plain",
+            ["Content-Length"] = tostring(#encoded)
+        },
+        source = ltn12.source.string(encoded),
+        sink = ltn12.sink.table(response)
+    }
+    
+    return table.concat(response)
+end
+
+-- 设置剪贴板
+local function setClipboard(text)
+    local encoded = base64.encode(text)
+    local response = {}
+    http.request{
+        url = API_BASE .. "/api/clipboard",
+        method = "POST",
+        headers = {
+            ["Content-Type"] = "text/plain",
+            ["Content-Length"] = tostring(#encoded)
+        },
+        source = ltn12.source.string(encoded),
+        sink = ltn12.sink.table(response)
+    }
+    return table.concat(response)
+end
+
+-- 使用示例
+downloadScreenshot("/tmp/ios_screen.png")
+writeFile("/var/mobile/notes.txt", "你好，世界！")
+setClipboard("复制的文本")
+```
+
+---
+
+## JavaScript/浏览器使用示例
+
+```javascript
+const API_BASE = 'http://192.168.1.100:8080';
+
+// 获取截图
+async function captureScreenshot() {
+    const response = await fetch(`${API_BASE}/api/screenshot?format=png`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    
+    // 显示图片
+    const img = document.createElement('img');
+    img.src = url;
+    document.body.appendChild(img);
+}
+
+// 写入文件
+async function writeFile(path, content) {
+    const encoded = btoa(unescape(encodeURIComponent(content)));
+    const response = await fetch(`${API_BASE}/api/writefile?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: encoded
+    });
+    return response.json();
+}
+
+// 设置剪贴板
+async function setClipboard(text) {
+    const encoded = btoa(unescape(encodeURIComponent(text)));
+    const response = await fetch(`${API_BASE}/api/clipboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: encoded
+    });
+    return response.json();
+}
+```
+
+---
 
 ## 安全注意事项
 
-1. **文件路径** - 确保应用程序有权限写入指定的文件路径
-2. **控制套接字** - 控制套接字默认只监听 `127.0.0.1`，外部无法直接访问
-3. **路径遍历** - API 不会阻止路径遍历攻击，请确保传入的路径是可信的
+1. **HTTP 服务器默认监听所有网络接口** (`0.0.0.0`)，局域网内任何设备都可以访问
+2. **没有内置身份验证**，请确保在受信任的网络中使用
+3. **建议措施**:
+   - 仅在受信任的局域网中使用
+   - 使用防火墙限制访问
+   - 通过 VPN 或 SSH 隧道访问
 
-## 限制
+---
 
-1. 截图功能需要屏幕捕获权限
-2. 文件写入受 iOS 沙盒限制
-3. 控制套接字命令最大长度为 1024 字节（base64 内容除外）
+## 故障排除
+
+### 无法连接到 HTTP 服务器
+
+1. 确认 TrollVNC 服务器已启动
+2. 检查防火墙设置
+3. 确认端口 8080 未被占用
+4. 查看日志确认 HTTP 服务器是否成功启动
+
+### 截图失败
+
+1. 确认 TrollVNC 有屏幕录制权限
+2. 检查设备是否处于锁定状态
+
+### 文件写入失败
+
+1. 确认目标路径有写入权限
+2. 检查磁盘空间
+3. 确认路径存在或父目录可写
+
+---
+
+## 旧版 TCP 控制套接字
+
+HTTP API 是新增的接口，原有的 TCP 控制套接字（默认 5555 端口）仍然可用。两者可以共存，互不影响。

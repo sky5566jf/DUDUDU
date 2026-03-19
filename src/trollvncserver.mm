@@ -52,6 +52,7 @@
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
 #import "TVNCApiManager.h"
+#import "TVNCHttpServer.h"
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
@@ -4947,6 +4948,19 @@ static void tvStopRfbEventThread(void) {
 static void initializeAndRunRfbServer(void) {
     rfbInitServer(gScreen);
     TVLog(@"VNC server initialized on port %d, %dx%d, name '%@'", gPort, gWidth, gHeight, gDesktopName);
+    
+    // 启动 HTTP API 服务器（默认启用）
+    dispatch_async(dispatch_get_main_queue(), ^{
+        TVNCHttpServer *httpServer = [TVNCHttpServer sharedServer];
+        if (!httpServer.isRunning) {
+            BOOL started = [httpServer start];
+            if (started) {
+                TVLog(@"HTTP API server started on port %lu", (unsigned long)httpServer.port);
+            } else {
+                TVLog(@"Failed to start HTTP API server");
+            }
+        }
+    });
 
     if (isRepeaterEnabled()) {
         static CFTimeInterval sRetryInterval = 0.0;
