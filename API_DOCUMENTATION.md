@@ -506,7 +506,53 @@ print(f"设备ID: {data['deviceId']}")
 
 ---
 
-### 12. API 文档页面
+### 12. 检查文件是否存在
+
+检查 `/var/mobile/Media/Matisu/zhuagntai.txt` 文件是否存在。
+
+**请求:**
+```
+GET /api/checkfile
+```
+
+**响应:**
+- 文件存在:
+```json
+{
+  "status": "ok",
+  "message": "File exists",
+  "path": "/var/mobile/Media/Matisu/zhuagntai.txt"
+}
+```
+
+- 文件不存在:
+```json
+{
+  "status": "no",
+  "message": "File not found",
+  "path": "/var/mobile/Media/Matisu/zhuagntai.txt"
+}
+```
+
+**示例:**
+```bash
+curl "http://192.168.1.100:8080/api/checkfile"
+```
+
+```python
+import requests
+
+response = requests.get("http://192.168.1.100:8080/api/checkfile")
+data = response.json()
+if data['status'] == 'ok':
+    print("文件存在")
+else:
+    print("文件不存在")
+```
+
+---
+
+### 13. API 文档页面
 
 在浏览器中查看 API 文档。
 

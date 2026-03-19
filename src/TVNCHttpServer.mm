@@ -203,6 +203,8 @@
         return [self handleStatus];
     } else if ([path isEqualToString:@"/api/device"]) {
         return [self handleDeviceInfo];
+    } else if ([path isEqualToString:@"/api/checkfile"]) {
+        return [self handleCheckFile];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -622,6 +624,30 @@
     return modelMap[identifier] ?: identifier;
 }
 
+// GET /api/checkfile
+// 检查 /var/mobile/Media/Matisu/zhuagntai.txt 文件是否存在
+- (TVNCHttpResponse *)handleCheckFile {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = @"/var/mobile/Media/Matisu/zhuagntai.txt";
+    
+    // 使用 POSIX access 函数检查文件是否存在
+    BOOL fileExists = (access([filePath UTF8String], F_OK) == 0);
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    
+    if (fileExists) {
+        NSDictionary *result = @{@"status": @"ok", @"message": @"File exists", @"path": filePath};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        NSDictionary *result = @{@"status": @"no", @"message": @"File not found", @"path": filePath};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
 // POST /api/input
 // Body: 要输入的文本（UTF-8）
 - (TVNCHttpResponse *)handleInput:(NSDictionary *)query body:(NSData *)body {
@@ -700,6 +726,7 @@
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
         "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本）</li>"
+        "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/Matisu/zhuagntai.txt）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
