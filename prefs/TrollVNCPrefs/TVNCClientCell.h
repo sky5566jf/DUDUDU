@@ -1,1 +1,1 @@
-../../app/TrollVNC/TrollVNC/TVNCClientCell.h
+﻿../../app/MatisuVNC/MatisuVNC/TVNCClientCell.h

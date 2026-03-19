@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -28,12 +28,12 @@
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
-    [[TVNCHotspotManager sharedManager] registerWithName:@"TrollVNC"];
+    [[TVNCHotspotManager sharedManager] registerWithName:@"MatisuVNC"];
 
 #ifdef THEBOOTSTRAP
     // Initialize Auto Updater
     GHUpdateStrategy *updateStrategy = [[GHUpdateStrategy alloc] init];
-    [updateStrategy setRepoFullName:@"OwnGoalStudio/TrollVNC"];
+    [updateStrategy setRepoFullName:@"OwnGoalStudio/MatisuVNC"];
 
     GitHubReleaseUpdater *updater = [GitHubReleaseUpdater shared];
 #if TARGET_IPHONE_SIMULATOR

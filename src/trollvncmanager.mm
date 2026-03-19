@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -36,7 +36,7 @@
 #import "TRWatchDog.h"
 #import "libproc.h"
 
-#define SINGLETON_MARKER_PATH "/var/mobile/Library/Caches/com.82flex.trollvnc.manager.pid"
+#define SINGLETON_MARKER_PATH "/var/mobile/Library/Caches/com.Matisu.MatisuVNC.manager.pid"
 
 BOOL tvncLoggingEnabled = YES;
 BOOL tvncVerboseLoggingEnabled = NO;
@@ -217,11 +217,11 @@ int main(int argc, const char *argv[]) {
     @autoreleasepool {
         NSString *executablePath = [NSString stringWithUTF8String:argv[0]];
         executablePath = [executablePath stringByDeletingLastPathComponent];
-        executablePath = [executablePath stringByAppendingPathComponent:@"trollvncserver"];
+        executablePath = [executablePath stringByAppendingPathComponent:@"MatisuVNCserver"];
 
         gWatchDog = [[TRWatchDog alloc] init];
 
-        [gWatchDog setLabel:@"TrollVNC-Server"];
+        [gWatchDog setLabel:@"MatisuVNC-Server"];
         [gWatchDog setProgramArguments:@[
             executablePath,
             @"-daemon",
@@ -229,7 +229,7 @@ int main(int argc, const char *argv[]) {
 
         NSMutableDictionary *mEnvs = [[[NSProcessInfo processInfo] environment] mutableCopy];
         [mEnvs addEntriesFromDictionary:@{
-            @"TROLLVNC_REPEATER_RETRY_INTERVAL" : @"30.0",
+            @"MatisuVNC_REPEATER_RETRY_INTERVAL" : @"30.0",
         }];
 
         [gWatchDog setEnvironmentVariables:mEnvs];
@@ -253,8 +253,8 @@ int main(int argc, const char *argv[]) {
             rootPath = [rootPath stringByDeletingLastPathComponent];
         } while (YES);
 
-        NSString *stdoutPath = [rootPath stringByAppendingPathComponent:@"tmp/trollvnc-stdout.log"];
-        NSString *stderrPath = [rootPath stringByAppendingPathComponent:@"tmp/trollvnc-stderr.log"];
+        NSString *stdoutPath = [rootPath stringByAppendingPathComponent:@"tmp/MatisuVNC-stdout.log"];
+        NSString *stderrPath = [rootPath stringByAppendingPathComponent:@"tmp/MatisuVNC-stderr.log"];
 
         [gWatchDog setStandardOutputPath:stdoutPath];
         [gWatchDog setStandardErrorPath:stderrPath];

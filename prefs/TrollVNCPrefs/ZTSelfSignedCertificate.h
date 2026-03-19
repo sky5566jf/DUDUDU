@@ -1,1 +1,1 @@
-../../app/TrollVNC/TrollVNC/ZTSelfSignedCertificate.h
+﻿../../app/MatisuVNC/MatisuVNC/ZTSelfSignedCertificate.h

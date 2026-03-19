@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -189,7 +189,7 @@ static NSString *const kPasteboardDarwinNotification = @"com.apple.pasteboard.no
     }
 
     // Avoid loop: If this matches the value we just set and this call is from the system notification, ignore it.
-    // If it’s a local setString call, allow the callback so the remote can be updated.
+    // If it鈥檚 a local setString call, allow the callback so the remote can be updated.
     if (!local && self.lastSetValue &&
         ((current ?: (id)NSNull.null) == (id)NSNull.null ? YES : [self.lastSetValue isEqualToString:current ?: @""])) {
         // Clear the flag once, but do not callback
@@ -199,7 +199,7 @@ static NSString *const kPasteboardDarwinNotification = @"com.apple.pasteboard.no
     }
 
     // Optional extra guard when called from system: if we just performed a local set and
-    // changeCount hasn’t advanced past the baseline, skip. This protects from edge cases
+    // changeCount hasn鈥檛 advanced past the baseline, skip. This protects from edge cases
     // where multiple notifications arrive in the same loop.
     if (!local && self.lastLocalSetBaselineCount >= 0) {
 
@@ -210,7 +210,7 @@ static NSString *const kPasteboardDarwinNotification = @"com.apple.pasteboard.no
             return;
         }
 
-        // Once we’ve seen a changeCount advance, clear the baseline
+        // Once we鈥檝e seen a changeCount advance, clear the baseline
         self.lastLocalSetBaselineCount = -1;
     }
 

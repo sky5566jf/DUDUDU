@@ -1,15 +1,15 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 	<dict>
 		<key>CFBundleName</key>
-		<string>CCTrollVNC</string>
+		<string>CCMatisuVNC</string>
 		<key>CFBundleDisplayName</key>
 		<string>MatisuWDA</string>
 		<key>CFBundleExecutable</key>
-		<string>CCTrollVNC</string>
+		<string>CCMatisuVNC</string>
 		<key>CFBundleIdentifier</key>
-		<string>com.82flex.cctrollvnc</string>
+		<string>com.Matisu.ccMatisuVNC</string>
 		<key>CFBundleDevelopmentRegion</key>
 		<string>English</string>
 		<key>CFBundleInfoDictionaryVersion</key>
@@ -28,7 +28,7 @@
 			<integer>2</integer>
 		</array>
 		<key>NSPrincipalClass</key>
-		<string>CCTrollVNC</string>
+		<string>CCMatisuVNC</string>
 		<key>CFBundleSupportedPlatforms</key>
 		<array>
 			<string>iPhoneOS</string>

@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -27,7 +27,7 @@
     } while (0)
 #endif
 
-static NSString *const kGHUpdaterDefaultsSuite = @"com.82flex.trollvnc.GitHubReleaseUpdater.Defaults";
+static NSString *const kGHUpdaterDefaultsSuite = @"com.Matisu.MatisuVNC.GitHubReleaseUpdater.Defaults";
 static NSString *const kKeyPausedUntil = @"pausedUntil";
 static NSString *const kKeySkippedVersion = @"skippedVersion";
 static NSString *const kKeyLastCheckAt = @"lastCheckAt";
@@ -181,7 +181,7 @@ NSString *const GitHubReleaseUpdaterErrorDomain = @"GitHubReleaseUpdater";
 
 - (instancetype)initPrivate {
     if (self = [super init]) {
-        _queue = dispatch_queue_create("com.82flex.trollvnc.GitHubReleaseUpdater.queue", DISPATCH_QUEUE_SERIAL);
+        _queue = dispatch_queue_create("com.Matisu.MatisuVNC.GitHubReleaseUpdater.queue", DISPATCH_QUEUE_SERIAL);
         NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
         cfg.requestCachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
         cfg.timeoutIntervalForRequest = 30;

@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -16,7 +16,7 @@
 */
 
 #import "TVNCServiceCoordinator.h"
-#import "TrollVNC-Swift.h"
+#import "MatisuVNC-Swift.h"
 
 #import <Foundation/Foundation.h>
 #import <MobileCoreServices/LSApplicationProxy.h>
@@ -79,9 +79,9 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
 - (void)commonInit {
     _checkTimer = nil;
     _serviceRunning = NO;
-    _userDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
+    _userDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.Matisu.MatisuVNC"];
 
-    NSBundle *prefsBundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"TrollVNCPrefs"
+    NSBundle *prefsBundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"MatisuVNCPrefs"
                                                                                      ofType:@"bundle"]];
 
     NSString *presetPath = [prefsBundle pathForResource:@"Managed" ofType:@"plist"];
@@ -153,7 +153,7 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
     static TRTask *serviceTask = nil;
     serviceTask = [[TRTask alloc] init];
 
-    NSString *executablePath = [[NSBundle mainBundle] pathForResource:@"trollvncmanager" ofType:@""];
+    NSString *executablePath = [[NSBundle mainBundle] pathForResource:@"MatisuVNCmanager" ofType:@""];
     if (!executablePath) {
         return;
     }

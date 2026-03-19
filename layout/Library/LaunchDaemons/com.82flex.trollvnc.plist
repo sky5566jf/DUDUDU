@@ -1,9 +1,9 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>CFBundleIdentifier</key>
-	<string>com.82flex.trollvnc</string>
+	<string>com.Matisu.MatisuVNC</string>
 	<key>EnablePressuredExit</key>
 	<false/>
 	<key>EnableTransactions</key>
@@ -12,7 +12,7 @@
 	<dict>
 		<key>DISABLE_TWEAKS</key>
 		<string>1</string>
-		<key>TROLLVNC_REPEATER_RETRY_INTERVAL</key>
+		<key>MatisuVNC_REPEATER_RETRY_INTERVAL</key>
 		<string>30.0</string>
 	</dict>
 	<key>ExitTimeOut</key>
@@ -24,22 +24,22 @@
 	<key>KeepAlive</key>
 	<true/>
 	<key>Label</key>
-	<string>com.82flex.trollvnc</string>
+	<string>com.Matisu.MatisuVNC</string>
 	<key>POSIXSpawnType</key>
 	<string>App</string>
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/bin/trollvncserver</string>
+		<string>/usr/bin/MatisuVNCserver</string>
 		<string>-daemon</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/tmp/trollvnc-stderr.log</string>
+	<string>/tmp/MatisuVNC-stderr.log</string>
 	<key>StandardOutPath</key>
-	<string>/tmp/trollvnc-stdout.log</string>
+	<string>/tmp/MatisuVNC-stdout.log</string>
 	<key>ThrottleInterval</key>
 	<integer>5</integer>
 	<key>UserName</key>

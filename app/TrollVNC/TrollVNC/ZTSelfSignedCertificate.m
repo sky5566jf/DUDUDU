@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -18,20 +18,18 @@
 #import "ZTSelfSignedCertificate.h"
 #import <Security/Security.h>
 
-#pragma mark - 私有 Security 符号声明
+#pragma mark - 绉佹湁 Security 绗﹀彿澹版槑
 
-// 私有函数（在 SecCertificateRequest.c 中实现）
+// 绉佹湁鍑芥暟锛堝湪 SecCertificateRequest.c 涓疄鐜帮級
 extern SecCertificateRef SecGenerateSelfSignedCertificate(CFArrayRef subject, CFDictionaryRef __nullable parameters,
                                                           SecKeyRef publicKey, SecKeyRef privateKey);
 
-// 各种私有常量（在 Security 私有头中定义）
-extern const CFStringRef kSecOidCommonName;
+// 鍚勭绉佹湁甯搁噺锛堝湪 Security 绉佹湁澶翠腑瀹氫箟锛?extern const CFStringRef kSecOidCommonName;
 extern const CFStringRef kSecCSRBasicContraintsPathLen;
 extern const CFStringRef kSecCertificateKeyUsage;
 extern const CFStringRef kSecCertificateExtensionsEncoded;
 
-// keyUsage bit 定义（对齐 SecCertificatePriv.h）
-enum {
+// keyUsage bit 瀹氫箟锛堝榻?SecCertificatePriv.h锛?enum {
     kSecKeyUsageUnspecified = 0,
     kSecKeyUsageDigitalSignature = 1 << 0,
     kSecKeyUsageNonRepudiation = 1 << 1,
@@ -45,7 +43,7 @@ enum {
     kSecKeyUsageAll = 0x7FF
 };
 
-#pragma mark - Helper: DER → PEM
+#pragma mark - Helper: DER 鈫?PEM
 
 static NSString *ZTPEMFromDER(NSData *der, NSString *header, NSString *footer) {
     if (!der)
@@ -67,7 +65,7 @@ static NSString *ZTPEMFromDER(NSData *der, NSString *header, NSString *footer) {
     return pem;
 }
 
-/// 手工构造 EKU = { serverAuth, clientAuth } 的 DER
+/// 鎵嬪伐鏋勯€?EKU = { serverAuth, clientAuth } 鐨?DER
 /// ExtendedKeyUsage ::= SEQUENCE OF OBJECT IDENTIFIER
 ///   serverAuth 1.3.6.1.5.5.7.3.1
 ///   clientAuth 1.3.6.1.5.5.7.3.2
@@ -82,7 +80,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
     return [NSData dataWithBytes:ekuBytes length:sizeof(ekuBytes)];
 }
 
-#pragma mark - 实现
+#pragma mark - 瀹炵幇
 
 @interface ZTSelfSignedCertificate ()
 @property(nonatomic, readwrite) NSString *certificatePEM;
@@ -115,7 +113,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
 
     CFStringRef cfCommonName = (__bridge CFStringRef)commonName;
 
-    // 1. 生成 RSA key pair (2048 bit)
+    // 1. 鐢熸垚 RSA key pair (2048 bit)
     {
         CFMutableDictionaryRef keyParams = CFDictionaryCreateMutable(
             kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
@@ -139,7 +137,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
         }
     }
 
-    // 2. 构造 certParams：CA:TRUE, pathLen=0, keyUsage, EKU(serverAuth+clientAuth)
+    // 2. 鏋勯€?certParams锛欳A:TRUE, pathLen=0, keyUsage, EKU(serverAuth+clientAuth)
     certParams = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
                                            &kCFTypeDictionaryValueCallBacks);
     if (!certParams)
@@ -153,8 +151,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
         CFRelease(pathLen);
     }
 
-    // 2.2 keyUsage：接近 minica root 的风格，允许签发证书 + CRL + 一些常用用途
-    {
+    // 2.2 keyUsage锛氭帴杩?minica root 鐨勯鏍硷紝鍏佽绛惧彂璇佷功 + CRL + 涓€浜涘父鐢ㄧ敤閫?    {
         int keyUsageValue =
             kSecKeyUsageDigitalSignature | kSecKeyUsageKeyEncipherment | kSecKeyUsageKeyCertSign | kSecKeyUsageCRLSign;
 
@@ -165,7 +162,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
     }
 
     // 2.3 Extended Key Usage: serverAuth + clientAuth
-    //    使用 kSecCertificateExtensionsEncoded，自己提供 DER 编好的 EKU
+    //    浣跨敤 kSecCertificateExtensionsEncoded锛岃嚜宸辨彁渚?DER 缂栧ソ鐨?EKU
     {
         encodedExts = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
                                                 &kCFTypeDictionaryValueCallBacks);
@@ -184,35 +181,34 @@ static NSData *ZTExtendedKeyUsageDER(void) {
         CFDictionarySetValue(certParams, kSecCertificateExtensionsEncoded, encodedExts);
     }
 
-    // 3. 构造 subject（三层数组结构，只有一个 CN，类似 minica root 的 Subject）
-    {
-        // 第三层：[ kSecOidCommonName, cfCommonName ]
+    // 3. 鏋勯€?subject锛堜笁灞傛暟缁勭粨鏋勶紝鍙湁涓€涓?CN锛岀被浼?minica root 鐨?Subject锛?    {
+        // 绗笁灞傦細[ kSecOidCommonName, cfCommonName ]
         const void *cnFields[2] = {kSecOidCommonName, cfCommonName};
         cnPair = CFArrayCreate(kCFAllocatorDefault, cnFields, 2, &kCFTypeArrayCallBacks);
         if (!cnPair)
             goto cleanup;
 
-        // 第二层：[ cnPair ]
+        // 绗簩灞傦細[ cnPair ]
         const void *cnRDNFields[1] = {cnPair};
         cnRDN = CFArrayCreate(kCFAllocatorDefault, cnRDNFields, 1, &kCFTypeArrayCallBacks);
         if (!cnRDN)
             goto cleanup;
 
-        // 顶层：[ cnRDN ]
+        // 椤跺眰锛歔 cnRDN ]
         const void *rdnList[1] = {cnRDN};
         subject = CFArrayCreate(kCFAllocatorDefault, rdnList, 1, &kCFTypeArrayCallBacks);
         if (!subject)
             goto cleanup;
     }
 
-    // 4. 调用 SecGenerateSelfSignedCertificate 生成自签 CA 证书
+    // 4. 璋冪敤 SecGenerateSelfSignedCertificate 鐢熸垚鑷 CA 璇佷功
     cert = SecGenerateSelfSignedCertificate(subject, certParams, publicKey, privateKey);
 
     if (!cert) {
         goto cleanup;
     }
 
-    // 5. 导出 certificate (DER → PEM)
+    // 5. 瀵煎嚭 certificate (DER 鈫?PEM)
     {
         CFDataRef certData = SecCertificateCopyData(cert);
         if (!certData)
@@ -226,7 +222,7 @@ static NSData *ZTExtendedKeyUsageDER(void) {
         self.certificatePEM = pem;
     }
 
-    // 6. 导出 private key (DER → PEM, PKCS#1 RSA PRIVATE KEY)
+    // 6. 瀵煎嚭 private key (DER 鈫?PEM, PKCS#1 RSA PRIVATE KEY)
     {
         CFErrorRef error = NULL;
         CFDataRef keyData = SecKeyCopyExternalRepresentation(privateKey, &error);

@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -74,7 +74,7 @@ NS_INLINE NSString *GetDefaultRouteInterface(void) {
     return dict[@"PrimaryInterface"];
 }
 
-// Resolve current IPv4/IPv6 address of interface en0 (Wi‑Fi). Prefer IPv4 if available.
+// Resolve current IPv4/IPv6 address of interface en0 (Wi鈥慒i). Prefer IPv4 if available.
 NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     struct ifaddrs *ifaList = NULL;
     if (getifaddrs(&ifaList) != 0 || !ifaList)
@@ -149,7 +149,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (NSBundle *)bundle {
     if (!_bundle) {
-        _bundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"TrollVNCPrefs" ofType:@"bundle"]];
+        _bundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"MatisuVNCPrefs" ofType:@"bundle"]];
     }
     return _bundle;
 }
@@ -247,7 +247,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     ]] setMinimumTrackTintColor:_primaryColor];
     [self.view setTintColor:_primaryColor];
 
-    self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"TrollVNC"
+    self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"MatisuVNC"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:nil
                                                                             action:nil];
@@ -332,7 +332,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 #endif
 
         NSString *footerText = [NSString
-            stringWithFormat:NSLocalizedStringFromTableInBundle(@"TrollVNC (%@) v%@", @"Localizable", self.bundle, nil),
+            stringWithFormat:NSLocalizedStringFromTableInBundle(@"MatisuVNC (%@) v%@", @"Localizable", self.bundle, nil),
                              packageScheme, versionString];
         _defaultFooterText = footerText;
     }
@@ -507,7 +507,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (void)viewLogs {
-    NSString *logsPath = [self.jbrootPath stringByAppendingPathComponent:@"tmp/trollvnc-stderr.log"];
+    NSString *logsPath = [self.jbrootPath stringByAppendingPathComponent:@"tmp/MatisuVNC-stderr.log"];
 
     StripedTextTableViewController *logsVC = [[StripedTextTableViewController alloc] initWithPath:logsPath];
     logsVC.primaryColor = self.primaryColor;
@@ -543,12 +543,12 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (NSString *)cacertPath {
     return [self.jbrootPath
-        stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.82flex.trollvnc.ca-cert.pem"];
+        stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.Matisu.MatisuVNC.ca-cert.pem"];
 }
 
 - (NSString *)cakeyPath {
     return [self.jbrootPath
-        stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.82flex.trollvnc.ca-key.pem"];
+        stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.Matisu.MatisuVNC.ca-key.pem"];
 }
 
 - (void)exportCertificate {
@@ -610,7 +610,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
                                                     [weakSelf _reallyGenerateKeys];
                                                 }]];
         [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedStringFromTableInBundle(
-                                                            @"Export Certificate…", @"Localizable", self.bundle, nil)
+                                                            @"Export Certificate鈥?, @"Localizable", self.bundle, nil)
                                                   style:UIAlertActionStyleDefault
                                                 handler:^(UIAlertAction *_Nonnull action) {
                                                     [weakSelf exportCertificate];
@@ -625,7 +625,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)_reallyGenerateKeys {
     NSString *randomUUID = [[[NSUUID UUID] UUIDString] substringFromIndex:28];
-    NSString *commonName = [NSString stringWithFormat:@"TrollVNC %@", randomUUID];
+    NSString *commonName = [NSString stringWithFormat:@"MatisuVNC %@", randomUUID];
 
     ZTSelfSignedCertificate *ca = [ZTSelfSignedCertificate generateWithCommonName:commonName];
     if (!ca) {
@@ -706,7 +706,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
                                                                    message:message
                                                             preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:ok style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedStringFromTableInBundle(@"Export Certificate…",
+    [alert addAction:[UIAlertAction actionWithTitle:NSLocalizedStringFromTableInBundle(@"Export Certificate鈥?,
                                                                                        @"Localizable", self.bundle, nil)
                                               style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *_Nonnull action) {
@@ -738,21 +738,21 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (void)_reallyResetDefaults {
-    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:@"com.82flex.trollvnc"];
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:@"com.Matisu.MatisuVNC"];
     [[NSUserDefaults standardUserDefaults] synchronize];
 
     [self reloadSpecifiers];
 }
 
 - (void)support {
-    NSURL *url = [NSURL URLWithString:@"https://havoc.app/search/82Flex"];
+    NSURL *url = [NSURL URLWithString:@"https://havoc.app/search/Matisu"];
     if ([[UIApplication sharedApplication] canOpenURL:url]) {
         [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
     }
 }
 
 - (void)source {
-    NSURL *url = [NSURL URLWithString:@"https://github.com/OwnGoalStudio/TrollVNC"];
+    NSURL *url = [NSURL URLWithString:@"https://github.com/OwnGoalStudio/MatisuVNC"];
     if ([[UIApplication sharedApplication] canOpenURL:url]) {
         [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
     }
@@ -810,7 +810,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             }
 
             return [NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                                  @"A new version %@ is available! You’re currently using v%@. "
+                                                  @"A new version %@ is available! You鈥檙e currently using v%@. "
                                                   @"Download the latest version from Havoc Marketplace.",
                                                   @"Localizable", self.bundle, nil),
                                               releaseInfo.tagName, [[GitHubReleaseUpdater shared] currentVersion]];

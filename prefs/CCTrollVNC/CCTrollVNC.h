@@ -1,6 +1,6 @@
-/*
- This file is part of TrollVNC
- Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
+﻿/*
+ This file is part of MatisuVNC
+ Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -17,6 +17,6 @@
 
 #import <ControlCenterUIKit/CCUIToggleModule.h>
 
-@interface CCTrollVNC : CCUIToggleModule
+@interface CCMatisuVNC : CCUIToggleModule
 
 @end

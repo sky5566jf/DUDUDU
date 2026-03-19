@@ -1,176 +1,176 @@
-/* No comment provided by engineer. */
-"%@ rows not loaded" = "%@ 行未加载";
+﻿/* No comment provided by engineer. */
+"%@ rows not loaded" = "%@ 琛屾湭鍔犺浇";
 
 /* No comment provided by engineer. */
-"A CA private key already exists. Generating new keys will overwrite the existing ones. Are you sure you want to continue?" = "CA 私钥已存在。生成新密钥将覆盖现有密钥。你确定要继续吗？";
+"A CA private key already exists. Generating new keys will overwrite the existing ones. Are you sure you want to continue?" = "CA 绉侀挜宸插瓨鍦ㄣ€傜敓鎴愭柊瀵嗛挜灏嗚鐩栫幇鏈夊瘑閽ャ€備綘纭畾瑕佺户缁悧锛?;
 
 /* No comment provided by engineer. */
-"A new version %@ is available! You’re currently using v%@." = "有新版本 %@ 可用！你当前使用的是 v%@。";
+"A new version %@ is available! You鈥檙e currently using v%@." = "鏈夋柊鐗堟湰 %@ 鍙敤锛佷綘褰撳墠浣跨敤鐨勬槸 v%@銆?;
 
 /* No comment provided by engineer. */
-"A new version %@ is available! You’re currently using v%@. Download the latest version from Havoc Marketplace." = "有新版本 %@ 可用！你当前使用的是 v%@。请从浩劫商店下载最新版本。";
+"A new version %@ is available! You鈥檙e currently using v%@. Download the latest version from Havoc Marketplace." = "鏈夋柊鐗堟湰 %@ 鍙敤锛佷綘褰撳墠浣跨敤鐨勬槸 v%@銆傝浠庢旦鍔晢搴椾笅杞芥渶鏂扮増鏈€?;
 
-/* trollvncserver */
-"A VNC client connected from %@." = "来自 %@ 的 VNC 客户端已连接。";
+/* MatisuVNCserver */
+"A VNC client connected from %@." = "鏉ヨ嚜 %@ 鐨?VNC 瀹㈡埛绔凡杩炴帴銆?;
 
-/* trollvncserver */
-"A VNC client disconnected from %@." = "来自 %@ 的 VNC 客户端已断开连接。";
-
-/* No comment provided by engineer. */
-"Apply" = "应用";
+/* MatisuVNCserver */
+"A VNC client disconnected from %@." = "鏉ヨ嚜 %@ 鐨?VNC 瀹㈡埛绔凡鏂紑杩炴帴銆?;
 
 /* No comment provided by engineer. */
-"Apply Changes" = "应用更改";
+"Apply" = "搴旂敤";
 
 /* No comment provided by engineer. */
-"Are you sure you want to reset all settings to their defaults?" = "你确定要将所有设置还原为默认值吗？";
+"Apply Changes" = "搴旂敤鏇存敼";
 
 /* No comment provided by engineer. */
-"Are you sure you want to restart the VNC service?" = "确定要重启 VNC 服务吗？";
+"Are you sure you want to reset all settings to their defaults?" = "浣犵‘瀹氳灏嗘墍鏈夎缃繕鍘熶负榛樿鍊煎悧锛?;
 
 /* No comment provided by engineer. */
-"Block" = "封禁";
+"Are you sure you want to restart the VNC service?" = "纭畾瑕侀噸鍚?VNC 鏈嶅姟鍚楋紵";
 
 /* No comment provided by engineer. */
-"Block Client" = "封禁客户端";
+"Block" = "灏佺";
 
 /* No comment provided by engineer. */
-"Cancel" = "取消";
+"Block Client" = "灏佺瀹㈡埛绔?;
 
 /* No comment provided by engineer. */
-"Cannot parse text with UTF-8 encoding: “%@”." = "无法解析 UTF-8 编码的文本：“%@”。";
+"Cancel" = "鍙栨秷";
 
 /* No comment provided by engineer. */
-"Certificate Not Found" = "未找到证书";
+"Cannot parse text with UTF-8 encoding: 鈥?@鈥?" = "鏃犳硶瑙ｆ瀽 UTF-8 缂栫爜鐨勬枃鏈細鈥?@鈥濄€?;
 
 /* No comment provided by engineer. */
-"Clients" = "客户端";
+"Certificate Not Found" = "鏈壘鍒拌瘉涔?;
 
 /* No comment provided by engineer. */
-"Confirm" = "确认";
+"Clients" = "瀹㈡埛绔?;
 
 /* No comment provided by engineer. */
-"Connected %@" = "已连接 %@";
+"Confirm" = "纭";
 
 /* No comment provided by engineer. */
-"Copy" = "拷贝";
+"Connected %@" = "宸茶繛鎺?%@";
 
 /* No comment provided by engineer. */
-"Copy Host" = "拷贝主机名";
+"Copy" = "鎷疯礉";
 
 /* No comment provided by engineer. */
-"Copy ID" = "拷贝标识符";
+"Copy Host" = "鎷疯礉涓绘満鍚?;
 
 /* No comment provided by engineer. */
-"Current IP Address: %@" = "当前 IP 地址：%@";
+"Copy ID" = "鎷疯礉鏍囪瘑绗?;
 
 /* No comment provided by engineer. */
-"Disconnect" = "断开";
+"Current IP Address: %@" = "褰撳墠 IP 鍦板潃锛?@";
 
 /* No comment provided by engineer. */
-"Disconnect All" = "断开所有连接";
+"Disconnect" = "鏂紑";
 
 /* No comment provided by engineer. */
-"Disconnect Client" = "断开客户端";
+"Disconnect All" = "鏂紑鎵€鏈夎繛鎺?;
 
 /* No comment provided by engineer. */
-"Do you want to clear this log file “%@”?" = "你想要清空此日志文件 “%@” 吗？";
+"Disconnect Client" = "鏂紑瀹㈡埛绔?;
 
 /* No comment provided by engineer. */
-"Export Certificate…" = "导出证书…";
+"Do you want to clear this log file 鈥?@鈥?" = "浣犳兂瑕佹竻绌烘鏃ュ織鏂囦欢 鈥?@鈥?鍚楋紵";
 
 /* No comment provided by engineer. */
-"Failed to generate self-signed CA certificate." = "无法生成自签名 CA 证书。";
+"Export Certificate鈥? = "瀵煎嚭璇佷功鈥?;
 
 /* No comment provided by engineer. */
-"Failed to save generated keys: %@" = "无法保存生成的密钥：%@";
+"Failed to generate self-signed CA certificate." = "鏃犳硶鐢熸垚鑷鍚?CA 璇佷功銆?;
 
 /* No comment provided by engineer. */
-"Generation Failed" = "创建失败";
+"Failed to save generated keys: %@" = "鏃犳硶淇濆瓨鐢熸垚鐨勫瘑閽ワ細%@";
 
 /* No comment provided by engineer. */
-"Generation Succeeded" = "创建成功";
+"Generation Failed" = "鍒涘缓澶辫触";
 
 /* No comment provided by engineer. */
-"Invalid Port" = "端口无效";
+"Generation Succeeded" = "鍒涘缓鎴愬姛";
 
 /* No comment provided by engineer. */
-"Later" = "以后再说";
+"Invalid Port" = "绔彛鏃犳晥";
 
 /* No comment provided by engineer. */
-"Launching" = "启动中";
+"Later" = "浠ュ悗鍐嶈";
 
 /* No comment provided by engineer. */
-"New Version Available" = "新版本可用";
+"Launching" = "鍚姩涓?;
 
 /* No comment provided by engineer. */
-"No clients connected" = "没有客户端连接";
+"New Version Available" = "鏂扮増鏈彲鐢?;
 
 /* No comment provided by engineer. */
-"OK" = "好";
+"No clients connected" = "娌℃湁瀹㈡埛绔繛鎺?;
 
 /* No comment provided by engineer. */
-"Overwrite" = "覆盖";
+"OK" = "濂?;
 
 /* No comment provided by engineer. */
-"Overwrite Existing Keys" = "覆盖现有密钥";
+"Overwrite" = "瑕嗙洊";
 
 /* No comment provided by engineer. */
-"Pause Auto Update" = "暂停自动更新";
+"Overwrite Existing Keys" = "瑕嗙洊鐜版湁瀵嗛挜";
 
 /* No comment provided by engineer. */
-"Repeater" = "中继器";
+"Pause Auto Update" = "鏆傚仠鑷姩鏇存柊";
 
 /* No comment provided by engineer. */
-"Reset" = "还原";
+"Repeater" = "涓户鍣?;
 
 /* No comment provided by engineer. */
-"Reset to Defaults" = "还原为默认值";
+"Reset" = "杩樺師";
 
 /* No comment provided by engineer. */
-"Restart" = "重启";
+"Reset to Defaults" = "杩樺師涓洪粯璁ゅ€?;
 
 /* No comment provided by engineer. */
-"Reverse Connection: %@" = "反向连接：%@";
+"Restart" = "閲嶅惎";
 
 /* No comment provided by engineer. */
-"The self-signed CA certificate and private key have been successfully generated. You need to trust this certificate in your client browser or operating system. Restart the service to apply the changes." = "自签名 CA 证书和私钥已成功生成。你需要在客户端浏览器或操作系统中信任此证书。重启服务以使更改生效。";
+"Reverse Connection: %@" = "鍙嶅悜杩炴帴锛?@";
 
 /* No comment provided by engineer. */
-"Skip This Version" = "跳过此版本";
+"The self-signed CA certificate and private key have been successfully generated. You need to trust this certificate in your client browser or operating system. Restart the service to apply the changes." = "鑷鍚?CA 璇佷功鍜岀閽ュ凡鎴愬姛鐢熸垚銆備綘闇€瑕佸湪瀹㈡埛绔祻瑙堝櫒鎴栨搷浣滅郴缁熶腑淇′换姝よ瘉涔︺€傞噸鍚湇鍔′互浣挎洿鏀圭敓鏁堛€?;
 
 /* No comment provided by engineer. */
-"TCP/HTTP ports must be 1024..65535 (HTTP can be 0 to disable). The server will fallback to defaults." = "TCP/HTTP 端口必须在 1024..65535（HTTP 也可为 0 表示禁用）。服务器将回退到默认端口。";
+"Skip This Version" = "璺宠繃姝ょ増鏈?;
 
 /* No comment provided by engineer. */
-"The content of text file “%@” is empty." = "文本文件 “%@” 的内容为空。";
-
-/* trollvncserver */
-"There are %d active VNC clients." = "有 %d 个活动的 VNC 客户端。";
-
-/* trollvncserver */
-"There is %d active VNC client." = "有 %d 个活动的 VNC 客户端。";
+"TCP/HTTP ports must be 1024..65535 (HTTP can be 0 to disable). The server will fallback to defaults." = "TCP/HTTP 绔彛蹇呴』鍦?1024..65535锛圚TTP 涔熷彲涓?0 琛ㄧず绂佺敤锛夈€傛湇鍔″櫒灏嗗洖閫€鍒伴粯璁ょ鍙ｃ€?;
 
 /* No comment provided by engineer. */
-"TrollVNC" = "TrollVNC";
+"The content of text file 鈥?@鈥?is empty." = "鏂囨湰鏂囦欢 鈥?@鈥?鐨勫唴瀹逛负绌恒€?;
+
+/* MatisuVNCserver */
+"There are %d active VNC clients." = "鏈?%d 涓椿鍔ㄧ殑 VNC 瀹㈡埛绔€?;
+
+/* MatisuVNCserver */
+"There is %d active VNC client." = "鏈?%d 涓椿鍔ㄧ殑 VNC 瀹㈡埛绔€?;
 
 /* No comment provided by engineer. */
-"TrollVNC (%@) v%@" = "TrollVNC (%@) v%@";
+"MatisuVNC" = "MatisuVNC";
 
 /* No comment provided by engineer. */
-"unavailable" = "不可用";
+"MatisuVNC (%@) v%@" = "MatisuVNC (%@) v%@";
 
 /* No comment provided by engineer. */
-"Upgrade Now" = "立即升级";
+"unavailable" = "涓嶅彲鐢?;
 
 /* No comment provided by engineer. */
-"View Logs" = "查看日志";
+"Upgrade Now" = "绔嬪嵆鍗囩骇";
 
 /* No comment provided by engineer. */
-"View-Only" = "仅查看";
+"View Logs" = "鏌ョ湅鏃ュ織";
 
 /* No comment provided by engineer. */
-"Viewer" = "查看器";
+"View-Only" = "浠呮煡鐪?;
 
 /* No comment provided by engineer. */
-"You need to generate a self-signed CA certificate first before exporting it." = "你需要先生成自签名 CA 证书，然后才能导出它。";
+"Viewer" = "鏌ョ湅鍣?;
+
+/* No comment provided by engineer. */
+"You need to generate a self-signed CA certificate first before exporting it." = "浣犻渶瑕佸厛鐢熸垚鑷鍚?CA 璇佷功锛岀劧鍚庢墠鑳藉鍑哄畠銆?;

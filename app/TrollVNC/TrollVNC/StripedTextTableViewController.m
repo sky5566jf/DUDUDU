@@ -1,9 +1,9 @@
-//
+﻿//
 //  StripedTextTableViewController.m
 //  CommonViewControllers
 //
-//  Created by Lessica <82flex@gmail.com> on 2022/1/20.
-//  Copyright © 2022 Zheng Wu. All rights reserved.
+//  Created by Lessica <Matisu@gmail.com> on 2022/1/20.
+//  Copyright 漏 2022 Zheng Wu. All rights reserved.
 //
 
 #import "StripedTextTableViewController.h"
@@ -150,7 +150,7 @@
     if (!stringPart) {
         self.textRows =
             [NSArray arrayWithObjects:[NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                                                     @"Cannot parse text with UTF-8 encoding: “%@”.",
+                                                                     @"Cannot parse text with UTF-8 encoding: 鈥?@鈥?",
                                                                      @"Localizable", self.localizationBundle, @""),
                                                                  [entryPath lastPathComponent]],
                                       nil];
@@ -160,7 +160,7 @@
     if (stringPart.length == 0) {
         self.textRows =
             [NSArray arrayWithObjects:[NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                                                     @"The content of text file “%@” is empty.",
+                                                                     @"The content of text file 鈥?@鈥?is empty.",
                                                                      @"Localizable", self.localizationBundle, @""),
                                                                  [entryPath lastPathComponent]],
                                       nil];
@@ -301,7 +301,7 @@
         alertControllerWithTitle:NSLocalizedStringFromTableInBundle(@"Confirm", @"Localizable", self.localizationBundle,
                                                                     @"")
                          message:[NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                                                @"Do you want to clear this log file “%@”?",
+                                                                @"Do you want to clear this log file 鈥?@鈥?",
                                                                 @"Localizable", self.localizationBundle, @""),
                                                             [self.entryPath lastPathComponent]]
                   preferredStyle:UIAlertControllerStyleAlert];

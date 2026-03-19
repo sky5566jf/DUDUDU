@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 
 cd "$(dirname "$0")"/.. || exit 1
 
@@ -18,9 +18,9 @@ if [ -z "$REAL_SIMULATOR_ID" ]; then
     exit 1
 fi
 
-BINARY=".theos/obj/iphone_simulator/debug/trollvncserver"
+BINARY=".theos/obj/iphone_simulator/debug/MatisuVNCserver"
 if [ ! -f "$BINARY" ]; then
-    BINARY=".theos/obj/iphone_simulator/trollvncserver"
+    BINARY=".theos/obj/iphone_simulator/MatisuVNCserver"
 fi
 
 xcrun simctl spawn "$REAL_SIMULATOR_ID" "$BINARY" -C off -U on -O on -M altcmd
