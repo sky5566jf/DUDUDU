@@ -23,6 +23,10 @@
 #import <CoreVideo/CoreVideo.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
+#import <sys/stat.h>
+#import <fcntl.h>
+#import <unistd.h>
+#import <errno.h>
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -218,44 +222,71 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return NO;
     }
     
+    // 使用 POSIX API 进行文件操作，绕过 iOS 沙盒限制
+    const char *path = [filePath UTF8String];
+    
     // 确保目录存在
     NSString *directory = [filePath stringByDeletingLastPathComponent];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:directory]) {
-        NSError *createError = nil;
-        BOOL created = [fileManager createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:&createError];
-        if (!created) {
-            if (error) {
-                *error = createError;
-            }
-            return NO;
+    const char *dirPath = [directory UTF8String];
+    
+    // 递归创建目录
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s", dirPath);
+    size_t len = strlen(tmp);
+    
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = 0;
+    
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = 0;
+            mkdir(tmp, 0755);
+            *p = '/';
         }
+    }
+    mkdir(tmp, 0755);
+    
+    // 检查目录是否创建成功
+    struct stat st;
+    if (stat(dirPath, &st) != 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:1005
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Failed to create directory: %s", strerror(errno)]}];
+        }
+        return NO;
     }
     
-    // 写入文件
-    if (append && [fileManager fileExistsAtPath:filePath]) {
-        // 追加模式
-        NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:filePath];
-        if (!fileHandle) {
-            if (error) {
-                *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                            code:1004
-                                        userInfo:@{NSLocalizedDescriptionKey : @"Failed to open file for writing"}];
-            }
-            return NO;
+    // 打开文件
+    int flags = O_WRONLY | O_CREAT | (append ? O_APPEND : O_TRUNC);
+    int fd = open(path, flags, 0644);
+    
+    if (fd < 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:1006
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Failed to open file: %s", strerror(errno)]}];
         }
-        
-        [fileHandle seekToEndOfFile];
-        [fileHandle writeData:data];
-        [fileHandle closeFile];
-        return YES;
-    } else {
-        // 覆盖模式或新建文件
-        return [data writeToFile:filePath options:NSDataWritingAtomic error:error];
+        return NO;
     }
+    
+    // 写入数据
+    ssize_t written = write(fd, data.bytes, data.length);
+    close(fd);
+    
+    if (written < 0 || (size_t)written != data.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:1007
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Failed to write file: %s", strerror(errno)]}];
+        }
+        return NO;
+    }
+    
+    return YES;
 }
 
 #pragma mark - 剪贴板 API

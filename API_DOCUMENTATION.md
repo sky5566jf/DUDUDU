@@ -363,6 +363,26 @@ async function setClipboard(text) {
 1. 确认目标路径有写入权限
 2. 检查磁盘空间
 3. 确认路径存在或父目录可写
+4. **TrollStore 安装的应用**: 通过 TrollStore 安装的应用拥有更高的文件系统权限，可以访问更多路径
+
+### 关于 TrollStore 安装
+
+**TrollStore 安装的应用具有以下优势：**
+
+- ✅ 可以访问沙盒外的文件系统
+- ✅ 不需要越狱
+- ✅ 拥有更多系统权限
+
+**推荐的可写路径：**
+
+```
+/var/mobile/Documents/       # 用户文档目录
+/var/mobile/Media/           # 媒体目录
+/var/mobile/Library/         # 库目录（谨慎操作）
+/var/tmp/                    # 临时目录
+```
+
+**注意：** 即使通过 TrollStore 安装，某些系统关键路径仍然受保护，不建议写入系统目录。
 
 ---
 
