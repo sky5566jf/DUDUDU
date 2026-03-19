@@ -16,7 +16,7 @@
 */
 
 #import "TVNCServiceCoordinator.h"
-#import "MatisuVNC-Swift.h"
+#import "TrollVNC-Swift.h"
 
 #import <Foundation/Foundation.h>
 #import <MobileCoreServices/LSApplicationProxy.h>
