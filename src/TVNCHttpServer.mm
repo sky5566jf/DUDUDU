@@ -24,7 +24,9 @@
 #import <netinet/in.h>
 #import <sys/socket.h>
 #import <sys/utsname.h>
+#import <sys/stat.h>
 #import <unistd.h>
+#import <errno.h>
 
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
