@@ -316,6 +316,9 @@
     
     BOOL append = [query[@"append"] isEqualToString:@"true"];
     
+    TVLog(@"HTTP Server: WriteFileText request - path: %@, append: %@, size: %lu bytes", 
+          filePath, append ? @"YES" : @"NO", (unsigned long)body.length);
+    
     // 直接使用 body 作为文本内容
     NSError *error = nil;
     BOOL success = [[TVNCApiManager sharedManager] writeContent:body
@@ -332,7 +335,12 @@
         response.statusCode = 500;
         response.contentType = @"application/json";
         NSString *errMsg = error ? error.localizedDescription : @"Unknown error";
-        NSDictionary *result = @{@"success": @NO, @"error": errMsg};
+        TVLog(@"HTTP Server: WriteFileText failed - %@", errMsg);
+        NSDictionary *result = @{
+            @"success": @NO, 
+            @"error": errMsg,
+            @"path": filePath
+        };
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     }
     
@@ -657,6 +665,7 @@
     
     NSString *filePath = query[@"path"];
     if (!filePath || filePath.length == 0) {
+        TVLog(@"HTTP Server: Upload failed - missing path parameter");
         response.statusCode = 400;
         response.contentType = @"application/json";
         NSDictionary *error = @{@"error": @"Missing path parameter", @"message": @"Please provide target file path via ?path=/xxx/xxx"};
@@ -665,6 +674,7 @@
     }
     
     if (!body || body.length == 0) {
+        TVLog(@"HTTP Server: Upload failed - empty body for path: %@", filePath);
         response.statusCode = 400;
         response.contentType = @"application/json";
         NSDictionary *error = @{@"error": @"Empty body", @"message": @"Please provide file content in request body"};
@@ -672,34 +682,51 @@
         return response;
     }
     
+    TVLog(@"HTTP Server: Upload request - path: %@, size: %lu bytes", filePath, (unsigned long)body.length);
+    
     // 获取目标目录
     NSString *directory = [filePath stringByDeletingLastPathComponent];
+    const char *dirPath = [directory UTF8String];
+    const char *filePathC = [filePath UTF8String];
     
-    // 检查目录是否存在，不存在则创建
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    BOOL isDirectory;
-    BOOL exists = [fileManager fileExistsAtPath:directory isDirectory:&isDirectory];
+    // 使用 POSIX API 创建目录（更可靠，适用于 TrollStore）
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof(tmp), "%s", dirPath);
+    size_t len = strlen(tmp);
     
-    if (!exists) {
-        // 目录不存在，创建它
-        NSError *createError = nil;
-        BOOL created = [fileManager createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:&createError];
-        if (!created) {
+    if (tmp[len - 1] == '/')
+        tmp[len - 1] = 0;
+    
+    // 检查目录是否已存在
+    struct stat st;
+    BOOL dirExisted = (stat(dirPath, &st) == 0);
+    
+    if (!dirExisted) {
+        // 递归创建目录
+        for (char *p = tmp + 1; *p; p++) {
+            if (*p == '/') {
+                *p = 0;
+                mkdir(tmp, 0755);
+                *p = '/';
+            }
+        }
+        mkdir(tmp, 0755);
+        
+        // 验证目录是否创建成功
+        if (stat(dirPath, &st) != 0) {
+            TVLog(@"HTTP Server: Upload failed - cannot create directory: %s", strerror(errno));
             response.statusCode = 500;
             response.contentType = @"application/json";
             NSDictionary *error = @{
                 @"success": @NO,
                 @"error": @"Failed to create directory",
-                @"details": createError ? createError.localizedDescription : @"Unknown error",
+                @"details": [NSString stringWithFormat:@"%s", strerror(errno)],
                 @"path": directory
             };
             response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
             return response;
         }
-    } else if (!isDirectory) {
+    } else if (!S_ISDIR(st.st_mode)) {
         // 路径存在但不是目录
         response.statusCode = 400;
         response.contentType = @"application/json";
@@ -712,37 +739,59 @@
         return response;
     }
     
-    // 写入文件
-    NSError *writeError = nil;
-    BOOL success = [body writeToFile:filePath options:NSDataWritingAtomic error:&writeError];
-    
-    if (success) {
-        // 获取文件属性
-        NSDictionary *attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
-        NSDate *modificationDate = attributes[NSFileModificationDate];
-        
-        response.statusCode = 200;
+    // 使用 POSIX API 写入文件（更可靠，适用于 TrollStore）
+    int fd = open(filePathC, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) {
+        TVLog(@"HTTP Server: Upload failed - cannot open file: %s", strerror(errno));
+        response.statusCode = 500;
         response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @YES,
-            @"path": filePath,
-            @"bytes": @(body.length),
-            @"directory": directory,
-            @"created": exists ? @NO : @YES,  // 目录是否是本次创建的
-            @"modified": modificationDate ? [modificationDate description] : @"Unknown"
+        NSDictionary *error = @{
+            @"success": @NO,
+            @"error": @"Failed to open file",
+            @"details": [NSString stringWithFormat:@"%s", strerror(errno)],
+            @"path": filePath
         };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    } else {
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 写入数据
+    ssize_t written = write(fd, body.bytes, body.length);
+    close(fd);
+    
+    if (written < 0 || (size_t)written != body.length) {
+        TVLog(@"HTTP Server: Upload failed - write error: %s", strerror(errno));
         response.statusCode = 500;
         response.contentType = @"application/json";
         NSDictionary *error = @{
             @"success": @NO,
             @"error": @"Failed to write file",
-            @"details": writeError ? writeError.localizedDescription : @"Unknown error",
+            @"details": [NSString stringWithFormat:@"%s", strerror(errno)],
             @"path": filePath
         };
         response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
     }
+    
+    // 获取文件修改时间
+    NSString *modificationDate = @"Unknown";
+    if (stat(filePathC, &st) == 0) {
+        modificationDate = [[NSDate dateWithTimeIntervalSince1970:st.st_mtime] description];
+    }
+    
+    TVLog(@"HTTP Server: Upload success - path: %@, size: %lu bytes", filePath, (unsigned long)body.length);
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @YES,
+        @"path": filePath,
+        @"bytes": @(body.length),
+        @"directory": directory,
+        @"created": dirExisted ? @NO : @YES,
+        @"modified": modificationDate
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     
     return response;
 }
@@ -843,19 +892,29 @@
 @implementation TVNCHttpConnection
 
 - (void)handle {
-    // 设置接收超时
+    // 设置接收超时（增加到60秒，支持大文件上传）
     struct timeval tv;
-    tv.tv_sec = 30;
+    tv.tv_sec = 60;
     tv.tv_usec = 0;
     setsockopt(_clientSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     
     // 读取请求
     NSMutableData *requestData = [NSMutableData data];
     uint8_t buffer[4096];
+    NSInteger totalReceived = 0;
+    NSInteger maxRequestSize = 100 * 1024 * 1024; // 最大 100MB
     
     while (true) {
         ssize_t n = recv(_clientSocket, buffer, sizeof(buffer), 0);
         if (n <= 0) break;
+        
+        totalReceived += n;
+        
+        // 安全检查：请求体过大
+        if (totalReceived > maxRequestSize) {
+            TVLog(@"HTTP Server: Request too large (%ld bytes)", (long)totalReceived);
+            break;
+        }
         
         [requestData appendBytes:buffer length:n];
         
@@ -880,6 +939,12 @@
                     NSString *lenStr = [headerStr substringWithRange:NSMakeRange(start, endRange.location - start)];
                     contentLength = [lenStr integerValue];
                 }
+            }
+            
+            // 安全检查：Content-Length 过大
+            if (contentLength > maxRequestSize) {
+                TVLog(@"HTTP Server: Content-Length too large (%ld bytes)", (long)contentLength);
+                break;
             }
             
             // 如果已接收完 body，退出循环
@@ -947,7 +1012,8 @@
     [responseHeader appendFormat:@"Content-Length: %lu\r\n", (unsigned long)response.body.length];
     [responseHeader appendString:@"Access-Control-Allow-Origin: *\r\n"];
     [responseHeader appendString:@"Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"];
-    [responseHeader appendString:@"Access-Control-Allow-Headers: Content-Type\r\n"];
+    [responseHeader appendString:@"Access-Control-Allow-Headers: Content-Type, Content-Length, Accept, Accept-Language, Accept-Encoding\r\n"];
+    [responseHeader appendString:@"Access-Control-Max-Age: 86400\r\n"];
     [responseHeader appendString:@"Connection: close\r\n"];
     [responseHeader appendString:@"\r\n"];
     
