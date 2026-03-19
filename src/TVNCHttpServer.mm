@@ -898,71 +898,48 @@
 @implementation TVNCHttpConnection
 
 - (void)handle {
-    // 设置接收超时（增加到60秒，支持大文件上传）
+    // 设置接收超时（5分钟，支持大文件上传）
     struct timeval tv;
-    tv.tv_sec = 60;
+    tv.tv_sec = 300;
     tv.tv_usec = 0;
     setsockopt(_clientSocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     
-    // 读取请求
-    NSMutableData *requestData = [NSMutableData data];
-    uint8_t buffer[4096];
+    // 读取请求头
+    NSMutableData *headerData = [NSMutableData data];
+    uint8_t buffer[8192];
     NSInteger totalReceived = 0;
-    NSInteger maxRequestSize = 100 * 1024 * 1024; // 最大 100MB
+    NSInteger maxHeaderSize = 64 * 1024; // 最大 64KB 头部
+    NSRange headerEndRange = NSMakeRange(NSNotFound, 0);
     
-    while (true) {
+    // 先读取头部（直到 \r\n\r\n）
+    while (totalReceived < maxHeaderSize) {
         ssize_t n = recv(_clientSocket, buffer, sizeof(buffer), 0);
         if (n <= 0) break;
         
+        [headerData appendBytes:buffer length:n];
         totalReceived += n;
         
-        // 安全检查：请求体过大
-        if (totalReceived > maxRequestSize) {
-            TVLog(@"HTTP Server: Request too large (%ld bytes)", (long)totalReceived);
-            break;
-        }
-        
-        [requestData appendBytes:buffer length:n];
-        
-        // 检查是否接收完头部
-        NSRange range = [requestData rangeOfData:[@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]
+        // 查找头部结束标记
+        headerEndRange = [headerData rangeOfData:[@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]
                                          options:0
-                                           range:NSMakeRange(0, requestData.length)];
-        if (range.location != NSNotFound) {
-            // 检查是否有 body
-            NSUInteger headerEnd = range.location + range.length;
-            NSString *headerStr = [[NSString alloc] initWithBytes:requestData.bytes
-                                                           length:headerEnd
-                                                         encoding:NSUTF8StringEncoding];
-            
-            // 解析 Content-Length
-            NSInteger contentLength = 0;
-            NSRange clRange = [headerStr rangeOfString:@"Content-Length: "];
-            if (clRange.location != NSNotFound) {
-                NSUInteger start = clRange.location + clRange.length;
-                NSRange endRange = [headerStr rangeOfString:@"\r\n" options:0 range:NSMakeRange(start, headerStr.length - start)];
-                if (endRange.location != NSNotFound) {
-                    NSString *lenStr = [headerStr substringWithRange:NSMakeRange(start, endRange.location - start)];
-                    contentLength = [lenStr integerValue];
-                }
-            }
-            
-            // 安全检查：Content-Length 过大
-            if (contentLength > maxRequestSize) {
-                TVLog(@"HTTP Server: Content-Length too large (%ld bytes)", (long)contentLength);
-                break;
-            }
-            
-            // 如果已接收完 body，退出循环
-            if (requestData.length >= headerEnd + contentLength) {
-                break;
-            }
+                                           range:NSMakeRange(0, headerData.length)];
+        if (headerEndRange.location != NSNotFound) {
+            break;
         }
     }
     
-    // 解析请求
-    NSString *requestStr = [[NSString alloc] initWithData:requestData encoding:NSUTF8StringEncoding];
-    NSArray *lines = [requestStr componentsSeparatedByString:@"\r\n"];
+    if (headerEndRange.location == NSNotFound) {
+        TVLog(@"HTTP Server: Failed to receive complete headers");
+        close(_clientSocket);
+        return;
+    }
+    
+    // 解析请求头
+    NSUInteger headerLength = headerEndRange.location + headerEndRange.length;
+    NSString *headerStr = [[NSString alloc] initWithBytes:headerData.bytes
+                                                   length:headerLength
+                                                 encoding:NSUTF8StringEncoding];
+    NSArray *lines = [headerStr componentsSeparatedByString:@"\r\n"];
     if (lines.count == 0) {
         TVLog(@"HTTP Server: Empty request");
         close(_clientSocket);
@@ -979,8 +956,6 @@
     
     NSString *method = requestParts[0];
     NSString *fullPath = requestParts[1];
-    
-    TVLog(@"HTTP Server: %@ %@ (received %ld bytes)", method, fullPath, (long)totalReceived);
     
     // 解析路径和查询参数
     NSString *path = fullPath;
@@ -1000,16 +975,102 @@
         }
     }
     
-    // 解析 body
-    NSData *body = nil;
-    NSRange headerEndRange = [requestData rangeOfData:[@"\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]
-                                              options:0
-                                                range:NSMakeRange(0, requestData.length)];
-    if (headerEndRange.location != NSNotFound) {
-        NSUInteger bodyStart = headerEndRange.location + headerEndRange.length;
-        if (requestData.length > bodyStart) {
-            body = [requestData subdataWithRange:NSMakeRange(bodyStart, requestData.length - bodyStart)];
+    // 解析 Content-Length
+    NSInteger contentLength = 0;
+    for (NSString *line in lines) {
+        if ([line hasPrefix:@"Content-Length: "]) {
+            NSString *lenStr = [line substringFromIndex:16];
+            contentLength = [lenStr integerValue];
+            break;
         }
+    }
+    
+    TVLog(@"HTTP Server: %@ %@ (Content-Length: %ld)", method, fullPath, (long)contentLength);
+    
+    // 处理 body
+    NSData *body = nil;
+    NSInteger maxMemorySize = 10 * 1024 * 1024; // 10MB 以下直接读入内存
+    
+    // 检查是否已有部分 body 数据（在头部之后）
+    NSInteger bodyReceived = headerData.length - headerLength;
+    NSMutableData *bodyData = [NSMutableData data];
+    if (bodyReceived > 0) {
+        [bodyData appendBytes:((uint8_t *)headerData.bytes + headerLength) length:bodyReceived];
+    }
+    
+    // 对于 /api/upload 且文件较大的情况，使用流式处理
+    BOOL isUploadRequest = [path isEqualToString:@"/api/upload"];
+    NSString *tempFilePath = nil;
+    int tempFileFd = -1;
+    
+    if (isUploadRequest && contentLength > maxMemorySize) {
+        // 大文件上传：使用临时文件
+        tempFilePath = [NSTemporaryDirectory() stringByAppendingPathComponent:[NSString stringWithFormat:@"upload_%ld", (long)time(NULL)]];
+        tempFileFd = open([tempFilePath UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        
+        if (tempFileFd >= 0 && bodyData.length > 0) {
+            write(tempFileFd, bodyData.bytes, bodyData.length);
+        }
+        
+        // 继续接收剩余数据到临时文件
+        NSInteger remaining = contentLength - bodyReceived;
+        while (remaining > 0 && tempFileFd >= 0) {
+            ssize_t toRead = sizeof(buffer);
+            if (toRead > remaining) toRead = remaining;
+            
+            ssize_t n = recv(_clientSocket, buffer, toRead, 0);
+            if (n <= 0) break;
+            
+            write(tempFileFd, buffer, n);
+            remaining -= n;
+        }
+        
+        if (tempFileFd >= 0) {
+            close(tempFileFd);
+            // 读取临时文件内容
+            body = [NSData dataWithContentsOfFile:tempFilePath];
+            // 删除临时文件
+            unlink([tempFilePath UTF8String]);
+        }
+    } else {
+        // 小文件或其他请求：读入内存
+        // 如果 Content-Length > 0，按长度读取；否则读取直到连接关闭
+        if (contentLength > 0) {
+            NSInteger remaining = contentLength - bodyReceived;
+            while (remaining > 0) {
+                ssize_t toRead = sizeof(buffer);
+                if (toRead > remaining) toRead = remaining;
+                
+                ssize_t n = recv(_clientSocket, buffer, toRead, 0);
+                if (n <= 0) break;
+                
+                [bodyData appendBytes:buffer length:n];
+                remaining -= n;
+            }
+        } else if ([method isEqualToString:@"POST"] || [method isEqualToString:@"PUT"]) {
+            // 没有 Content-Length 但有 body，读取直到超时或连接关闭
+            // 设置短超时用于检测 body 结束
+            struct timeval shortTv;
+            shortTv.tv_sec = 1;
+            shortTv.tv_usec = 0;
+            setsockopt(_clientSocket, SOL_SOCKET, SO_RCVTIMEO, &shortTv, sizeof(shortTv));
+            
+            while (true) {
+                ssize_t n = recv(_clientSocket, buffer, sizeof(buffer), 0);
+                if (n <= 0) break;
+                [bodyData appendBytes:buffer length:n];
+                // 限制最大读取 10MB
+                if (bodyData.length > maxMemorySize) break;
+            }
+            
+            // 恢复长超时
+            struct timeval longTv;
+            longTv.tv_sec = 300;
+            longTv.tv_usec = 0;
+            setsockopt(_clientSocket, SOL_SOCKET, SO_RCVTIMEO, &longTv, sizeof(longTv));
+        }
+        
+        body = bodyData;
     }
     
     // 处理请求
