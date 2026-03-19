@@ -140,14 +140,17 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     }
     
     // 设置压缩质量（仅对 JPEG 有效）
+    CFDictionaryRef propertiesRef = NULL;
     if (CFStringCompare(format, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
-        NSDictionary *properties = @{
-            (__bridge NSString *)kCGImageDestinationLossyCompressionQuality : @(quality)
-        };
-        CGImageDestinationSetProperties(dest, (__bridge CFDictionaryRef)properties);
+        CFStringRef keys[1] = { CFSTR("kCGImageDestinationLossyCompressionQuality") };
+        CFNumberRef values[1] = { CFNumberCreate(NULL, kCFNumberCGFloatType, &quality) };
+        propertiesRef = CFDictionaryCreate(NULL, (const void **)keys, (const void **)values, 1, 
+                                           &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(values[0]);
     }
     
-    CGImageDestinationAddImage(dest, cgImage, NULL);
+    CGImageDestinationAddImage(dest, cgImage, propertiesRef);
+    if (propertiesRef) CFRelease(propertiesRef);
     BOOL success = CGImageDestinationFinalize(dest);
     
     CFRelease(dest);
