@@ -508,7 +508,7 @@ print(f"设备ID: {data['deviceId']}")
 
 ### 12. 检查文件是否存在
 
-检查 `/var/mobile/Media/Matisu/zhuagntai.txt` 文件是否存在。
+检查 `/var/mobile/Media/zhuangtai.txt` 文件是否存在。
 
 **请求:**
 ```
@@ -521,7 +521,7 @@ GET /api/checkfile
 {
   "status": "ok",
   "message": "File exists",
-  "path": "/var/mobile/Media/Matisu/zhuagntai.txt"
+  "path": "/var/mobile/Media/zhuangtai.txt"
 }
 ```
 
@@ -530,7 +530,7 @@ GET /api/checkfile
 {
   "status": "no",
   "message": "File not found",
-  "path": "/var/mobile/Media/Matisu/zhuagntai.txt"
+  "path": "/var/mobile/Media/zhuangtai.txt"
 }
 ```
 

@@ -625,11 +625,11 @@
 }
 
 // GET /api/checkfile
-// 检查 /var/mobile/Media/Matisu/zhuagntai.txt 文件是否存在
+// 检查 /var/mobile/Media/zhuangtai.txt 文件是否存在
 - (TVNCHttpResponse *)handleCheckFile {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
-    NSString *filePath = @"/var/mobile/Media/Matisu/zhuagntai.txt";
+    NSString *filePath = @"/var/mobile/Media/zhuangtai.txt";
     
     // 使用 POSIX access 函数检查文件是否存在
     BOOL fileExists = (access([filePath UTF8String], F_OK) == 0);
@@ -726,7 +726,7 @@
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
         "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本）</li>"
-        "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/Matisu/zhuagntai.txt）</li>"
+        "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/zhuangtai.txt）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
