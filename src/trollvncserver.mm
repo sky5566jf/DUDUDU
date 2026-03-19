@@ -4293,14 +4293,17 @@ static void setXCutTextLatin1(char *str, int len, rfbClientPtr cl) {
     NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     
     if (!s) {
-        // 尝试其他中文编码
-        NSStringEncoding encodings[] = {
-            NSGB18030StringEncoding,        // 中文 GB18030
-            NSChineseEUCStringEncoding,     // EUC-CN
+        // 尝试其他编码
+        // 注意：NSGB18030StringEncoding 和 NSChineseEUCStringEncoding 在某些 SDK 中不可用
+        // 使用原始数值：GB18030 = 0x80000006, EUC-CN = 0x80000003
+        const NSStringEncoding encodings[] = {
+            (NSStringEncoding)0x80000006,   // GB18030
+            (NSStringEncoding)0x80000003,   // EUC-CN (GB2312)
             NSISOLatin1StringEncoding,      // Latin-1 (标准)
         };
+        const NSUInteger numEncodings = sizeof(encodings) / sizeof(encodings[0]);
         
-        for (NSUInteger i = 0; i < sizeof(encodings) / sizeof(encodings[0]); i++) {
+        for (NSUInteger i = 0; i < numEncodings; i++) {
             s = [[NSString alloc] initWithData:data encoding:encodings[i]];
             if (s) {
                 TVLog(@"Clipboard: decoded Latin-1 text using encoding %lu", (unsigned long)encodings[i]);
@@ -4343,18 +4346,21 @@ static void setXCutTextUTF8(char *str, int len, rfbClientPtr cl) {
     if (!s && len > 0) {
         // UTF-8 解码失败，尝试其他编码
         // 有些 VNC 客户端可能使用 GBK/GB2312 编码发送中文
-        NSStringEncoding encodings[] = {
+        // 注意：NSGB18030StringEncoding 和 NSChineseEUCStringEncoding 在某些 SDK 中不可用
+        // 使用原始数值：GB18030 = 0x80000006, EUC-CN = 0x80000003
+        const NSStringEncoding encodings[] = {
             NSUTF8StringEncoding,           // UTF-8 (标准)
             NSUTF16StringEncoding,          // UTF-16
             NSUTF16LittleEndianStringEncoding,
             NSUTF16BigEndianStringEncoding,
-            NSGB18030StringEncoding,        // 中文 GB18030
-            NSChineseEUCStringEncoding,     // EUC-CN
+            (NSStringEncoding)0x80000006,   // GB18030
+            (NSStringEncoding)0x80000003,   // EUC-CN (GB2312)
             NSISOLatin1StringEncoding,      // Latin-1 (回退)
             NSASCIIStringEncoding,          // ASCII (最后回退)
         };
+        const NSUInteger numEncodings = sizeof(encodings) / sizeof(encodings[0]);
         
-        for (NSUInteger i = 0; i < sizeof(encodings) / sizeof(encodings[0]); i++) {
+        for (NSUInteger i = 0; i < numEncodings; i++) {
             s = [[NSString alloc] initWithData:data encoding:encodings[i]];
             if (s) {
                 TVLog(@"Clipboard: decoded using encoding %lu", (unsigned long)encodings[i]);

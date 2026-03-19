@@ -20,10 +20,26 @@
 #endif
 
 #import <UIKit/UIKit.h>
-#import <IOSurface/IOSurface.h>
 #import <CoreVideo/CoreVideo.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
+
+// IOSurface 头文件路径处理
+#if __has_include(<IOSurface/IOSurface.h>)
+#import <IOSurface/IOSurface.h>
+#elif __has_include(<IOSurfaceSPI.h>)
+#import "IOSurfaceSPI.h"
+#else
+// 前向声明 IOSurface 函数
+extern "C" {
+typedef struct __IOSurface *IOSurfaceRef;
+IOSurfaceRef IOSurfaceCreate(CFDictionaryRef properties);
+void IOSurfaceLock(IOSurfaceRef surface, uint32_t options, uint32_t *seed);
+void IOSurfaceUnlock(IOSurfaceRef surface, uint32_t options, uint32_t *seed);
+void *IOSurfaceGetBaseAddress(IOSurfaceRef surface);
+size_t IOSurfaceGetAllocSize(IOSurfaceRef surface);
+}
+#endif
 
 #import "TVNCApiManager.h"
 #import "ScreenCapturer.h"
@@ -143,7 +159,8 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     CFDictionaryRef propertiesRef = NULL;
     if (CFStringCompare(format, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
         CFStringRef keys[1] = { CFSTR("kCGImageDestinationLossyCompressionQuality") };
-        CFNumberRef values[1] = { CFNumberCreate(NULL, kCFNumberCGFloatType, &quality) };
+        float qualityFloat = (float)quality;
+        CFNumberRef values[1] = { CFNumberCreate(NULL, kCFNumberFloatType, &qualityFloat) };
         propertiesRef = CFDictionaryCreate(NULL, (const void **)keys, (const void **)values, 1, 
                                            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         CFRelease(values[0]);
