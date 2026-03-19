@@ -172,13 +172,6 @@
     
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
-    // 添加 CORS 头支持
-    NSMutableDictionary *headers = [@{
-        @"Access-Control-Allow-Origin": @"*",
-        @"Access-Control-Allow-Methods": @"GET, POST, OPTIONS",
-        @"Access-Control-Allow-Headers": @"Content-Type"
-    } mutableCopy];
-    
     // 处理 OPTIONS 请求（CORS 预检）
     if ([method isEqualToString:@"OPTIONS"]) {
         response.statusCode = 200;

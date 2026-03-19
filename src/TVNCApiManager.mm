@@ -338,16 +338,16 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     // 处理不同类型的输入框
     if ([firstResponder isKindOfClass:[UITextField class]]) {
         UITextField *textField = (UITextField *)firstResponder;
-        NSString *currentText = textField.text ?: @"";
-        NSRange selectedRange = textField.selectedRange;
         
-        // 在光标位置插入文本
-        NSMutableString *newText = [currentText mutableCopy];
-        [newText replaceCharactersInRange:selectedRange withString:text];
-        textField.text = newText;
+        // 使用 UITextInput 协议的方法获取/设置选中范围
+        UITextRange *selectedTextRange = textField.selectedTextRange;
+        if (!selectedTextRange) {
+            selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument 
+                                                      toPosition:textField.endOfDocument];
+        }
         
-        // 更新光标位置
-        textField.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
+        // 替换选中的文本
+        [textField replaceRange:selectedTextRange withText:text];
         
         // 发送编辑事件
         [textField sendActionsForControlEvents:UIControlEventEditingChanged];
@@ -508,13 +508,11 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         
     } else if (hasCommand && mainKey == 0x41) { // Cmd+A (全选)
         UIView *firstResponder = [self findFirstResponder];
-        if ([firstResponder isKindOfClass:[UITextField class]]) {
-            UITextField *textField = (UITextField *)firstResponder;
-            textField.selectedRange = NSMakeRange(0, textField.text.length);
-            return YES;
-        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
-            UITextView *textView = (UITextView *)firstResponder;
-            textView.selectedRange = NSMakeRange(0, textView.text.length);
+        if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+            id<UITextInput> textInput = (id<UITextInput>)firstResponder;
+            UITextRange *allRange = [textInput textRangeFromPosition:textInput.beginningOfDocument 
+                                                          toPosition:textInput.endOfDocument];
+            textInput.selectedTextRange = allRange;
             return YES;
         }
         return NO;
@@ -566,53 +564,31 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 }
 
 - (BOOL)deleteBackward:(UIView *)firstResponder {
-    if ([firstResponder isKindOfClass:[UITextField class]]) {
-        UITextField *textField = (UITextField *)firstResponder;
-        NSRange selectedRange = textField.selectedRange;
-        NSString *currentText = textField.text ?: @"";
-        
-        if (selectedRange.length > 0) {
-            // 删除选中的文本
-            NSMutableString *newText = [currentText mutableCopy];
-            [newText deleteCharactersInRange:selectedRange];
-            textField.text = newText;
-            textField.selectedRange = NSMakeRange(selectedRange.location, 0);
-        } else if (selectedRange.location > 0) {
-            // 删除光标前一个字符
-            NSMutableString *newText = [currentText mutableCopy];
-            [newText deleteCharactersInRange:NSMakeRange(selectedRange.location - 1, 1)];
-            textField.text = newText;
-            textField.selectedRange = NSMakeRange(selectedRange.location - 1, 0);
-        }
-        
-        [textField sendActionsForControlEvents:UIControlEventEditingChanged];
-        return YES;
-        
-    } else if ([firstResponder isKindOfClass:[UITextView class]]) {
-        UITextView *textView = (UITextView *)firstResponder;
-        NSRange selectedRange = textView.selectedRange;
-        NSString *currentText = textView.text ?: @"";
-        
-        if (selectedRange.length > 0) {
-            NSMutableString *newText = [currentText mutableCopy];
-            [newText deleteCharactersInRange:selectedRange];
-            textView.text = newText;
-            textView.selectedRange = NSMakeRange(selectedRange.location, 0);
-        } else if (selectedRange.location > 0) {
-            NSMutableString *newText = [currentText mutableCopy];
-            [newText deleteCharactersInRange:NSMakeRange(selectedRange.location - 1, 1)];
-            textView.text = newText;
-            textView.selectedRange = NSMakeRange(selectedRange.location - 1, 0);
-        }
-        
-        if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
-            [textView.delegate textViewDidChange:textView];
-        }
-        return YES;
-        
-    } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+    if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
         id<UITextInput> textInput = (id<UITextInput>)firstResponder;
-        [textInput deleteBackward];
+        
+        // 获取当前选中的范围
+        UITextRange *selectedRange = textInput.selectedTextRange;
+        
+        if (selectedRange && !selectedRange.isEmpty) {
+            // 有选中的文本，直接删除
+            [textInput replaceRange:selectedRange withText:@""];
+        } else {
+            // 没有选中的文本，删除光标前一个字符
+            [textInput deleteBackward];
+        }
+        
+        // 发送编辑事件（如果是 UITextField）
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)firstResponder;
+            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)firstResponder;
+            if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [textView.delegate textViewDidChange:textView];
+            }
+        }
+        
         return YES;
     }
     
