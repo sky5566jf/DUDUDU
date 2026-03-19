@@ -458,7 +458,55 @@ GET /api/status
 
 ---
 
-### 11. API 文档页面
+### 11. 获取设备信息
+
+获取 iOS 设备信息，包括设备名称、设备ID、型号和系统版本。
+
+**请求:**
+```
+GET /api/device
+```
+
+**响应:**
+```json
+{
+  "deviceName": "张三的 iPhone",
+  "deviceId": "A1B2C3D4-E5F6-7890-1234-567890ABCDEF",
+  "deviceModel": "iPhone15,2",
+  "deviceModelName": "iPhone 14 Pro",
+  "systemVersion": "16.5",
+  "systemName": "iOS"
+}
+```
+
+**字段说明:**
+| 字段 | 说明 |
+|------|------|
+| deviceName | 用户设置的设备名称 |
+| deviceId | 设备唯一标识符 (UUID) |
+| deviceModel | 设备型号标识符 (如 iPhone15,2) |
+| deviceModelName | 设备型号友好名称 (如 iPhone 14 Pro) |
+| systemVersion | iOS 系统版本号 |
+| systemName | 系统名称 (如 iOS) |
+
+**示例:**
+```bash
+curl "http://192.168.1.100:8080/api/device"
+```
+
+```python
+import requests
+
+response = requests.get("http://192.168.1.100:8080/api/device")
+data = response.json()
+print(f"设备: {data['deviceModelName']}")
+print(f"iOS版本: {data['systemVersion']}")
+print(f"设备ID: {data['deviceId']}")
+```
+
+---
+
+### 12. API 文档页面
 
 在浏览器中查看 API 文档。
 
