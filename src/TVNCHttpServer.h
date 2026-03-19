@@ -24,9 +24,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 /**
  TVNCHttpServer
- --------------
- 轻量级 HTTP 服务器，提供 REST API 接口
- 默认在 8080 端口启动
+--------------
+轻量级 HTTP 服务器，提供 REST API 接口
+默认在 8182 端口启动
  */
 @interface TVNCHttpServer : NSObject
 
@@ -35,7 +35,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)new NS_UNAVAILABLE;
 - (instancetype)init NS_UNAVAILABLE;
 
-/// HTTP 服务器端口，默认 8080
+/// HTTP 服务器端口，默认 8182
 @property (nonatomic, assign) NSUInteger port;
 
 /// 是否已启动

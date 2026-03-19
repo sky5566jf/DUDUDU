@@ -67,7 +67,7 @@
 
 - (instancetype)init {
     if (self = [super init]) {
-        _port = 8080;
+        _port = 8182;
         _serverSocket = -1;
         _running = NO;
         _serverQueue = dispatch_queue_create("com.trollvnc.httpserver", DISPATCH_QUEUE_SERIAL);
@@ -205,6 +205,8 @@
         return [self handleDeviceInfo];
     } else if ([path isEqualToString:@"/api/checkfile"]) {
         return [self handleCheckFile];
+    } else if ([path isEqualToString:@"/api/upload"]) {
+        return [self handleUploadFile:query body:body];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -648,6 +650,103 @@
     return response;
 }
 
+// POST /api/upload?path=/var/mobile/Documents/folder/filename.ext
+// 上传任意文件，如果目标文件夹不存在会自动创建
+- (TVNCHttpResponse *)handleUploadFile:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = query[@"path"];
+    if (!filePath || filePath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Missing path parameter", @"message": @"Please provide target file path via ?path=/xxx/xxx"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    if (!body || body.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty body", @"message": @"Please provide file content in request body"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 获取目标目录
+    NSString *directory = [filePath stringByDeletingLastPathComponent];
+    
+    // 检查目录是否存在，不存在则创建
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    BOOL isDirectory;
+    BOOL exists = [fileManager fileExistsAtPath:directory isDirectory:&isDirectory];
+    
+    if (!exists) {
+        // 目录不存在，创建它
+        NSError *createError = nil;
+        BOOL created = [fileManager createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:&createError];
+        if (!created) {
+            response.statusCode = 500;
+            response.contentType = @"application/json";
+            NSDictionary *error = @{
+                @"success": @NO,
+                @"error": @"Failed to create directory",
+                @"details": createError ? createError.localizedDescription : @"Unknown error",
+                @"path": directory
+            };
+            response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+            return response;
+        }
+    } else if (!isDirectory) {
+        // 路径存在但不是目录
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{
+            @"success": @NO,
+            @"error": @"Path exists but is not a directory",
+            @"path": directory
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 写入文件
+    NSError *writeError = nil;
+    BOOL success = [body writeToFile:filePath options:NSDataWritingAtomic error:&writeError];
+    
+    if (success) {
+        // 获取文件属性
+        NSDictionary *attributes = [fileManager attributesOfItemAtPath:filePath error:nil];
+        NSDate *modificationDate = attributes[NSFileModificationDate];
+        
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{
+            @"success": @YES,
+            @"path": filePath,
+            @"bytes": @(body.length),
+            @"directory": directory,
+            @"created": exists ? @NO : @YES,  // 目录是否是本次创建的
+            @"modified": modificationDate ? [modificationDate description] : @"Unknown"
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{
+            @"success": @NO,
+            @"error": @"Failed to write file",
+            @"details": writeError ? writeError.localizedDescription : @"Unknown error",
+            @"path": filePath
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+    }
+    
+    return response;
+}
+
 // POST /api/input
 // Body: 要输入的文本（UTF-8）
 - (TVNCHttpResponse *)handleInput:(NSDictionary *)query body:(NSData *)body {
@@ -727,6 +826,7 @@
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
         "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本）</li>"
         "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/zhuangtai.txt）</li>"
+        "<li><b>POST /api/upload?path=/xxx/xxx</b> - 上传任意文件（自动创建目录）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
