@@ -22,8 +22,8 @@
 #import <UIKit/UIKit.h>
 #import <IOSurface/IOSurface.h>
 #import <CoreVideo/CoreVideo.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
-#import <MobileCoreServices/MobileCoreServices.h>
 
 #import "TVNCApiManager.h"
 #import "ScreenCapturer.h"
@@ -54,11 +54,11 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 #pragma mark - 截图 API
 
 - (nullable NSData *)captureScreenshotAsPNG {
-    return [self captureScreenshotWithFormat:kUTTypePNG quality:1.0];
+    return [self captureScreenshotWithFormat:(__bridge CFStringRef)@"public.png" quality:1.0];
 }
 
 - (nullable NSData *)captureScreenshotAsJPEGWithQuality:(CGFloat)quality {
-    return [self captureScreenshotWithFormat:kUTTypeJPEG quality:quality];
+    return [self captureScreenshotWithFormat:(__bridge CFStringRef)@"public.jpeg" quality:quality];
 }
 
 - (nullable NSData *)captureScreenshotWithFormat:(CFStringRef)format quality:(CGFloat)quality {
@@ -140,7 +140,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     }
     
     // 设置压缩质量（仅对 JPEG 有效）
-    if (CFStringCompare(format, kUTTypeJPEG, 0) == kCFCompareEqualTo) {
+    if (CFStringCompare(format, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
         NSDictionary *properties = @{
             (__bridge NSString *)kCGImageDestinationLossyCompressionQuality : @(quality)
         };
