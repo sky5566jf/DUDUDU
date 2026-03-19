@@ -50,6 +50,7 @@
 #import "PSAssistiveTouchSettingsDetail.h"
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
+#import "TVNCApiManager.h"
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
@@ -3781,6 +3782,153 @@ static NSData *tvCtlTextForKick(NSString *cid, BOOL addToBlocklist) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
+#pragma mark - API Command Handlers
+
+// 截图命令处理：screenshot [png|jpeg] [path]
+// 如果没有指定路径，返回 base64 编码的图片数据
+static NSData *tvCtlHandleScreenshot(NSString *cmd) {
+    NSArray *parts = [cmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    NSString *format = @"png";
+    NSString *filePath = nil;
+    
+    if (parts.count >= 2) {
+        format = [parts[1] lowercaseString];
+    }
+    if (parts.count >= 3) {
+        // 重建路径（处理包含空格的路径）
+        NSRange range = [cmd rangeOfString:parts[2]];
+        if (range.location != NSNotFound) {
+            filePath = [cmd substringFromIndex:range.location];
+        }
+    }
+    
+    NSData *imageData = nil;
+    if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
+        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:0.9];
+    } else {
+        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
+    }
+    
+    if (!imageData) {
+        return [@"ERR ScreenshotFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    if (filePath && filePath.length > 0) {
+        // 保存到文件
+        NSError *error = nil;
+        BOOL written = [imageData writeToFile:filePath options:NSDataWritingAtomic error:&error];
+        if (written) {
+            NSString *resp = [NSString stringWithFormat:@"OK %lu bytes written to %@\n", (unsigned long)imageData.length, filePath];
+            return [resp dataUsingEncoding:NSUTF8StringEncoding];
+        } else {
+            NSString *errMsg = error ? error.localizedDescription : @"Unknown error";
+            NSString *resp = [NSString stringWithFormat:@"ERR WriteFailed: %@\n", errMsg];
+            return [resp dataUsingEncoding:NSUTF8StringEncoding];
+        }
+    } else {
+        // 返回 base64 编码的数据
+        NSString *base64String = [imageData base64EncodedStringWithOptions:0];
+        NSString *resp = [NSString stringWithFormat:@"OK %@\n%@\n", format, base64String];
+        return [resp dataUsingEncoding:NSUTF8StringEncoding];
+    }
+}
+
+// 文件写入命令处理：writefile <path> [append]
+// 下一行是 base64 编码的内容
+static NSData *tvCtlHandleWriteFile(NSString *cmd, int cfd) {
+    NSArray *parts = [cmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (parts.count < 2) {
+        return [@"ERR MissingPath\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    NSString *filePath = nil;
+    NSRange range = [cmd rangeOfString:parts[1]];
+    if (range.location != NSNotFound) {
+        filePath = [cmd substringFromIndex:range.location];
+    }
+    
+    // 检查是否有 append 参数
+    BOOL append = [cmd containsString:@" append"] || [cmd hasSuffix:@" append"];
+    
+    // 读取 base64 内容（下一行）
+    uint8_t buf[65536];
+    size_t off = 0;
+    struct timeval tv;
+    tv.tv_sec = 5;
+    tv.tv_usec = 0;
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    
+    for (;;) {
+        ssize_t n = recv(cfd, buf + off, sizeof(buf) - off - 1, 0);
+        if (n <= 0) break;
+        off += (size_t)n;
+        if (off >= sizeof(buf) - 1) break;
+        if (memchr(buf, '\n', off)) break;
+    }
+    buf[off] = '\0';
+    
+    // 解析 base64 内容
+    NSString *contentStr = [[NSString alloc] initWithBytes:buf length:off encoding:NSUTF8StringEncoding];
+    contentStr = [contentStr stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    
+    NSData *contentData = [[NSData alloc] initWithBase64EncodedString:contentStr options:0];
+    if (!contentData) {
+        return [@"ERR InvalidBase64\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    // 写入文件
+    NSError *error = nil;
+    BOOL success = [[TVNCApiManager sharedManager] writeContent:contentData
+                                                      toFilePath:filePath
+                                                          append:append
+                                                           error:&error];
+    
+    if (success) {
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    } else {
+        NSString *errMsg = error ? error.localizedDescription : @"Unknown error";
+        NSString *resp = [NSString stringWithFormat:@"ERR %@\n", errMsg];
+        return [resp dataUsingEncoding:NSUTF8StringEncoding];
+    }
+}
+
+// 剪贴板设置命令处理：clipboard <base64-encoded-text>
+static NSData *tvCtlHandleClipboard(NSString *cmd) {
+    NSArray *parts = [cmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+    if (parts.count < 2) {
+        return [@"ERR MissingContent\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    // 重建 base64 内容（处理包含空格的情况）
+    NSRange range = [cmd rangeOfString:parts[1]];
+    if (range.location == NSNotFound) {
+        return [@"ERR InvalidContent\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    NSString *base64Content = [cmd substringFromIndex:range.location];
+    base64Content = [base64Content stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    
+    // 解码 base64
+    NSData *decodedData = [[NSData alloc] initWithBase64EncodedString:base64Content options:0];
+    if (!decodedData) {
+        return [@"ERR InvalidBase64\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    // 转换为字符串（使用 UTF-8 编码支持中文）
+    NSString *text = [[NSString alloc] initWithData:decodedData encoding:NSUTF8StringEncoding];
+    if (!text) {
+        return [@"ERR InvalidUTF8\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    
+    // 设置剪贴板
+    BOOL success = [[TVNCApiManager sharedManager] setClipboardText:text];
+    if (success) {
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    } else {
+        return [@"ERR ClipboardSetFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+}
+
 static BOOL tvDisconnectAllClients(void) {
     if (!gScreen)
         return NO;
@@ -3862,6 +4010,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             BOOL shouldBlock = [cmd hasPrefix:@"block "];
             resp = tvCtlTextForKick(cid, shouldBlock);
         }
+    } else if ([cmd hasPrefix:@"screenshot"]) {
+        resp = tvCtlHandleScreenshot(cmd);
+    } else if ([cmd hasPrefix:@"writefile "]) {
+        resp = tvCtlHandleWriteFile(cmd, cfd);
+    } else if ([cmd hasPrefix:@"clipboard "]) {
+        resp = tvCtlHandleClipboard(cmd);
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
@@ -4133,15 +4287,40 @@ static void setXCutTextLatin1(char *str, int len, rfbClientPtr cl) {
 
     TVLog(@"Clipboard: received client cut text (Latin-1) len=%d", len);
     NSData *data = [NSData dataWithBytes:str length:(NSUInteger)len];
-    NSString *s = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    
+    // 首先尝试 UTF-8（许多客户端实际上通过 Latin-1 通道发送 UTF-8）
+    NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    
+    if (!s) {
+        // 尝试其他中文编码
+        NSStringEncoding encodings[] = {
+            NSGB18030StringEncoding,        // 中文 GB18030
+            NSChineseEUCStringEncoding,     // EUC-CN
+            NSISOLatin1StringEncoding,      // Latin-1 (标准)
+        };
+        
+        for (NSUInteger i = 0; i < sizeof(encodings) / sizeof(encodings[0]); i++) {
+            s = [[NSString alloc] initWithData:data encoding:encodings[i]];
+            if (s) {
+                TVLog(@"Clipboard: decoded Latin-1 text using encoding %lu", (unsigned long)encodings[i]);
+                break;
+            }
+        }
+    }
+    
     if (!s)
         s = @"";
 
     dispatch_async(dispatch_get_main_queue(), ^{
         gClipboardSuppressSend.fetch_add(1, std::memory_order_relaxed);
 
-        TVLog(@"Clipboard: applying client text to UIPasteboard (Latin-1), suppression now=%d",
-              gClipboardSuppressSend.load(std::memory_order_relaxed));
+        TVLog(@"Clipboard: applying client text to UIPasteboard (Latin-1), text length=%lu, suppression now=%d",
+              (unsigned long)s.length, gClipboardSuppressSend.load(std::memory_order_relaxed));
+        
+        // 直接设置到 UIPasteboard 确保中文正确
+        UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+        pasteboard.string = s;
+        
         [[ClipboardManager sharedManager] setStringFromRemote:s];
 
         gClipboardSuppressSend.fetch_sub(1, std::memory_order_relaxed);
@@ -4156,19 +4335,48 @@ static void setXCutTextUTF8(char *str, int len, rfbClientPtr cl) {
     TVLog(@"Clipboard: received client cut text (UTF-8) len=%d", len);
 
     NSData *data = [NSData dataWithBytes:str length:(NSUInteger)len];
+    
+    // 尝试 UTF-8 解码（支持中文）
     NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    
+    if (!s && len > 0) {
+        // UTF-8 解码失败，尝试其他编码
+        // 有些 VNC 客户端可能使用 GBK/GB2312 编码发送中文
+        NSStringEncoding encodings[] = {
+            NSUTF8StringEncoding,           // UTF-8 (标准)
+            NSUTF16StringEncoding,          // UTF-16
+            NSUTF16LittleEndianStringEncoding,
+            NSUTF16BigEndianStringEncoding,
+            NSGB18030StringEncoding,        // 中文 GB18030
+            NSChineseEUCStringEncoding,     // EUC-CN
+            NSISOLatin1StringEncoding,      // Latin-1 (回退)
+            NSASCIIStringEncoding,          // ASCII (最后回退)
+        };
+        
+        for (NSUInteger i = 0; i < sizeof(encodings) / sizeof(encodings[0]); i++) {
+            s = [[NSString alloc] initWithData:data encoding:encodings[i]];
+            if (s) {
+                TVLog(@"Clipboard: decoded using encoding %lu", (unsigned long)encodings[i]);
+                break;
+            }
+        }
+    }
+    
     if (!s) {
-        // Fallback try Latin-1 if UTF-8 decode fails
-        s = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
-        if (!s)
-            s = @"";
+        s = @"";
     }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         gClipboardSuppressSend.fetch_add(1, std::memory_order_relaxed);
 
-        TVLog(@"Clipboard: applying client text to UIPasteboard (UTF-8), suppression now=%d",
-              gClipboardSuppressSend.load(std::memory_order_relaxed));
+        TVLog(@"Clipboard: applying client text to UIPasteboard (UTF-8), text length=%lu, suppression now=%d",
+              (unsigned long)s.length, gClipboardSuppressSend.load(std::memory_order_relaxed));
+        
+        // 使用 UIPasteboard 设置字符串，确保中文正确
+        UIPasteboard *pasteboard = [UIPasteboard generalPasteboard];
+        pasteboard.string = s;
+        
+        // 同时通过 ClipboardManager 处理
         [[ClipboardManager sharedManager] setStringFromRemote:s];
 
         gClipboardSuppressSend.fetch_sub(1, std::memory_order_relaxed);

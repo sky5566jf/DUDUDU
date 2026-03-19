@@ -28,6 +28,7 @@ trollvncserver_FILES += src/ClipboardManager.mm
 trollvncserver_FILES += src/ScreenCapturer.mm
 trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
+trollvncserver_FILES += src/TVNCApiManager.mm
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
@@ -79,6 +80,8 @@ trollvncserver_FRAMEWORKS += CoreVideo
 trollvncserver_FRAMEWORKS += Foundation
 trollvncserver_FRAMEWORKS += IOKit
 trollvncserver_FRAMEWORKS += IOSurface
+trollvncserver_FRAMEWORKS += ImageIO
+trollvncserver_FRAMEWORKS += MobileCoreServices
 trollvncserver_FRAMEWORKS += QuartzCore
 trollvncserver_FRAMEWORKS += UIKit
 trollvncserver_FRAMEWORKS += UserNotifications
