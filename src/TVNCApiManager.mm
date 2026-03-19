@@ -438,13 +438,18 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
         
         // 发送 Command 键按下
-        [generator otherConsumerUsageDown:kHIDUsage_Csmr_ACPaste];
+        [generator keyDown:@"COMMAND"];
         
         struct timespec pressDelay = {0, (long)(0.05 * 1e9)};
         nanosleep(&pressDelay, 0);
         
+        // 发送 V 键
+        [generator keyPress:@"v"];
+        
+        nanosleep(&pressDelay, 0);
+        
         // 发送 Command 键释放
-        [generator otherConsumerUsageUp:kHIDUsage_Csmr_ACPaste];
+        [generator keyUp:@"COMMAND"];
         
         return YES;
     } @catch (NSException *exception) {
