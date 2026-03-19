@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -173,7 +173,7 @@ NS_INLINE void _DTXCalcLinearPinchStartEndPoints(CGRect bounds, CGFloat pixelsSc
 
     dispatch_queue_attr_t attr = dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL,
                                                                          QOS_CLASS_USER_INTERACTIVE, 0);
-    _hidEventQueue = dispatch_queue_create("com.Matisu.MatisuVNC.hid-events", attr);
+    _hidEventQueue = dispatch_queue_create("com.82flex.trollvnc.hid-events", attr);
 
     for (NSUInteger i = 0; i < HIDMaxTouchCount; ++i)
         _activePoints[i].identifier = fingerIdentifiers[i];

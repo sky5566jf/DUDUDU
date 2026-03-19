@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -32,7 +32,7 @@
 
 #import "Logging.h"
 #import "TRWatchDog.h"
-#import "MatisuVNCmanager-Swift.h"
+#import "trollvncmanager-Swift.h"
 
 #define TAG "TRWatchDog"
 
@@ -94,7 +94,7 @@ NSString *const TRWatchDogErrorDomain = @"TRWatchDogErrorDomain";
 
         // Initialize state machine
         _internalState = TRWatchDogStateStopped;
-        _stateQueue = dispatch_queue_create("com.Matisu.MatisuVNC.TRWatchDog.state", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
+        _stateQueue = dispatch_queue_create("com.82flex.trollvnc.TRWatchDog.state", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
         _currentTask = nil;
         _throttleTimer = NULL;
 

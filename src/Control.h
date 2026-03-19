@@ -1,1 +1,1 @@
-﻿../app/MatisuVNC/MatisuVNC/Control.h
+../app/TrollVNC/TrollVNC/Control.h

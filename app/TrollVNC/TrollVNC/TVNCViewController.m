@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -37,7 +37,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
-    NSBundle *resBundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"MatisuVNCPrefs"
+    NSBundle *resBundle = [NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:@"TrollVNCPrefs"
                                                                                    ofType:@"bundle"]];
     self.localizationBundle = resBundle ?: [NSBundle mainBundle];
 
@@ -151,7 +151,7 @@
         NSLocalizedStringFromTableInBundle(@"New Version Available", @"Localizable", self.localizationBundle, nil);
     NSString *alertMessage =
         [NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                       @"A new version %@ is available! You鈥檙e currently using v%@.", @"Localizable",
+                                       @"A new version %@ is available! You’re currently using v%@.", @"Localizable",
                                        self.localizationBundle, nil),
                                    releaseVersion, [[GitHubReleaseUpdater shared] currentVersion]];
 

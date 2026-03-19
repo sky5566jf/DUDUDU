@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -46,7 +46,6 @@
 #import "Control.h"
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
-#import "MatisuAPI.h"
 #import "Logging.h"
 #import "PSAssistiveTouchSettingsDetail.h"
 #import "STHIDEventGenerator.h"
@@ -66,7 +65,7 @@ static BOOL gEnabled = YES;
 static int gPort = 5901;
 static int gTvCtlPort = 0;        // port for control connections (0 = disabled)
 static NSString *gBindHost = nil; // optional bind address from CLI/config
-static NSString *gDesktopName = @"MatisuVNC";
+static NSString *gDesktopName = @"TrollVNC";
 static BOOL gViewOnly = NO;
 static double gKeepAliveSec = 0.0; // 15..86400
 static BOOL gClipboardEnabled = YES;
@@ -115,9 +114,6 @@ static int gHttpPort = 0;
 static char *gHttpDirOverride = NULL;
 static char *gSslCertPath = NULL;
 static char *gSslKeyPath = NULL;
-
-// MatisuVNC Custom API Server
-static int gApiPort = 0; // 0 = disabled, default port 8080
 
 // Bonjour / mDNS Auto-Discovery
 static BOOL gBonjourEnabled = YES; // publish _rfb._tcp (and optional _http._tcp)
@@ -225,7 +221,7 @@ static NSBundle *tvResourceBundle(void) {
         if (!mainBundle)
             return;
 
-        NSString *resPath = [mainBundle pathForResource:@"MatisuVNCPrefs" ofType:@"bundle"];
+        NSString *resPath = [mainBundle pathForResource:@"TrollVNCPrefs" ofType:@"bundle"];
         NSBundle *resBundle = resPath ? [NSBundle bundleWithPath:resPath] : nil;
         if (!resBundle)
             return;
@@ -234,7 +230,7 @@ static NSBundle *tvResourceBundle(void) {
 #else
         NSString *exe = tvExecutablePath();
         NSString *exeDir = [exe stringByDeletingLastPathComponent];
-        NSString *resRel = @"../../Library/PreferenceBundles/MatisuVNCPrefs.bundle";
+        NSString *resRel = @"../../Library/PreferenceBundles/TrollVNCPrefs.bundle";
         NSString *resPath = [[exeDir stringByAppendingPathComponent:resRel] stringByStandardizingPath];
         NSBundle *resBundle = resPath ? [NSBundle bundleWithPath:resPath] : nil;
         if (!resBundle)
@@ -296,7 +292,7 @@ static void printUsageAndExit(const char *prog) {
     static const char *sPackageScheme = MYSTRINGIFY(THEOS_PACKAGE_SCHEME);
     static const char *sPackageVersion = MYSTRINGIFY(PACKAGE_VERSION);
 
-    fprintf(stderr, "MatisuVNC (%s) v%s\n", sPackageScheme, sPackageVersion);
+    fprintf(stderr, "TrollVNC (%s) v%s\n", sPackageScheme, sPackageVersion);
     fprintf(stderr, "Usage: %s [-p port] [-n name] [options]\n\n", prog);
 
     fprintf(stderr, "Basic:\n");
@@ -365,10 +361,10 @@ static void printUsageAndExit(const char *prog) {
     fprintf(stderr, "Environment:\n");
     fprintf(
         stderr,
-        "  MatisuVNC_PASSWORD                 Classic VNC password (enables VNC auth when set; first 8 chars used)\n");
+        "  TROLLVNC_PASSWORD                 Classic VNC password (enables VNC auth when set; first 8 chars used)\n");
     fprintf(stderr,
-            "  MatisuVNC_VIEWONLY_PASSWORD        View-only password; passwords stored as [full..., view-only...]\n");
-    fprintf(stderr, "  MatisuVNC_REPEATER_RETRY_INTERVAL  Repeater retry interval (default: 0)\n\n");
+            "  TROLLVNC_VIEWONLY_PASSWORD        View-only password; passwords stored as [full..., view-only...]\n");
+    fprintf(stderr, "  TROLLVNC_REPEATER_RETRY_INTERVAL  Repeater retry interval (default: 0)\n\n");
 
     exit(EXIT_SUCCESS);
 }
@@ -452,11 +448,11 @@ static void parseDaemonOptions(void) {
     }
 
     if (!prefs) {
-        prefs = [[NSUserDefaults standardUserDefaults] persistentDomainForName:@"com.Matisu.MatisuVNC"];
+        prefs = [[NSUserDefaults standardUserDefaults] persistentDomainForName:@"com.82flex.trollvnc"];
     }
 
     if (!prefs) {
-        TVLog(@"-daemon: no preferences found for domain com.Matisu.MatisuVNC");
+        TVLog(@"-daemon: no preferences found for domain com.82flex.trollvnc");
         return;
     }
 
@@ -862,13 +858,13 @@ static void parseDaemonOptions(void) {
     BOOL hasFullPwd = NO, hasViewPwd = NO;
     if ([fullPwd isKindOfClass:[NSString class]]) {
         NSString *trunc = (fullPwd.length > 8) ? [fullPwd substringToIndex:8] : fullPwd;
-        setenv("MatisuVNC_PASSWORD", trunc.UTF8String ?: "", 1);
+        setenv("TROLLVNC_PASSWORD", trunc.UTF8String ?: "", 1);
         hasFullPwd = (trunc.length > 0);
     }
     NSString *viewPwd = [prefs objectForKey:@"ViewOnlyPassword"];
     if ([viewPwd isKindOfClass:[NSString class]]) {
         NSString *trunc = (viewPwd.length > 8) ? [viewPwd substringToIndex:8] : viewPwd;
-        setenv("MatisuVNC_VIEWONLY_PASSWORD", trunc.UTF8String ?: "", 1);
+        setenv("TROLLVNC_VIEWONLY_PASSWORD", trunc.UTF8String ?: "", 1);
         hasViewPwd = (trunc.length > 0);
     }
 
@@ -909,12 +905,12 @@ static void parseDaemonOptions(void) {
     [cfg appendFormat:@"dir=%@ cert=%@ key=%@", dirStr, certStr, keyStr];
 
     TVLog(@"%@", cfg);
-    TVLog(@"-daemon: preferences applied (domain=com.Matisu.MatisuVNC)");
+    TVLog(@"-daemon: preferences applied (domain=com.82flex.trollvnc)");
 }
 
 static void parseCLI(int argc, const char *argv[]) {
     // Special mode: -daemon reads configuration from NSUserDefaults domain
-    // com.Matisu.MatisuVNC and initializes runtime options accordingly.
+    // com.82flex.trollvnc and initializes runtime options accordingly.
     BOOL isDaemon = NO;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-daemon") == 0) {
@@ -1098,20 +1094,10 @@ static void parseCLI(int argc, const char *argv[]) {
 #pragma clang diagnostic pop
 
     int opt;
-    const char *optstr = "p:b:n:vA:c:C:s:F:d:Q:t:P:R:aW:w:NM:KU:O:I:i:H:D:e:k:B:T:VhA:";
+    const char *optstr = "p:b:n:vA:c:C:s:F:d:Q:t:P:R:aW:w:NM:KU:O:I:i:H:D:e:k:B:T:Vh";
     optind = 1;
     while ((opt = getopt(__argc2, __argv2.data(), optstr)) != -1) {
         switch (opt) {
-        case 'A': {
-            long ap = strtol(optarg ? optarg : "0", NULL, 10);
-            if (ap < 0 || ap > 65535) {
-                TVPrintError("Invalid API port: %s (expected 0..65535)", optarg);
-                exit(EXIT_FAILURE);
-            }
-            gApiPort = (int)ap;
-            TVLog(@"CLI: API port set to %d (-A)", gApiPort);
-            break;
-        }
         case 'b': {
             if (!optarg || !*optarg) {
                 TVPrintError("-b requires a non-empty host name or address");
@@ -1132,7 +1118,7 @@ static void parseCLI(int argc, const char *argv[]) {
             break;
         }
         case 'n': {
-            gDesktopName = [NSString stringWithUTF8String:optarg ?: "MatisuVNC"];
+            gDesktopName = [NSString stringWithUTF8String:optarg ?: "TrollVNC"];
             TVLog(@"CLI: Desktop name set to '%@'", gDesktopName);
             break;
         }
@@ -1978,8 +1964,8 @@ static const BOOL cParallelHashOnFlush = YES; // use parallel hashing at flush t
 
 #pragma mark - Frame Handlers
 
-static std::atomic<int> gRotationQuad(0); // 0=0掳, 1=90掳, 2=180掳, 3=270掳 (clockwise)
-static void *gRotateScratch = NULL;       // rotation scratch (for 90掳/270掳)
+static std::atomic<int> gRotationQuad(0); // 0=0°, 1=90°, 2=180°, 3=270° (clockwise)
+static void *gRotateScratch = NULL;       // rotation scratch (for 90°/270°)
 static size_t gRotateScratchSize = 0;     // bytes
 static void *gScaleTemp = NULL;           // vImage scale temp buffer
 static size_t gScaleTempSize = 0;         // bytes
@@ -3003,8 +2989,8 @@ NS_INLINE CGPoint vncPointToDevicePoint(int vx, int vy) {
     int rotQ = (gOrientationSyncEnabled ? gRotationQuad.load(std::memory_order_relaxed) : 0) & 3;
 
 #if !TARGET_IPHONE_SIMULATOR
-    // On iPad, align input coordinates with an extra +270掳 CW rotation
-    // (i.e., -90掳) per corrected requirement.
+    // On iPad, align input coordinates with an extra +270° CW rotation
+    // (i.e., -90°) per corrected requirement.
     static BOOL sIsPad = NO;
     static dispatch_once_t sPadOnce;
     dispatch_once(&sPadOnce, ^{
@@ -3233,7 +3219,7 @@ static void ptrAddEvent(int buttonMask, int x, int y, rfbClientPtr cl) {
 
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        gWheelQueue = dispatch_queue_create("com.Matisu.MatisuVNC.wheel", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
+        gWheelQueue = dispatch_queue_create("com.82flex.trollvnc.wheel", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
     });
 
     if (gWheelStepPx > 0 && ((wheelUpNow && !wheelUpPrev) || (wheelDnNow && !wheelDnPrev))) {
@@ -3305,7 +3291,7 @@ static NSString *tvBootHash8(void) {
 
 // Compose Bonjour service name as gDesktopName + 8-char boot hash, clamped to 63 bytes
 static NSString *tvBonjourServiceName(NSString *baseName) {
-    NSString *name = baseName ?: @"MatisuVNC";
+    NSString *name = baseName ?: @"TrollVNC";
     NSString *suffix = tvBootHash8();
     // mDNS single-label length limit is 63 bytes (UTF-8). We reserve suffix bytes.
     const NSUInteger maxBytes = 63;
@@ -3569,7 +3555,7 @@ static void tvStartControlSocketIfNeeded(void) {
     static dispatch_queue_t sTVCtlQueue = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        sTVCtlQueue = dispatch_queue_create("com.Matisu.MatisuVNC.control", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
+        sTVCtlQueue = dispatch_queue_create("com.82flex.trollvnc.control", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
     });
 
     gTvCtlAcceptSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)fd, 0, sTVCtlQueue);
@@ -3912,9 +3898,9 @@ static void tvPublishUserSingleNotifs(void) {
 
     NSString *localizedContentTmpl;
     localizedContentTmpl = (gClientCount == 1) ? LocalizedString(@"There is %d active VNC client.", @"Localizable",
-                                                                 tvLocalizationBundle(), @"MatisuVNCserver")
+                                                                 tvLocalizationBundle(), @"trollvncserver")
                                                : LocalizedString(@"There are %d active VNC clients.", @"Localizable",
-                                                                 tvLocalizationBundle(), @"MatisuVNCserver");
+                                                                 tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, gClientCount];
     dispatch_async(dispatch_get_main_queue(), ^(void) {
@@ -3941,7 +3927,7 @@ static void tvPublishClientConnectedNotif(NSString *host) {
 
     NSString *localizedContentTmpl;
     localizedContentTmpl =
-        LocalizedString(@"A VNC client connected from %@.", @"Localizable", tvLocalizationBundle(), @"MatisuVNCserver");
+        LocalizedString(@"A VNC client connected from %@.", @"Localizable", tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, host];
     dispatch_async(dispatch_get_main_queue(), ^(void) {
@@ -3961,7 +3947,7 @@ static void tvPublishClientDisconnectedNotif(NSString *host) {
 
     NSString *localizedContentTmpl;
     localizedContentTmpl = LocalizedString(@"A VNC client disconnected from %@.", @"Localizable",
-                                           tvLocalizationBundle(), @"MatisuVNCserver");
+                                           tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, host];
     dispatch_async(dispatch_get_main_queue(), ^(void) {
@@ -4140,57 +4126,21 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
 
 static std::atomic<int> gClipboardSuppressSend(0); // >0 means suppress sending clipboard to clients
 
-// Helper function to decode text with multiple encoding support (for Chinese/Unicode)
-static NSString *decodeClipboardText(char *str, int len) {
-    if (!str || len <= 0) {
-        return @"";
-    }
-
-    NSData *data = [NSData dataWithBytes:str length:(NSUInteger)len];
-
-    // Try UTF-8 first (supports all Unicode including Chinese)
-    NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (s && s.length > 0) {
-        return s;
-    }
-
-    // Try GBK encoding (common for Chinese Windows systems)
-    NSStringEncoding gbkEncoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGBK);
-    s = [[NSString alloc] initWithData:data encoding:gbkEncoding];
-    if (s && s.length > 0) {
-        return s;
-    }
-
-    // Try GB2312 (older Chinese encoding)
-    NSStringEncoding gb2312Encoding = CFStringConvertEncodingToNSStringEncoding(kCFStringEncodingGB_2312_80);
-    s = [[NSString alloc] initWithData:data encoding:gb2312Encoding];
-    if (s && s.length > 0) {
-        return s;
-    }
-
-    // Try Latin-1 as final fallback (will lose non-Latin characters)
-    s = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
-    if (s) {
-        return s;
-    }
-
-    return @"";
-}
-
 static void setXCutTextLatin1(char *str, int len, rfbClientPtr cl) {
     (void)cl;
     if (!str || len < 0)
         len = 0;
 
     TVLog(@"Clipboard: received client cut text (Latin-1) len=%d", len);
-
-    // Use helper function for proper encoding detection
-    NSString *s = decodeClipboardText(str, len);
+    NSData *data = [NSData dataWithBytes:str length:(NSUInteger)len];
+    NSString *s = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+    if (!s)
+        s = @"";
 
     dispatch_async(dispatch_get_main_queue(), ^{
         gClipboardSuppressSend.fetch_add(1, std::memory_order_relaxed);
 
-        TVLog(@"Clipboard: applying client text to UIPasteboard (with Chinese/Unicode support), suppression now=%d",
+        TVLog(@"Clipboard: applying client text to UIPasteboard (Latin-1), suppression now=%d",
               gClipboardSuppressSend.load(std::memory_order_relaxed));
         [[ClipboardManager sharedManager] setStringFromRemote:s];
 
@@ -4205,13 +4155,19 @@ static void setXCutTextUTF8(char *str, int len, rfbClientPtr cl) {
 
     TVLog(@"Clipboard: received client cut text (UTF-8) len=%d", len);
 
-    // Use helper function for proper encoding detection (supports Chinese/Unicode)
-    NSString *s = decodeClipboardText(str, len);
+    NSData *data = [NSData dataWithBytes:str length:(NSUInteger)len];
+    NSString *s = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!s) {
+        // Fallback try Latin-1 if UTF-8 decode fails
+        s = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
+        if (!s)
+            s = @"";
+    }
 
     dispatch_async(dispatch_get_main_queue(), ^{
         gClipboardSuppressSend.fetch_add(1, std::memory_order_relaxed);
 
-        TVLog(@"Clipboard: applying client text to UIPasteboard (with Chinese/Unicode support), suppression now=%d",
+        TVLog(@"Clipboard: applying client text to UIPasteboard (UTF-8), suppression now=%d",
               gClipboardSuppressSend.load(std::memory_order_relaxed));
         [[ClipboardManager sharedManager] setStringFromRemote:s];
 
@@ -4383,7 +4339,7 @@ static void prepareClipboardManager(void) {
     // server->client sync; start/stop tied to client presence
     if (gClipboardEnabled) {
         [[ClipboardManager sharedManager] setOnChange:^(NSString *_Nullable text) {
-            // If we鈥檙e in suppression (coming from client->server), do nothing
+            // If we’re in suppression (coming from client->server), do nothing
             if (gClipboardSuppressSend.load(std::memory_order_relaxed) > 0)
                 return;
             sendClipboardToClients(text);
@@ -4465,13 +4421,13 @@ NS_INLINE int rotationForOrientation(UIInterfaceOrientation o) {
     switch (o) {
     case UIInterfaceOrientationPortrait:
     default:
-        return 0; // 0掳
+        return 0; // 0°
     case UIInterfaceOrientationPortraitUpsideDown:
-        return 2; // 180掳
+        return 2; // 180°
     case UIInterfaceOrientationLandscapeLeft:
-        return 1; // 90掳 CW
+        return 1; // 90° CW
     case UIInterfaceOrientationLandscapeRight:
-        return 3; // 270掳 CW
+        return 3; // 270° CW
     }
 }
 
@@ -4618,8 +4574,8 @@ static rfbBool tvCheckPasswordByList(rfbClientPtr cl, const char *passwd, int le
 
 static void setupRfbClassicAuthentication(void) {
     // Enable classic VNC authentication if environment variables are provided
-    const char *envPwd = getenv("MatisuVNC_PASSWORD");
-    const char *envViewPwd = getenv("MatisuVNC_VIEWONLY_PASSWORD");
+    const char *envPwd = getenv("TROLLVNC_PASSWORD");
+    const char *envViewPwd = getenv("TROLLVNC_VIEWONLY_PASSWORD");
 
     int fullCount = (envPwd && *envPwd) ? 1 : 0;
     int viewCount = (envViewPwd && *envViewPwd) ? 1 : 0;
@@ -4683,7 +4639,7 @@ static void setupRfbHttpServer(void) {
             gScreen->httpDir = strdup(gHttpDirOverride);
             TVLog(@"HTTP server config: port=%d, dir=%s (override), proxyConnect=YES", gHttpPort, gHttpDirOverride);
         } else {
-            // Compute httpDir relative to executable: ../share/MatisuVNC/webclients
+            // Compute httpDir relative to executable: ../share/trollvnc/webclients
             do {
                 NSString *exe = tvExecutablePath();
                 NSString *exeDir = [exe stringByDeletingLastPathComponent];
@@ -4691,7 +4647,7 @@ static void setupRfbHttpServer(void) {
 #ifdef THEBOOTSTRAP
                 webRel = @"./webclients";
 #else
-                webRel = @"../share/MatisuVNC/webclients";
+                webRel = @"../share/trollvnc/webclients";
 #endif
                 NSString *webPath = [[exeDir stringByAppendingPathComponent:webRel] stringByStandardizingPath];
                 const char *fs = [webPath fileSystemRepresentation];
@@ -4712,20 +4668,6 @@ static void setupRfbHttpServer(void) {
     }
     if (gSslKeyPath && *gSslKeyPath) {
         gScreen->sslkeyfile = strdup(gSslKeyPath);
-    }
-}
-
-static void setupMatisuAPIServer(void) {
-    // Start custom API server if port is configured
-    if (gApiPort > 0) {
-        BOOL success = [[MatisuAPI sharedAPI] startServerOnPort:gApiPort];
-        if (success) {
-            TVLog(@"MatisuAPI: Custom API server started on port %d", gApiPort);
-        } else {
-            TVLog(@"MatisuAPI: Failed to start API server on port %d", gApiPort);
-        }
-    } else {
-        TVLog(@"MatisuAPI: Custom API server is disabled (port=0)");
     }
 }
 
@@ -4793,7 +4735,7 @@ static void initializeAndRunRfbServer(void) {
 
     if (isRepeaterEnabled()) {
         static CFTimeInterval sRetryInterval = 0.0;
-        const char *envRetryInterval = getenv("MatisuVNC_REPEATER_RETRY_INTERVAL");
+        const char *envRetryInterval = getenv("TROLLVNC_REPEATER_RETRY_INTERVAL");
         if (envRetryInterval) {
             sRetryInterval = atof(envRetryInterval);
         }
@@ -4972,13 +4914,13 @@ static void cleanupAndExit(int code) {
         gScreen = NULL;
     }
 
-    // There鈥檚 no need to free other resources because we鈥檙e going to exit the process. Yay!
+    // There’s no need to free other resources because we’re going to exit the process. Yay!
     exit(code);
 }
 
 #ifdef THEBOOTSTRAP
-#define SINGLETON_PARENT_NAME "MatisuVNCmanager"
-#define SINGLETON_MARKER_PATH "/var/mobile/Library/Caches/com.Matisu.MatisuVNC.server.pid"
+#define SINGLETON_PARENT_NAME "trollvncmanager"
+#define SINGLETON_MARKER_PATH "/var/mobile/Library/Caches/com.82flex.trollvnc.server.pid"
 
 static void monitorParentProcess(void) {
     if (isatty(STDIN_FILENO)) {
@@ -5118,7 +5060,6 @@ int main(int argc, const char *argv[]) {
         setupRfbCutTextHandlers();
         setupRfbServerSideCursor();
         setupRfbHttpServer();
-        setupMatisuAPIServer();
         setupRfbFileTransferExtension();
 
         prepareBulletinManager();

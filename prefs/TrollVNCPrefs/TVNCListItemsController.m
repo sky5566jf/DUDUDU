@@ -1,1 +1,1 @@
-﻿../../app/MatisuVNC/MatisuVNC/TVNCListItemsController.m
+../../app/TrollVNC/TrollVNC/TVNCListItemsController.m

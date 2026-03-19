@@ -1,1 +1,1 @@
-﻿../../app/MatisuVNC/MatisuVNC/StripedTextTableViewController.h
+../../app/TrollVNC/TrollVNC/StripedTextTableViewController.h

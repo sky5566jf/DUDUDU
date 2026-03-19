@@ -1,14 +1,14 @@
-﻿"/absolute/path" = "/absolute/path";
+"/absolute/path" = "/absolute/path";
 
 "/path/to/cert.pem" = "/path/to/cert.pem";
 
 "/path/to/key.pem" = "/path/to/key.pem";
 
-"0.1鈥?.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery." = "0.1鈥?.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery.";
+"0.1–1.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery." = "0.1–1.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery.";
 
 "8 characters max." = "8 characters max.";
 
-"A repeater ID is required for the 鈥淯ltraVNC Repeater鈥?mode." = "A repeater ID is required for the 鈥淯ltraVNC Repeater鈥?mode.";
+"A repeater ID is required for the “UltraVNC Repeater” mode." = "A repeater ID is required for the “UltraVNC Repeater” mode.";
 
 "Absolute path to static web client files. Leave empty to use built-in assets." = "Absolute path to static web client files. Leave empty to use built-in assets.";
 
@@ -18,7 +18,7 @@
 
 "Alt as Command" = "Alt as Command";
 
-"Alt鈫扖md" = "Alt鈫扖md";
+"Alt→Cmd" = "Alt→Cmd";
 
 "Are you sure you want to respring your device?" = "Are you sure you want to respring your device?";
 
@@ -38,7 +38,7 @@
 
 "Clipboard Sync" = "Clipboard Sync";
 
-"Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005鈥?.030." = "Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005鈥?.030.";
+"Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005–0.030." = "Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005–0.030.";
 
 "Configure basic server options." = "Configure basic server options.";
 
@@ -66,7 +66,7 @@
 
 "Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT.";
 
-"Export Certificate鈥? = "Export Certificate鈥?;
+"Export Certificate…" = "Export Certificate…";
 
 "Frame Rate" = "Frame Rate";
 
@@ -76,7 +76,7 @@
 
 "General" = "General";
 
-"Generate CA鈥? = "Generate CA鈥?;
+"Generate CA…" = "Generate CA…";
 
 "HTTP / WebSockets" = "HTTP / WebSockets";
 
@@ -90,13 +90,13 @@
 
 "Keep-Alive (sec)" = "Keep-Alive (sec)";
 
-"Keeps device awake only while at least one client is connected. 0 disables. Range 15鈥?00 sec; shorter intervals may increase battery usage." = "Keeps device awake only while at least one client is connected. 0 disables. Range 15鈥?00 sec; shorter intervals may increase battery usage.";
+"Keeps device awake only while at least one client is connected. 0 disables. Range 15–300 sec; shorter intervals may increase battery usage." = "Keeps device awake only while at least one client is connected. 0 disables. Range 15–300 sec; shorter intervals may increase battery usage.";
 
 "Log Keyboard Events" = "Log Keyboard Events";
 
 "Logs key events to syslog for debugging. Do not leave enabled in normal use." = "Logs key events to syslog for debugging. Do not leave enabled in normal use.";
 
-"Made with 鈾?by OwnGoal聽Studio" = "Made with 鈾?by OwnGoal聽Studio";
+"Made with ♥ by OwnGoal Studio" = "Made with ♥ by OwnGoal Studio";
 
 "Match iOS natural scroll direction for mouse wheel/trackpad; disable for traditional desktop direction." = "Match iOS natural scroll direction for mouse wheel/trackpad; disable for traditional desktop direction.";
 
@@ -176,7 +176,7 @@
 
 "Standard" = "Standard";
 
-"Standard (Alt鈫扥ption, Super鈫扖ommand)" = "Standard (Alt鈫扥ption, Super鈫扖ommand)";
+"Standard (Alt→Option, Super→Command)" = "Standard (Alt→Option, Super→Command)";
 
 "Standard: Alt as Option, Super as Command." = "Standard: Alt as Option, Super as Command.";
 
@@ -194,7 +194,7 @@
 
 "Tile Size (px)" = "Tile Size (px)";
 
-"MatisuVNC" = "MatisuVNC";
+"TrollVNC" = "TrollVNC";
 
 "UltraVNC Repeater" = "UltraVNC Repeater";
 
@@ -208,7 +208,7 @@
 
 "Viewer" = "Viewer";
 
-"VNC TCP port. Default 5901. Valid range 1024鈥?5535." = "VNC TCP port. Default 5901. Valid range 1024鈥?5535.";
+"VNC TCP port. Default 5901. Valid range 1024–65535." = "VNC TCP port. Default 5901. Valid range 1024–65535.";
 
 "Wheel Step (px)" = "Wheel Step (px)";
 

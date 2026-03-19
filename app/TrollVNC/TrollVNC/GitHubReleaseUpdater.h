@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -79,7 +79,7 @@ typedef void (^GHUpdateCheckCompletion)(GHReleaseInfo *_Nullable latest, NSError
 // Access cached latest release (may be stale). Returns nil if no cache.
 - (nullable GHReleaseInfo *)cachedLatestRelease;
 
-// Returns YES if there鈥檚 a newer version than current, using cache only.
+// Returns YES if there’s a newer version than current, using cache only.
 - (BOOL)hasNewerVersionInCache;
 
 @end

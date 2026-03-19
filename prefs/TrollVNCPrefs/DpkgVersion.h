@@ -1,1 +1,1 @@
-﻿../../app/MatisuVNC/MatisuVNC/DpkgVersion.h
+../../app/TrollVNC/TrollVNC/DpkgVersion.h

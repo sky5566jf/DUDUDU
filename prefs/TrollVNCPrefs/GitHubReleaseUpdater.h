@@ -1,1 +1,1 @@
-﻿../../app/MatisuVNC/MatisuVNC/GitHubReleaseUpdater.h
+../../app/TrollVNC/TrollVNC/GitHubReleaseUpdater.h

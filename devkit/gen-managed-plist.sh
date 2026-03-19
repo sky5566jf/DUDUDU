@@ -1,10 +1,10 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
-# Generate prefs/MatisuVNCPrefs/Resources/Managed.plist from environment variables
+# Generate prefs/TrollVNCPrefs/Resources/Managed.plist from environment variables
 # All inputs are provided via environment variables set by the CI workflow.
 
-PLIST="prefs/MatisuVNCPrefs/Resources/Managed.plist"
+PLIST="prefs/TrollVNCPrefs/Resources/Managed.plist"
 mkdir -p "$(dirname "$PLIST")"
 
 # Header

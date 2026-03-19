@@ -1,219 +1,219 @@
-﻿"/absolute/path" = "/absolute/path";
+"/absolute/path" = "/absolute/path";
 
 "/path/to/cert.pem" = "/path/to/cert.pem";
 
 "/path/to/key.pem" = "/path/to/key.pem";
 
-"0.1鈥?.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery." = "0.1鈥?.0銆傜缉灏忓彲闄嶄綆甯﹀/CPU 鍗犵敤锛?.0 淇濇寔鍍忕礌绾ф竻鏅般€傝鍦ㄧ敾璐ㄣ€佸欢杩熶笌鐢甸噺涔嬮棿鍙栧緱骞宠　銆?;
+"0.1–1.0. Lower scale reduces bandwidth/CPU; 1.0 is pixel-perfect. Balance quality, latency and battery." = "0.1–1.0。缩小可降低带宽/CPU 占用；1.0 保持像素级清晰。请在画质、延迟与电量之间取得平衡。";
 
-"8 characters max." = "鏈€澶?8 涓瓧绗?;
+"8 characters max." = "最多 8 个字符";
 
-"A repeater ID is required for the 鈥淯ltraVNC Repeater鈥?mode." = "鈥淯ltraVNC 涓户鍣ㄢ€?妯″紡闇€瑕佷竴涓腑缁у櫒 ID銆?;
+"A repeater ID is required for the “UltraVNC Repeater” mode." = "“UltraVNC 中继器” 模式需要一个中继器 ID。";
 
-"Absolute path to static web client files. Leave empty to use built-in assets." = "闈欐€?Web 瀹㈡埛绔枃浠剁殑缁濆璺緞銆傜暀绌轰娇鐢ㄥ唴缃祫婧愩€?;
+"Absolute path to static web client files. Leave empty to use built-in assets." = "静态 Web 客户端文件的绝对路径。留空使用内置资源。";
 
-"Advanced wheel options: comma-separated key=value (e.g. step=48,coalesce=0.03,accel=1.0). Leave empty to use defaults." = "楂樼骇婊氳疆閫夐」锛氫互閫楀彿鍒嗛殧鐨?key=value锛堜緥濡?step=48,coalesce=0.03,accel=1.0锛夈€傜暀绌轰娇鐢ㄩ粯璁ゅ€笺€?;
+"Advanced wheel options: comma-separated key=value (e.g. step=48,coalesce=0.03,accel=1.0). Leave empty to use defaults." = "高级滚轮选项：以逗号分隔的 key=value（例如 step=48,coalesce=0.03,accel=1.0）。留空使用默认值。";
 
-"Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "閫氳繃 Bonjour 鍦ㄥ眬鍩熺綉鍙戝竷 VNC 鏈嶅姟锛坃rfb._tcp锛夛紝渚夸簬鍏煎瀹㈡埛绔嚜鍔ㄥ彂鐜帮紱鍚敤鍐呯疆 HTTP 鏃朵篃浼氬彂甯?_http._tcp銆傚叧闂互绂佺敤骞挎挱銆?;
+"Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "通过 Bonjour 在局域网发布 VNC 服务（_rfb._tcp），便于兼容客户端自动发现；启用内置 HTTP 时也会发布 _http._tcp。关闭以禁用广播。";
 
-"Alt as Command" = "Alt 浣滀负 Command";
+"Alt as Command" = "Alt 作为 Command";
 
-"Alt鈫扖md" = "Alt鈫扖md";
+"Alt→Cmd" = "Alt→Cmd";
 
-"Are you sure you want to respring your device?" = "浣犵‘瀹氳娉ㄩ攢璁惧鍚楋紵";
+"Are you sure you want to respring your device?" = "你确定要注销设备吗？";
 
-"Assistive Touch Auto-Activation" = "Assistive Touch 鑷姩婵€娲?;
+"Assistive Touch Auto-Activation" = "Assistive Touch 自动激活";
 
-"Attempts to avoid blocking when swapping buffers; may cause tearing. Can reduce stalls when encoders are slow." = "灏濊瘯鍦ㄤ氦鎹㈢紦鍐叉椂閬垮厤闃诲锛涘彲鑳藉鑷存挄瑁傘€傚湪缂栫爜鍣ㄨ緝鎱㈡椂鍙噺灏戝仠椤裤€?;
+"Attempts to avoid blocking when swapping buffers; may cause tearing. Can reduce stalls when encoders are slow." = "尝试在交换缓冲时避免阻塞；可能导致撕裂。在编码器较慢时可减少停顿。";
 
-"Authentication" = "璁よ瘉";
+"Authentication" = "认证";
 
-"Automatically enables iOS AssistiveTouch while clients are connected to improve input support." = "杩炴帴鏈熼棿鑷姩鍚敤 iOS AssistiveTouch锛屼互鏀瑰杽杈撳叆鏀寔銆?;
+"Automatically enables iOS AssistiveTouch while clients are connected to improve input support." = "连接期间自动启用 iOS AssistiveTouch，以改善输入支持。";
 
-"Balance quality, latency and battery." = "骞宠　鐢昏川銆佸欢杩熶笌鐢甸噺娑堣€椼€?;
+"Balance quality, latency and battery." = "平衡画质、延迟与电量消耗。";
 
-"Cancel" = "鍙栨秷";
+"Cancel" = "取消";
 
-"Choose how remote Alt/Super map to iOS Option/Command." = "閫夋嫨杩滅 Alt/Super 鏄犲皠涓?iOS 鐨?Option/Command銆?;
+"Choose how remote Alt/Super map to iOS Option/Command." = "选择远端 Alt/Super 映射为 iOS 的 Option/Command。";
 
-"Clipboard Sync" = "鍓创鏉垮悓姝?;
+"Clipboard Sync" = "剪贴板同步";
 
-"Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005鈥?.030." = "鍚堝苟鍒锋柊浠ラ檷浣庡紑閿€銆傛暟鍊艰秺澶у欢杩熻秺楂橈紱涓€鑸寖鍥?0.005鈥?.030銆?;
+"Coalesces updates to reduce overhead. Higher values add latency; typical range 0.005–0.030." = "合并刷新以降低开销。数值越大延迟越高；一般范围 0.005–0.030。";
 
-"Configure basic server options." = "閰嶇疆鍩虹鏈嶅姟鍣ㄩ€夐」銆?;
+"Configure basic server options." = "配置基础服务器选项。";
 
-"Configure the built-in web client server." = "閰嶇疆鍐呯疆 Web 瀹㈡埛绔湇鍔″櫒銆?;
+"Configure the built-in web client server." = "配置内置 Web 客户端服务器。";
 
-"Connect/Disconnect Notifications" = "杩炴帴/鏂紑杩炴帴閫氱煡";
+"Connect/Disconnect Notifications" = "连接/断开连接通知";
 
-"Cursor & Orientation" = "鍏夋爣涓庢柟鍚?;
+"Cursor & Orientation" = "光标与方向";
 
-"Defer Window (sec)" = "鍚堝苟绐楀彛锛堢锛?;
+"Defer Window (sec)" = "合并窗口（秒）";
 
-"Desktop Name" = "妗岄潰鍚嶇О";
+"Desktop Name" = "桌面名称";
 
-"Dirty Detection" = "鑴忓尯妫€娴?;
+"Dirty Detection" = "脏区检测";
 
-"Dirty-detection tile size in pixels. Smaller captures finer changes but increases CPU cost." = "鑴忓尯妫€娴嬬殑鐡︾墖澶у皬锛堝儚绱狅級銆傝秺灏忚秺绮剧粏锛屼絾鏇磋€?CPU銆?;
+"Dirty-detection tile size in pixels. Smaller captures finer changes but increases CPU cost." = "脏区检测的瓦片大小（像素）。越小越精细，但更耗 CPU。";
 
-"Display & Performance" = "鏄剧ず涓庢€ц兘";
+"Display & Performance" = "显示与性能";
 
-"e.g. 60 or 30-60 or 30:60:120" = "渚嬪 60銆?0-60 鎴?30:60:120";
+"e.g. 60 or 30-60 or 30:60:120" = "例如 60、30-60 或 30:60:120";
 
-"Enable Auto-Discovery" = "鍚敤鑷姩鍙戠幇";
+"Enable Auto-Discovery" = "启用自动发现";
 
-"Enabled" = "鍚敤";
+"Enabled" = "启用";
 
-"Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "寤虹珛鍒扮洃鍚殑 VNC 鏌ョ湅鍣ㄦ垨涓户鍣ㄧ殑鍙嶅悜杩炴帴锛岃€屾棤闇€鎵撳紑鏈嶅姟鍣ㄧ鍙ｃ€傝繖瀵逛簬缁曡繃闃茬伀澧欐垨 NAT 闈炲父鏈夌敤銆?;
+"Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "建立到监听的 VNC 查看器或中继器的反向连接，而无需打开服务器端口。这对于绕过防火墙或 NAT 非常有用。";
 
-"Export Certificate鈥? = "瀵煎嚭璇佷功鈥?;
+"Export Certificate…" = "导出证书…";
 
-"Frame Rate" = "甯х巼";
+"Frame Rate" = "帧率";
 
-"Full-access Password" = "瀹屽叏璁块棶瀵嗙爜";
+"Full-access Password" = "完全访问密码";
 
-"Fullscreen Threshold (%)" = "鍏ㄥ睆闃堝€硷紙%锛?;
+"Fullscreen Threshold (%)" = "全屏阈值（%）";
 
-"General" = "閫氱敤";
+"General" = "通用";
 
-"Generate CA鈥? = "鐢熸垚鏍硅瘉涔︹€?;
+"Generate CA…" = "生成根证书…";
 
 "HTTP / WebSockets" = "HTTP / WebSockets";
 
-"HTTP Document Root" = "HTTP 鏂囨。鏍圭洰褰?;
+"HTTP Document Root" = "HTTP 文档根目录";
 
-"HTTP Port" = "HTTP 绔彛";
+"HTTP Port" = "HTTP 端口";
 
-"If changed tiles exceed this percent, send a full-screen update. 0 disables dirty detection (always fullscreen)." = "褰撳彉鍖栫摝鐗囨瘮渚嬭秴杩囪鐧惧垎姣旀椂锛屽彂閫佸叏灞忔洿鏂般€傝涓?0 鍏抽棴鑴忓尯妫€娴嬶紙鎬绘槸鍏ㄥ睆锛夈€?;
+"If changed tiles exceed this percent, send a full-screen update. 0 disables dirty detection (always fullscreen)." = "当变化瓦片比例超过该百分比时，发送全屏更新。设为 0 关闭脏区检测（总是全屏）。";
 
-"Ignore all input from clients. Overrides per-client view-only password if set." = "蹇界暐鏉ヨ嚜瀹㈡埛绔殑鎵€鏈夎緭鍏ャ€傚璁剧疆浜嗕粎鏌ョ湅瀵嗙爜锛屽垯姝ゅ紑鍏冲叏灞€瑕嗙洊瀹冦€?;
+"Ignore all input from clients. Overrides per-client view-only password if set." = "忽略来自客户端的所有输入。如设置了仅查看密码，则此开关全局覆盖它。";
 
-"Keep-Alive (sec)" = "淇濇椿锛堢锛?;
+"Keep-Alive (sec)" = "保活（秒）";
 
-"Keeps device awake only while at least one client is connected. 0 disables. Range 15鈥?00 sec; shorter intervals may increase battery usage." = "浠呭湪鑷冲皯鏈変竴涓鎴风杩炴帴鏃朵繚鎸佽澶囧敜閱掋€? 琛ㄧず绂佺敤銆傝寖鍥?15鈥?00 绉掋€?;
+"Keeps device awake only while at least one client is connected. 0 disables. Range 15–300 sec; shorter intervals may increase battery usage." = "仅在至少有一个客户端连接时保持设备唤醒。0 表示禁用。范围 15–300 秒。";
 
-"Log Keyboard Events" = "璁板綍閿洏浜嬩欢";
+"Log Keyboard Events" = "记录键盘事件";
 
-"Logs key events to syslog for debugging. Do not leave enabled in normal use." = "灏嗘寜閿簨浠惰褰曞埌绯荤粺鏃ュ織鐢ㄤ簬璋冭瘯銆傛甯镐娇鐢ㄦ椂涓嶅缓璁暱鏈熷紑鍚€?;
+"Logs key events to syslog for debugging. Do not leave enabled in normal use." = "将按键事件记录到系统日志用于调试。正常使用时不建议长期开启。";
 
-"Made with 鈾?by OwnGoal聽Studio" = "銆屼箤榫欏伐浣滃銆嶅€炬儏鐚埗";
+"Made with ♥ by OwnGoal Studio" = "「乌龙工作室」倾情献制";
 
-"Match iOS natural scroll direction for mouse wheel/trackpad; disable for traditional desktop direction." = "浣块紶鏍囨粴杞?瑙︽帶鏉挎粴鍔ㄦ柟鍚戜笌 iOS 鐨?鈥滆嚜鐒舵粴鍔ㄢ€?淇濇寔涓€鑷达紱鍏抽棴鍒欎娇鐢ㄤ紶缁熸闈㈡柟鍚戙€?;
+"Match iOS natural scroll direction for mouse wheel/trackpad; disable for traditional desktop direction." = "使鼠标滚轮/触控板滚动方向与 iOS 的 “自然滚动” 保持一致；关闭则使用传统桌面方向。";
 
-"Max concurrent client encodes before dropping new frames. 0 = never drop (may increase latency under load)." = "涓㈠純鏂板抚鍓嶅厑璁哥殑鏈€澶у苟鍙戠紪鐮佹暟銆? 琛ㄧず涓嶄涪寮冿紙鍦ㄩ珮璐熻浇涓嬪彲鑳藉鍔犲欢杩燂級銆?;
+"Max concurrent client encodes before dropping new frames. 0 = never drop (may increase latency under load)." = "丢弃新帧前允许的最大并发编码数。0 表示不丢弃（在高负载下可能增加延迟）。";
 
-"Max In-flight" = "鏈€澶у苟鍙戝抚";
+"Max In-flight" = "最大并发帧";
 
-"Max Rects" = "鏈€澶х煩褰㈡暟";
+"Max Rects" = "最大矩形数";
 
-"Mode" = "妯″紡";
+"Mode" = "模式";
 
-"Modifier Mapping" = "淇グ閿槧灏?;
+"Modifier Mapping" = "修饰键映射";
 
-"Name shown to VNC clients." = "鍦?VNC 瀹㈡埛绔腑鏄剧ず鐨勫悕绉般€?;
+"Name shown to VNC clients." = "在 VNC 客户端中显示的名称。";
 
-"Natural Scroll Direction" = "鑷劧婊氬姩鏂瑰悜";
+"Natural Scroll Direction" = "自然滚动方向";
 
-"Non-blocking Swap" = "闈為樆濉炰氦鎹?;
+"Non-blocking Swap" = "非阻塞交换";
 
-"None" = "鏃?;
+"None" = "无";
 
-"Output Scale" = "杈撳嚭缂╂斁";
+"Output Scale" = "输出缩放";
 
-"PEM-encoded private key path matching the certificate." = "涓庤瘉涔﹀尮閰嶇殑 PEM 缂栫爜绉侀挜璺緞銆?;
+"PEM-encoded private key path matching the certificate." = "与证书匹配的 PEM 编码私钥路径。";
 
-"PEM-encoded X.509 certificate path for TLS. Used by HTTP/WebSocket if both cert and key are set." = "鐢ㄤ簬 TLS 鐨?PEM 缂栫爜 X.509 璇佷功璺緞銆傝嫢鍚屾椂璁剧疆璇佷功涓庣閽ワ紝灏嗕娇鐢ㄥ畨鍏?WebSockets銆?;
+"PEM-encoded X.509 certificate path for TLS. Used by HTTP/WebSocket if both cert and key are set." = "用于 TLS 的 PEM 编码 X.509 证书路径。若同时设置证书与私钥，将使用安全 WebSockets。";
 
-"Pixels per wheel tick sent to clients. Higher = faster scroll." = "姣忔婊氳疆浜嬩欢鍚戝鎴风鍙戦€佺殑鍍忕礌鏁般€傛暟鍊艰秺澶ф粴鍔ㄨ秺蹇€?;
+"Pixels per wheel tick sent to clients. Higher = faster scroll." = "每次滚轮事件向客户端发送的像素数。数值越大滚动越快。";
 
-"Please support our paid works, thank you!" = "璇锋敮鎸佹垜浠殑鍏朵粬浠樿垂浣滃搧锛岃阿璋紒";
+"Please support our paid works, thank you!" = "请支持我们的其他付费作品，谢谢！";
 
-"Render a cursor on the server for clients that lack a hardware cursor. May slightly reduce performance." = "涓虹己灏戠‖浠跺厜鏍囩殑瀹㈡埛绔湪鏈嶅姟鍣ㄧ缁樺埗鍏夋爣銆傚彲鑳界暐寰奖鍝嶆€ц兘銆?;
+"Render a cursor on the server for clients that lack a hardware cursor. May slightly reduce performance." = "为缺少硬件光标的客户端在服务器端绘制光标。可能略微影响性能。";
 
-"Repeater" = "涓户鍣?;
+"Repeater" = "中继器";
 
-"Repeater ID" = "涓户鍣?ID";
+"Repeater ID" = "中继器 ID";
 
-"Reset to Defaults" = "杩樺師涓洪粯璁ゅ€?;
+"Reset to Defaults" = "还原为默认值";
 
-"Respring" = "娉ㄩ攢";
+"Respring" = "注销";
 
-"Respring to Apply Changes" = "娉ㄩ攢浠ュ簲鐢ㄦ洿鏀?;
+"Respring to Apply Changes" = "注销以应用更改";
 
-"Reverse Connection" = "鍙嶅悜杩炴帴";
+"Reverse Connection" = "反向连接";
 
-"Rotate the shared display to follow device orientation changes." = "璺熼殢璁惧鏂瑰悜鍙樺寲鏃嬭浆鍏变韩鐢婚潰銆?;
+"Rotate the shared display to follow device orientation changes." = "跟随设备方向变化旋转共享画面。";
 
-"Scroll & Input" = "婊氬姩涓庤緭鍏?;
+"Scroll & Input" = "滚动与输入";
 
-"Serve the built-in web VNC client on this port. 0 disables." = "鍦ㄨ绔彛鎻愪緵鍐呯疆 noVNC 瀹㈡埛绔€傝涓?0 鍏抽棴銆?;
+"Serve the built-in web VNC client on this port. 0 disables." = "在该端口提供内置 noVNC 客户端。设为 0 关闭。";
 
-"Server" = "鏈嶅姟鍣?;
+"Server" = "服务器";
 
-"Server-Side Cursor" = "鏈嶅姟鍣ㄧ鍏夋爣";
+"Server-Side Cursor" = "服务器端光标";
 
-"server:port" = "鏈嶅姟鍣?绔彛";
+"server:port" = "服务器:端口";
 
-"Set a password for view-only access (no input)." = "璁剧疆浠呮煡鐪嬭闂殑瀵嗙爜锛堟棤鎺у埗鏉冮檺锛夈€?;
+"Set a password for view-only access (no input)." = "设置仅查看访问的密码（无控制权限）。";
 
-"Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters." = "璁剧疆浠呮煡鐪嬭闂殑瀵嗙爜锛堟棤鎺у埗鏉冮檺锛夈€傜粡鍏?VNC 璁よ瘉鏂瑰紡浠呬娇鐢ㄥ墠 8 涓瓧绗︺€?;
+"Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters." = "设置仅查看访问的密码（无控制权限）。经典 VNC 认证方式仅使用前 8 个字符。";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended)." = "璁剧疆鍏锋湁瀹屽叏鎺у埗鏉冮檺鐨?VNC 瀵嗙爜銆傜暀绌哄皢鍏抽棴璁よ瘉锛堜笉鎺ㄨ崘锛夈€?;
+"Set a VNC password for full control. Leaving empty disables authentication (not recommended)." = "设置具有完全控制权限的 VNC 密码。留空将关闭认证（不推荐）。";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters." = "璁剧疆鍏锋湁瀹屽叏鎺у埗鏉冮檺鐨?VNC 瀵嗙爜銆傜暀绌哄皢鍏抽棴璁よ瘉锛堜笉鎺ㄨ崘锛夈€傜粡鍏?VNC 璁よ瘉鏂瑰紡浠呬娇鐢ㄥ墠 8 涓瓧绗︺€?;
+"Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters." = "设置具有完全控制权限的 VNC 密码。留空将关闭认证（不推荐）。经典 VNC 认证方式仅使用前 8 个字符。";
 
-"Show notifications when clients connect or disconnect." = "褰撳鎴风杩炴帴鎴栨柇寮€杩炴帴鏃舵樉绀洪€氱煡銆?;
+"Show notifications when clients connect or disconnect." = "当客户端连接或断开连接时显示通知。";
 
-"Shown to VNC clients" = "鍦ㄥ鎴风鏄剧ず";
+"Shown to VNC clients" = "在客户端显示";
 
-"Silence Notifications" = "闈欓粯閫氱煡";
+"Silence Notifications" = "静默通知";
 
-"Single fps (e.g. 60), range min-max (e.g. 30-60), or full spec min:pref:max (e.g. 30:60:120). iOS 15+ uses range; iOS 14 uses preferred/max." = "鍗曚竴甯х巼锛堝 60锛夛紝鑼冨洿 min-max锛堝 30-60锛夛紝鎴栧畬鏁磋鏍?min:pref:max锛堝 30:60:120锛夈€俰OS 15+ 浣跨敤鑼冨洿锛沬OS 14 浣跨敤鍋忓ソ/鏈€澶с€?;
+"Single fps (e.g. 60), range min-max (e.g. 30-60), or full spec min:pref:max (e.g. 30:60:120). iOS 15+ uses range; iOS 14 uses preferred/max." = "单一帧率（如 60），范围 min-max（如 30-60），或完整规格 min:pref:max（如 30:60:120）。iOS 15+ 使用范围；iOS 14 使用偏好/最大。";
 
-"SSL Certificate File" = "SSL 璇佷功鏂囦欢";
+"SSL Certificate File" = "SSL 证书文件";
 
-"SSL Private Key File" = "SSL 绉侀挜鏂囦欢";
+"SSL Private Key File" = "SSL 私钥文件";
 
-"Standard" = "鏍囧噯";
+"Standard" = "标准";
 
-"Standard (Alt鈫扥ption, Super鈫扖ommand)" = "鏍囧噯锛圓lt鈫扥ption锛孲uper鈫扖ommand锛?;
+"Standard (Alt→Option, Super→Command)" = "标准（Alt→Option，Super→Command）";
 
-"Standard: Alt as Option, Super as Command." = "鏍囧噯锛欰lt 浣滀负 Option锛孲uper 浣滀负 Command銆?;
+"Standard: Alt as Option, Super as Command." = "标准：Alt 作为 Option，Super 作为 Command。";
 
-"Standard: Alt as Option, Super as Command. On macOS clients, Alt as Command (altcmd) is recommended." = "鏍囧噯锛欰lt 瀵瑰簲 Option锛孲uper 瀵瑰簲 Command銆俶acOS 瀹㈡埛绔缓璁€夋嫨 Alt 浣滀负 Command锛坅ltcmd锛夈€?;
+"Standard: Alt as Option, Super as Command. On macOS clients, Alt as Command (altcmd) is recommended." = "标准：Alt 对应 Option，Super 对应 Command。macOS 客户端建议选择 Alt 作为 Command（altcmd）。";
 
 "step=48,coalesce=0.03,..." = "step=48,coalesce=0.03,...";
 
-"Sync Interface Orientation" = "鍚屾鐣岄潰鏂瑰悜";
+"Sync Interface Orientation" = "同步界面方向";
 
-"Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access." = "杩炴帴鏈熼棿涓?VNC 瀹㈡埛绔悓姝ユ枃鏈壀璐存澘銆傚涓嶅笇鏈涜繙绋嬭闂壀璐存澘锛岃鍏抽棴銆?;
+"Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access." = "连接期间与 VNC 客户端同步文本剪贴板。如不希望远程访问剪贴板，请关闭。";
 
-"TCP Port" = "TCP 绔彛";
+"TCP Port" = "TCP 端口";
 
-"This project is licensed under GPLv2. Author: Lessica." = "鏈」鐩娇鐢?GPLv2 璁稿彲璇佸彂甯冦€備綔鑰咃細Lessica銆?;
+"This project is licensed under GPLv2. Author: Lessica." = "本项目使用 GPLv2 许可证发布。作者：Lessica。";
 
-"Tile Size (px)" = "鐡︾墖澶у皬锛堝儚绱狅級";
+"Tile Size (px)" = "瓦片大小（像素）";
 
-"To unblock previously blocked clients, restart the VNC service. The temporary block list is cleared on service restart." = "瑕佽В灏佷箣鍓嶈灏佺鐨勫鎴风锛岃閲嶅惎 VNC 鏈嶅姟銆備复鏃跺皝绂佸垪琛ㄤ細鍦ㄦ湇鍔￠噸鍚椂娓呯┖銆?;
+"To unblock previously blocked clients, restart the VNC service. The temporary block list is cleared on service restart." = "要解封之前被封禁的客户端，请重启 VNC 服务。临时封禁列表会在服务重启时清空。";
 
-"MatisuVNC" = "MatisuVNC";
+"TrollVNC" = "TrollVNC";
 
-"UltraVNC Repeater" = "UltraVNC 涓户鍣?;
+"UltraVNC Repeater" = "UltraVNC 中继器";
 
-"View Logs" = "鏌ョ湅鏃ュ織";
+"View Logs" = "查看日志";
 
-"View Source Code" = "鏌ョ湅婧愪唬鐮?;
+"View Source Code" = "查看源代码";
 
-"View-only" = "浠呮煡鐪?;
+"View-only" = "仅查看";
 
-"View-only Password" = "浠呮煡鐪嬪瘑鐮?;
+"View-only Password" = "仅查看密码";
 
-"Viewer" = "鏌ョ湅鍣?;
+"Viewer" = "查看器";
 
-"VNC TCP port. Default 5901. Valid range 1024鈥?5535." = "VNC TCP 绔彛銆傞粯璁?5901銆傛湁鏁堣寖鍥?1024鈥?5535銆?;
+"VNC TCP port. Default 5901. Valid range 1024–65535." = "VNC TCP 端口。默认 5901。有效范围 1024–65535。";
 
-"Wheel Step (px)" = "婊氳疆姝ヨ繘锛堝儚绱狅級";
+"Wheel Step (px)" = "滚轮步进（像素）";
 
-"Wheel Tuning" = "婊氳疆璋冩牎";
+"Wheel Tuning" = "滚轮调校";
 
-"When dirty rectangles exceed this count, collapse to a bounding box. Too high increases protocol overhead." = "褰撹剰鐭╁舰鏁伴噺瓒呰繃姝ゅ€兼椂锛屽悎骞朵负澶栨帴鐭╁舰銆傝繃楂樹細澧炲姞鍗忚寮€閿€銆?;
+"When dirty rectangles exceed this count, collapse to a bounding box. Too high increases protocol overhead." = "当脏矩形数量超过此值时，合并为外接矩形。过高会增加协议开销。";

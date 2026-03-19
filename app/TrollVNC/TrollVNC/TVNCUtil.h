@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -18,7 +18,7 @@
 #import <Foundation/Foundation.h>
 #import <sys/sysctl.h>
 
-#define TVNC_NOTIFY_PREFS_CHANGED "com.Matisu.MatisuVNC.prefs-changed"
+#define TVNC_NOTIFY_PREFS_CHANGED "com.82flex.trollvnc.prefs-changed"
 
 // Minimal process enumeration to restart VNC service
 NS_INLINE void TVNCEnumerateProcesses(void (^enumerator)(pid_t pid, NSString *executablePath, BOOL *stop)) {
@@ -77,9 +77,9 @@ NS_INLINE void TVNCEnumerateProcesses(void (^enumerator)(pid_t pid, NSString *ex
 }
 
 NS_INLINE void TVNCRestartVNCService(void) {
-    // Try to terminate MatisuVNCserver; launchd should respawn it if configured.
+    // Try to terminate trollvncserver; launchd should respawn it if configured.
     TVNCEnumerateProcesses(^(pid_t pid, NSString *executablePath, BOOL *stop) {
-        if ([executablePath.lastPathComponent isEqualToString:@"MatisuVNCserver"]) {
+        if ([executablePath.lastPathComponent isEqualToString:@"trollvncserver"]) {
             int rc = kill(pid, SIGTERM);
             if (rc == 0) {
 #ifdef THEBOOTSTRAP

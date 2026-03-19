@@ -1,19 +1,19 @@
-﻿/* No comment provided by engineer. */
+/* No comment provided by engineer. */
 "%@ rows not loaded" = "%@ rows not loaded";
 
 /* No comment provided by engineer. */
 "A CA private key already exists. Generating new keys will overwrite the existing ones. Are you sure you want to continue?" = "A CA private key already exists. Generating new keys will overwrite the existing ones. Are you sure you want to continue?";
 
 /* No comment provided by engineer. */
-"A new version %@ is available! You鈥檙e currently using v%@." = "A new version %1$@ is available! You鈥檙e currently using v%2$@.";
+"A new version %@ is available! You’re currently using v%@." = "A new version %1$@ is available! You’re currently using v%2$@.";
 
 /* No comment provided by engineer. */
-"A new version %@ is available! You鈥檙e currently using v%@. Download the latest version from Havoc Marketplace." = "A new version %1$@ is available! You鈥檙e currently using v%2$@. Download the latest version from Havoc Marketplace.";
+"A new version %@ is available! You’re currently using v%@. Download the latest version from Havoc Marketplace." = "A new version %1$@ is available! You’re currently using v%2$@. Download the latest version from Havoc Marketplace.";
 
-/* MatisuVNCserver */
+/* trollvncserver */
 "A VNC client connected from %@." = "A VNC client connected from %@.";
 
-/* MatisuVNCserver */
+/* trollvncserver */
 "A VNC client disconnected from %@." = "A VNC client disconnected from %@.";
 
 /* No comment provided by engineer. */
@@ -38,7 +38,7 @@
 "Cancel" = "Cancel";
 
 /* No comment provided by engineer. */
-"Cannot parse text with UTF-8 encoding: 鈥?@鈥?" = "Cannot parse text with UTF-8 encoding: 鈥?@鈥?";
+"Cannot parse text with UTF-8 encoding: “%@”." = "Cannot parse text with UTF-8 encoding: “%@”.";
 
 /* No comment provided by engineer. */
 "Certificate Not Found" = "Certificate Not Found";
@@ -74,10 +74,10 @@
 "Disconnect Client" = "Disconnect Client";
 
 /* No comment provided by engineer. */
-"Do you want to clear this log file 鈥?@鈥?" = "Do you want to clear this log file 鈥?@鈥?";
+"Do you want to clear this log file “%@”?" = "Do you want to clear this log file “%@”?";
 
 /* No comment provided by engineer. */
-"Export Certificate鈥? = "Export Certificate鈥?;
+"Export Certificate…" = "Export Certificate…";
 
 /* No comment provided by engineer. */
 "Failed to generate self-signed CA certificate." = "Failed to generate self-signed CA certificate.";
@@ -143,19 +143,19 @@
 "TCP/HTTP ports must be 1024..65535 (HTTP can be 0 to disable). The server will fallback to defaults." = "TCP/HTTP ports must be 1024..65535 (HTTP can be 0 to disable). The server will fallback to defaults.";
 
 /* No comment provided by engineer. */
-"The content of text file 鈥?@鈥?is empty." = "The content of text file 鈥?@鈥?is empty.";
+"The content of text file “%@” is empty." = "The content of text file “%@” is empty.";
 
-/* MatisuVNCserver */
+/* trollvncserver */
 "There are %d active VNC clients." = "There are %d active VNC clients.";
 
-/* MatisuVNCserver */
+/* trollvncserver */
 "There is %d active VNC client." = "There is %d active VNC client.";
 
 /* No comment provided by engineer. */
-"MatisuVNC" = "MatisuVNC";
+"TrollVNC" = "TrollVNC";
 
 /* No comment provided by engineer. */
-"MatisuVNC (%@) v%@" = "MatisuVNC (%@) v%@";
+"TrollVNC (%@) v%@" = "TrollVNC (%@) v%@";
 
 /* No comment provided by engineer. */
 "unavailable" = "unavailable";

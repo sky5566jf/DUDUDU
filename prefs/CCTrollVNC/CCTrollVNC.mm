@@ -1,6 +1,6 @@
-﻿/*
- This file is part of MatisuVNC
- Copyright (c) 2025 Matisu <Matisu@gmail.com> and contributors
+/*
+ This file is part of TrollVNC
+ Copyright (c) 2025 82Flex <82flex@gmail.com> and contributors
 
  This program is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License version 2
@@ -15,19 +15,19 @@
  along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 
-#import "CCMatisuVNC.h"
+#import "CCTrollVNC.h"
 #import "TVNCUtil.h"
 
 #import <notify.h>
 
-@implementation CCMatisuVNC {
+@implementation CCTrollVNC {
     NSUserDefaults *_defaults;
 }
 
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.Matisu.MatisuVNC"];
+        _defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
         [_defaults registerDefaults:@{
             @"Enabled" : @YES,
         }];

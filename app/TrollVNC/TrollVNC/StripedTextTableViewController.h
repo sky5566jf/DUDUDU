@@ -1,9 +1,9 @@
-﻿//
+//
 //  StripedTextTableViewController.h
 //  CommonViewControllers
 //
-//  Created by Lessica <Matisu@gmail.com> on 2022/1/20.
-//  Copyright 漏 2022 Zheng Wu. All rights reserved.
+//  Created by Lessica <82flex@gmail.com> on 2022/1/20.
+//  Copyright © 2022 Zheng Wu. All rights reserved.
 //
 
 #import <UIKit/UIKit.h>

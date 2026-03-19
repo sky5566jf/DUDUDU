@@ -1,1 +1,1 @@
-﻿../../app/MatisuVNC/MatisuVNC/TVNCSliderCell.h
+../../app/TrollVNC/TrollVNC/TVNCSliderCell.h
