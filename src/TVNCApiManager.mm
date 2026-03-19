@@ -49,6 +49,7 @@ size_t IOSurfaceGetAllocSize(IOSurfaceRef surface);
 #import "ScreenCapturer.h"
 #import "IOSurfaceSPI.h"
 #import "Logging.h"
+#import "STHIDEventGenerator.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -326,73 +327,139 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return result;
     }
     
-    // 查找当前第一响应者
+    // 方法1: 尝试直接操作第一响应者
     UIView *firstResponder = [self findFirstResponder];
-    if (!firstResponder) {
-        TVLog(@"No first responder found for text input");
+    if (firstResponder) {
+        TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
+        
+        // 尝试直接插入文本
+        if ([firstResponder isKindOfClass:[UITextField class]]) {
+            UITextField *textField = (UITextField *)firstResponder;
+            UITextRange *selectedTextRange = textField.selectedTextRange;
+            if (!selectedTextRange) {
+                selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument 
+                                                          toPosition:textField.endOfDocument];
+            }
+            [textField replaceRange:selectedTextRange withText:text];
+            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+            return YES;
+            
+        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+            UITextView *textView = (UITextView *)firstResponder;
+            NSRange selectedRange = textView.selectedRange;
+            NSMutableString *newText = [textView.text mutableCopy] ?: [NSMutableString string];
+            [newText replaceCharactersInRange:selectedRange withString:text];
+            textView.text = newText;
+            textView.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
+            if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+                [textView.delegate textViewDidChange:textView];
+            }
+            return YES;
+            
+        } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+            id<UITextInput> textInput = (id<UITextInput>)firstResponder;
+            UITextRange *selectedRange = textInput.selectedTextRange;
+            if (!selectedRange) {
+                selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument 
+                                                      toPosition:textInput.endOfDocument];
+            }
+            [textInput replaceRange:selectedRange withText:text];
+            return YES;
+        }
+    }
+    
+    // 方法2: 使用 HID 事件直接发送键盘输入
+    TVLog(@"No accessible first responder, using HID event method");
+    return [self inputTextViaHID:text];
+}
+
+// 通过 HID 事件输入文本（使用 STHIDEventGenerator）
+- (BOOL)inputTextViaHID:(NSString *)text {
+    if (!text || text.length == 0) {
         return NO;
     }
     
-    TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
-    
-    // 处理不同类型的输入框
-    if ([firstResponder isKindOfClass:[UITextField class]]) {
-        UITextField *textField = (UITextField *)firstResponder;
-        
-        // 使用 UITextInput 协议的方法获取/设置选中范围
-        UITextRange *selectedTextRange = textField.selectedTextRange;
-        if (!selectedTextRange) {
-            selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument 
-                                                      toPosition:textField.endOfDocument];
+    // 检查是否包含非 ASCII 字符
+    BOOL hasNonASCII = NO;
+    for (NSUInteger i = 0; i < text.length; i++) {
+        unichar c = [text characterAtIndex:i];
+        if (c > 127) {
+            hasNonASCII = YES;
+            break;
         }
-        
-        // 替换选中的文本
-        [textField replaceRange:selectedTextRange withText:text];
-        
-        // 发送编辑事件
-        [textField sendActionsForControlEvents:UIControlEventEditingChanged];
-        
-        return YES;
-        
-    } else if ([firstResponder isKindOfClass:[UITextView class]]) {
-        UITextView *textView = (UITextView *)firstResponder;
-        NSRange selectedRange = textView.selectedRange;
-        
-        // 在光标位置插入文本
-        NSMutableString *newText = [textView.text mutableCopy] ?: [NSMutableString string];
-        [newText replaceCharactersInRange:selectedRange withString:text];
-        textView.text = newText;
-        
-        // 更新光标位置
-        textView.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
-        
-        // 通知代理
-        if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
-            [textView.delegate textViewDidChange:textView];
-        }
-        
-        return YES;
-        
-    } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
-        // 通用 UITextInput 协议支持
-        id<UITextInput> textInput = (id<UITextInput>)firstResponder;
-        
-        // 获取当前选中的文本范围
-        UITextRange *selectedRange = textInput.selectedTextRange;
-        if (!selectedRange) {
-            // 如果没有选中范围，使用文档末尾
-            selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument 
-                                                  toPosition:textInput.endOfDocument];
-        }
-        
-        // 替换选中的文本
-        [textInput replaceRange:selectedRange withText:text];
-        
-        return YES;
     }
     
-    TVLog(@"First responder does not support text input: %@", NSStringFromClass([firstResponder class]));
-    return NO;
+    // 如果包含中文等非 ASCII 字符，使用剪贴板方式
+    if (hasNonASCII) {
+        TVLog(@"Text contains non-ASCII characters, using clipboard method");
+        return [self inputTextViaClipboard:text];
+    }
+    
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 逐个字符发送
+        for (NSUInteger i = 0; i < text.length; i++) {
+            NSString *character = [text substringWithRange:NSMakeRange(i, 1)];
+            [generator keyPress:character];
+        }
+        
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"HID input failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 通过剪贴板输入文本
+- (BOOL)inputTextViaClipboard:(NSString *)text {
+    // 保存原始剪贴板内容
+    NSString *originalText = [UIPasteboard generalPasteboard].string;
+    
+    // 设置要输入的文本到剪贴板
+    [UIPasteboard generalPasteboard].string = text;
+    
+    // 使用 HID 事件发送 Command+V 粘贴
+    BOOL success = [self sendPasteKeyCombination];
+    
+    // 延迟恢复原始剪贴板内容
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (originalText) {
+            [UIPasteboard generalPasteboard].string = originalText;
+        }
+    });
+    
+    return success;
+}
+
+// 发送粘贴组合键 Command+V
+- (BOOL)sendPasteKeyCombination {
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 发送 Command 键按下
+        [generator otherConsumerUsageDown:kHIDUsage_Csmr_ACPaste];
+        
+        struct timespec pressDelay = {0, (long)(0.05 * 1e9)};
+        nanosleep(&pressDelay, 0);
+        
+        // 发送 Command 键释放
+        [generator otherConsumerUsageUp:kHIDUsage_Csmr_ACPaste];
+        
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Paste key combination failed: %@", exception.reason);
+        
+        // 备用方案：尝试发送 v 键
+        @try {
+            STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+            [generator keyPress:@"v"];
+            return YES;
+        } @catch (NSException *e) {
+            TVLog(@"Fallback paste failed: %@", e.reason);
+            return NO;
+        }
+    }
 }
 
 - (BOOL)sendKeyCode:(NSInteger)keyCode {

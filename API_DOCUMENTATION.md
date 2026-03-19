@@ -270,6 +270,11 @@ print(response.json())
 
 将文本直接输入到当前获得焦点的输入框（如 UITextField、UITextView 等）。
 
+**⚠️ 重要提示：**
+- **TrollStore 安装的应用**才能使用此功能
+- 需要先在手机上点击输入框，确保键盘弹出
+- 中文输入使用剪贴板方式，英文/数字使用 HID 键盘事件
+
 **使用步骤：**
 1. 在手机上打开任意 App 并点击输入框（确保键盘弹出）
 2. 调用此 API 发送文本
@@ -303,7 +308,13 @@ Content-Type: text/plain; charset=utf-8
 
 **示例:**
 ```bash
-# 输入文本到当前输入框
+# 输入英文/数字（使用 HID 键盘事件）
+curl -X POST \
+  "http://192.168.1.100:8080/api/input" \
+  -H "Content-Type: text/plain; charset=utf-8" \
+  -d "Hello123"
+
+# 输入中文（使用剪贴板+粘贴）
 curl -X POST \
   "http://192.168.1.100:8080/api/input" \
   -H "Content-Type: text/plain; charset=utf-8" \
@@ -331,6 +342,10 @@ response = requests.post(
 )
 print(response.json())
 ```
+
+**工作原理:**
+- **ASCII 字符**（英文、数字、符号）：使用 HID 键盘事件逐个发送
+- **非 ASCII 字符**（中文、日文等）：使用剪贴板+粘贴方式
 
 **支持的输入框类型:**
 - UITextField（单行输入框）
