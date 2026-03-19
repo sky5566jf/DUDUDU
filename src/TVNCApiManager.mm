@@ -232,7 +232,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     
     TVLog(@"WriteFile: target path: %@, directory: %@", filePath, directory);
     
-    // 递归创建目录
+    // 递归创建目录（使用 0777 权限，确保可写）
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof(tmp), "%s", dirPath);
     size_t len = strlen(tmp);
@@ -243,15 +243,21 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     for (char *p = tmp + 1; *p; p++) {
         if (*p == '/') {
             *p = 0;
-            int ret = mkdir(tmp, 0755);
-            if (ret != 0 && errno != EEXIST) {
+            int ret = mkdir(tmp, 0777);
+            if (ret == 0) {
+                // 新创建的目录，尝试设置权限
+                chmod(tmp, 0777);
+            } else if (errno != EEXIST) {
                 TVLog(@"WriteFile: mkdir failed for '%s': %s", tmp, strerror(errno));
             }
             *p = '/';
         }
     }
-    int finalRet = mkdir(tmp, 0755);
-    if (finalRet != 0 && errno != EEXIST) {
+    int finalRet = mkdir(tmp, 0777);
+    if (finalRet == 0) {
+        // 新创建的目录，设置权限
+        chmod(tmp, 0777);
+    } else if (errno != EEXIST) {
         TVLog(@"WriteFile: final mkdir failed for '%s': %s", tmp, strerror(errno));
     }
     
@@ -282,16 +288,16 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return NO;
     }
     
+    // 尝试设置目录权限为可写（针对 Media 目录的特殊处理）
+    chmod(dirPath, 0777);
+    
     // 检查目录是否可写
     if (access(dirPath, W_OK) != 0) {
-        TVLog(@"WriteFile: directory not writable '%s': %s", dirPath, strerror(errno));
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:1009
-                                    userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Directory not writable '%@': %s", directory, strerror(errno)]}];
-        }
-        return NO;
+        TVLog(@"WriteFile: directory not writable '%s', trying alternative method...", dirPath);
+        
+        // 尝试使用 root 权限创建文件（TrollStore 应用通常有 root 权限）
+        // 跳过 access 检查，直接尝试写入
+        TVLog(@"WriteFile: will attempt to write anyway (TrollStore may have elevated permissions)");
     }
     
     // 打开文件

@@ -704,15 +704,19 @@
     BOOL dirExisted = (stat(dirPath, &st) == 0);
     
     if (!dirExisted) {
-        // 递归创建目录
+        // 递归创建目录（使用 0777 权限）
         for (char *p = tmp + 1; *p; p++) {
             if (*p == '/') {
                 *p = 0;
-                mkdir(tmp, 0755);
+                if (mkdir(tmp, 0777) == 0) {
+                    chmod(tmp, 0777);
+                }
                 *p = '/';
             }
         }
-        mkdir(tmp, 0755);
+        if (mkdir(tmp, 0777) == 0) {
+            chmod(tmp, 0777);
+        }
         
         // 验证目录是否创建成功
         if (stat(dirPath, &st) != 0) {
@@ -960,6 +964,7 @@
     NSString *requestStr = [[NSString alloc] initWithData:requestData encoding:NSUTF8StringEncoding];
     NSArray *lines = [requestStr componentsSeparatedByString:@"\r\n"];
     if (lines.count == 0) {
+        TVLog(@"HTTP Server: Empty request");
         close(_clientSocket);
         return;
     }
@@ -967,12 +972,15 @@
     // 解析请求行
     NSArray *requestParts = [lines[0] componentsSeparatedByString:@" "];
     if (requestParts.count < 2) {
+        TVLog(@"HTTP Server: Invalid request line: %@", lines[0]);
         close(_clientSocket);
         return;
     }
     
     NSString *method = requestParts[0];
     NSString *fullPath = requestParts[1];
+    
+    TVLog(@"HTTP Server: %@ %@ (received %ld bytes)", method, fullPath, (long)totalReceived);
     
     // 解析路径和查询参数
     NSString *path = fullPath;
