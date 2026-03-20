@@ -909,16 +909,19 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 
 // 获取 TrollStore 帮助程序路径
 - (NSString *)trollStoreHelperPath {
-    // 检查常见路径
+    // 检查常见路径（按优先级排序）
     NSArray *possiblePaths = @[
         @"/var/containers/Bundle/Application/com.opa334.TrollStore/trollstorehelper",
         @"/var/mobile/trollstorehelper",
         @"/usr/bin/trollstorehelper",
-        @"/usr/local/bin/trollstorehelper"
+        @"/usr/local/bin/trollstorehelper",
+        @"/var/jb/usr/bin/trollstorehelper",
+        @"/var/jb/bin/trollstorehelper"
     ];
     
     for (NSString *path in possiblePaths) {
         if (access([path UTF8String], X_OK) == 0) {
+            TVLog(@"Found TrollStore helper at: %@", path);
             return path;
         }
     }
@@ -929,34 +932,53 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return tsPath;
     }
     
+    TVLog(@"TrollStore helper not found in any known location");
     return nil;
 }
 
 // 动态查找 TrollStore helper
 - (NSString *)findTrollStoreHelper {
-    // 搜索 /var/containers/Bundle/Application 下的 TrollStore
-    NSString *bundlePath = @"/var/containers/Bundle/Application";
     NSFileManager *fm = [NSFileManager defaultManager];
     
-    NSError *error = nil;
-    NSArray *contents = [fm contentsOfDirectoryAtPath:bundlePath error:&error];
+    // 搜索路径列表
+    NSArray *searchPaths = @[
+        @"/var/containers/Bundle/Application",
+        @"/var/mobile/Containers/Bundle/Application"
+    ];
     
-    for (NSString *item in contents) {
-        NSString *fullPath = [bundlePath stringByAppendingPathComponent:item];
-        NSString *tsHelper = [fullPath stringByAppendingPathComponent:@"trollstorehelper"];
-        
-        if (access([tsHelper UTF8String], X_OK) == 0) {
-            return tsHelper;
+    for (NSString *bundlePath in searchPaths) {
+        if (![fm fileExistsAtPath:bundlePath]) {
+            continue;
         }
         
-        // 检查子目录
-        NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
-        for (NSString *subItem in subContents) {
-            if ([subItem hasSuffix:@".app"]) {
-                NSString *appPath = [fullPath stringByAppendingPathComponent:subItem];
-                NSString *helperPath = [appPath stringByAppendingPathComponent:@"trollstorehelper"];
-                if (access([helperPath UTF8String], X_OK) == 0) {
-                    return helperPath;
+        NSError *error = nil;
+        NSArray *contents = [fm contentsOfDirectoryAtPath:bundlePath error:&error];
+        
+        for (NSString *item in contents) {
+            NSString *fullPath = [bundlePath stringByAppendingPathComponent:item];
+            
+            // 检查是否是 TrollStore 相关目录
+            if ([item rangeOfString:@"TrollStore" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                [item rangeOfString:@"opa334" options:NSCaseInsensitiveSearch].location != NSNotFound) {
+                
+                // 直接检查目录下的 trollstorehelper
+                NSString *tsHelper = [fullPath stringByAppendingPathComponent:@"trollstorehelper"];
+                if (access([tsHelper UTF8String], X_OK) == 0) {
+                    TVLog(@"Found TrollStore helper at: %@", tsHelper);
+                    return tsHelper;
+                }
+                
+                // 检查子目录（.app 包内）
+                NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+                for (NSString *subItem in subContents) {
+                    if ([subItem hasSuffix:@".app"]) {
+                        NSString *appPath = [fullPath stringByAppendingPathComponent:subItem];
+                        NSString *helperPath = [appPath stringByAppendingPathComponent:@"trollstorehelper"];
+                        if (access([helperPath UTF8String], X_OK) == 0) {
+                            TVLog(@"Found TrollStore helper at: %@", helperPath);
+                            return helperPath;
+                        }
+                    }
                 }
             }
         }
@@ -968,6 +990,55 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 // 检查 TrollStore 是否可用
 - (BOOL)isTrollStoreAvailable {
     return [self trollStoreHelperPath] != nil;
+}
+
+// 获取 TrollStore 诊断信息
+- (NSDictionary *)getTrollStoreDiagnostics {
+    NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
+    
+    // 检查各个可能的路径
+    NSArray *possiblePaths = @[
+        @"/var/containers/Bundle/Application/com.opa334.TrollStore/trollstorehelper",
+        @"/var/mobile/trollstorehelper",
+        @"/usr/bin/trollstorehelper",
+        @"/usr/local/bin/trollstorehelper",
+        @"/var/jb/usr/bin/trollstorehelper",
+        @"/var/jb/bin/trollstorehelper"
+    ];
+    
+    NSMutableArray *pathChecks = [NSMutableArray array];
+    for (NSString *path in possiblePaths) {
+        BOOL exists = (access([path UTF8String], F_OK) == 0);
+        BOOL executable = (access([path UTF8String], X_OK) == 0);
+        [pathChecks addObject:@{
+            @"path": path,
+            @"exists": @(exists),
+            @"executable": @(executable)
+        }];
+    }
+    diagnostics[@"pathChecks"] = pathChecks;
+    
+    // 找到的实际 helper 路径
+    NSString *helperPath = [self trollStoreHelperPath];
+    diagnostics[@"foundHelperPath"] = helperPath ?: @"Not found";
+    diagnostics[@"isAvailable"] = @(helperPath != nil);
+    
+    // 尝试执行 helper 获取版本信息
+    if (helperPath) {
+        NSString *command = [NSString stringWithFormat:@"\"%@\" --version 2>&1 || echo \"No version flag\"", helperPath];
+        FILE *fp = popen([command UTF8String], "r");
+        if (fp) {
+            char buffer[1024];
+            NSMutableString *output = [NSMutableString string];
+            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+                [output appendString:[NSString stringWithUTF8String:buffer]];
+            }
+            pclose(fp);
+            diagnostics[@"helperVersion"] = [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+    }
+    
+    return diagnostics;
 }
 
 // 通过 TrollStore 安装 IPA
@@ -992,6 +1063,17 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         return NO;
     }
     
+    // 检查文件是否可读
+    if (access([ipaPath UTF8String], R_OK) != 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2002
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"IPA file not readable: %@", ipaPath]}];
+        }
+        return NO;
+    }
+    
     // 获取 TrollStore 帮助程序路径
     NSString *helperPath = [self trollStoreHelperPath];
     if (!helperPath) {
@@ -1006,55 +1088,47 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     TVLog(@"Installing IPA using TrollStore: %@", ipaPath);
     TVLog(@"TrollStore helper: %@", helperPath);
     
-    // 构建命令: trollstorehelper install <ipa_path>
-    // 使用 POSIX popen 执行命令（iOS 不支持 NSTask）
+    // 使用 system() 函数执行命令，更兼容 iOS
+    // trollstorehelper 的参数格式: install <ipa_path>
     NSString *command = [NSString stringWithFormat:@"\"%@\" install \"%@\" 2>&1", helperPath, ipaPath];
     TVLog(@"Executing command: %@", command);
     
-    @try {
-        FILE *fp = popen([command UTF8String], "r");
-        if (fp == NULL) {
-            TVLog(@"Failed to execute install command");
-            if (error) {
-                *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                            code:2004
-                                        userInfo:@{NSLocalizedDescriptionKey : @"Failed to execute install command"}];
-            }
-            return NO;
-        }
-        
-        // 读取输出
-        char buffer[1024];
-        NSMutableString *output = [NSMutableString string];
-        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            [output appendString:[NSString stringWithUTF8String:buffer]];
-        }
-        
-        int status = pclose(fp);
-        int exitCode = WEXITSTATUS(status);
-        
-        TVLog(@"TrollStore install output: %@", output);
-        TVLog(@"TrollStore install exit code: %d", exitCode);
-        
-        if (exitCode == 0) {
-            TVLog(@"IPA installed successfully: %@", ipaPath);
-            return YES;
-        } else {
-            if (error) {
-                NSString *errMsg = output.length > 0 ? output : @"Installation failed";
-                *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                            code:2004
-                                        userInfo:@{NSLocalizedDescriptionKey : errMsg}];
-            }
-            return NO;
-        }
-    } @catch (NSException *exception) {
-        TVLog(@"Failed to install IPA: %@", exception.reason);
+    // 使用 popen 执行命令并获取输出
+    FILE *fp = popen([command UTF8String], "r");
+    if (fp == NULL) {
+        TVLog(@"Failed to execute install command: %s", strerror(errno));
         if (error) {
             *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2005
+                                        code:2004
                                     userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Exception: %@", exception.reason]}];
+                                        [NSString stringWithFormat:@"Failed to execute install command: %s", strerror(errno)]}];
+        }
+        return NO;
+    }
+    
+    // 读取输出
+    char buffer[4096];
+    NSMutableString *output = [NSMutableString string];
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        [output appendString:[NSString stringWithUTF8String:buffer]];
+    }
+    
+    int status = pclose(fp);
+    int exitCode = WEXITSTATUS(status);
+    
+    TVLog(@"TrollStore install output: %@", output);
+    TVLog(@"TrollStore install exit code: %d", exitCode);
+    
+    if (exitCode == 0) {
+        TVLog(@"IPA installed successfully: %@", ipaPath);
+        return YES;
+    } else {
+        NSString *errMsg = output.length > 0 ? output : @"Installation failed";
+        TVLog(@"Installation failed: %@", errMsg);
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2004
+                                    userInfo:@{NSLocalizedDescriptionKey : errMsg}];
         }
         return NO;
     }

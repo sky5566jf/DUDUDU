@@ -219,6 +219,8 @@
         return [self handleInstallApp:query];
     } else if ([path isEqualToString:@"/api/uninstall"]) {
         return [self handleUninstallApp:query];
+    } else if ([path isEqualToString:@"/api/trollstore/diagnostics"]) {
+        return [self handleTrollStoreDiagnostics];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1053,6 +1055,20 @@
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
         TVLog(@"HTTP Server: App installation failed: %@", errMsg);
     }
+    
+    return response;
+}
+
+// GET /api/trollstore/diagnostics
+// 获取 TrollStore 诊断信息
+- (TVNCHttpResponse *)handleTrollStoreDiagnostics {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSDictionary *diagnostics = [[TVNCApiManager sharedManager] getTrollStoreDiagnostics];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:diagnostics options:NSJSONWritingPrettyPrinted error:nil];
     
     return response;
 }

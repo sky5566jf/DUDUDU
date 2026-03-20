@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrollVNC API 测试工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .server-config {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .server-config h2 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .input-group input {
+            flex: 1;
+            min-width: 200px;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+        }
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        .card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            margin: 5px 5px 5px 0;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+        .btn-success {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+        .btn-danger {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+        .btn-warning {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        }
+        .btn-secondary {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-weight: 500;
+        }
+        .form-group input, .form-group textarea, .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .result.success {
+            border-left-color: #38ef7d;
+            background: #e8f5e9;
+        }
+        .result.error {
+            border-left-color: #f45c43;
+            background: #ffebee;
+        }
+        .result pre {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-size: 12px;
+            font-family: 'Courier New', monospace;
+        }
+        .screenshot-container {
+            margin-top: 15px;
+            text-align: center;
+        }
+        .screenshot-container img {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        .slider-container input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+        .slider-value {
+            text-align: center;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-online {
+            background: #38ef7d;
+            box-shadow: 0 0 10px #38ef7d;
+        }
+        .status-offline {
+            background: #f45c43;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 TrollVNC API 测试工具</h1>
+        
+        <div class="server-config">
+            <h2>⚙️ 服务器配置</h2>
+            <div class="input-group">
+                <input type="text" id="serverIp" placeholder="服务器IP" value="192.69.0.43">
+                <input type="text" id="serverPort" placeholder="端口" value="8182">
+                <button class="btn btn-success" onclick="checkStatus()">
+                    <span class="status-indicator" id="statusDot"></span>检查连接
+                </button>
+            </div>
+        </div>
+
+        <div class="grid">
+            <!-- 截图 -->
+            <div class="card">
+                <h3>📸 屏幕截图</h3>
+                <div class="form-group">
+                    <label>格式</label>
+                    <select id="screenshotFormat">
+                        <option value="png">PNG</option>
+                        <option value="jpeg">JPEG</option>
+                    </select>
+                </div>
+                <div class="form-group" id="qualityGroup" style="display:none;">
+                    <label>JPEG 质量</label>
+                    <div class="slider-container">
+                        <input type="range" id="jpegQuality" min="0.1" max="1" step="0.1" value="0.9">
+                        <div class="slider-value" id="qualityValue">0.9</div>
+                    </div>
+                </div>
+                <button class="btn" onclick="takeScreenshot()">获取截图</button>
+                <div class="result hidden" id="screenshotResult"></div>
+                <div class="screenshot-container" id="screenshotContainer"></div>
+            </div>
+
+            <!-- 设备信息 -->
+            <div class="card">
+                <h3>📱 设备信息</h3>
+                <button class="btn btn-secondary" onclick="getDeviceInfo()">获取设备信息</button>
+                <div class="result hidden" id="deviceResult"></div>
+            </div>
+
+            <!-- 文件上传 -->
+            <div class="card">
+                <h3>📤 文件上传</h3>
+                <div class="form-group">
+                    <label>目标路径</label>
+                    <input type="text" id="uploadPath" placeholder="/var/mobile/Documents/file.ipa" value="/var/mobile/Documents/test.ipa">
+                </div>
+                <div class="form-group">
+                    <label>选择文件</label>
+                    <input type="file" id="uploadFile">
+                </div>
+                <button class="btn btn-success" onclick="uploadFile()">上传文件</button>
+                <div class="result hidden" id="uploadResult"></div>
+            </div>
+
+            <!-- 文本输入 -->
+            <div class="card">
+                <h3>⌨️ 文本输入</h3>
+                <div class="form-group">
+                    <label>输入文本</label>
+                    <textarea id="inputText" placeholder="输入要发送到设备的文本..."></textarea>
+                </div>
+                <button class="btn" onclick="sendInput()">发送文本</button>
+                <div class="result hidden" id="inputResult"></div>
+            </div>
+
+            <!-- 剪贴板 -->
+            <div class="card">
+                <h3>📋 剪贴板</h3>
+                <div class="form-group">
+                    <label>剪贴板内容</label>
+                    <textarea id="clipboardText" placeholder="输入要设置的剪贴板内容..."></textarea>
+                </div>
+                <button class="btn" onclick="setClipboard()">设置剪贴板</button>
+                <div class="result hidden" id="clipboardResult"></div>
+            </div>
+
+            <!-- 按键 -->
+            <div class="card">
+                <h3>🔘 按键控制</h3>
+                <div class="form-group">
+                    <label>按键代码</label>
+                    <select id="keyCode">
+                        <option value="13">回车键 (Enter)</option>
+                        <option value="8">退格键 (Backspace)</option>
+                        <option value="9">Tab 键</option>
+                        <option value="27">ESC 键</option>
+                        <option value="32">空格键</option>
+                    </select>
+                </div>
+                <button class="btn" onclick="sendKey()">发送按键</button>
+                <div class="result hidden" id="keyResult"></div>
+            </div>
+
+            <!-- 音量控制 -->
+            <div class="card">
+                <h3>🔊 音量控制</h3>
+                <div class="slider-container">
+                    <label>音量</label>
+                    <input type="range" id="volumeSlider" min="0" max="1" step="0.1" value="0.5">
+                    <div class="slider-value" id="volumeValue">0.5</div>
+                </div>
+                <button class="btn" onclick="getVolume()">获取音量</button>
+                <button class="btn btn-success" onclick="setVolume()">设置音量</button>
+                <div class="result hidden" id="volumeResult"></div>
+            </div>
+
+            <!-- 亮度控制 -->
+            <div class="card">
+                <h3>☀️ 亮度控制</h3>
+                <div class="slider-container">
+                    <label>亮度</label>
+                    <input type="range" id="brightnessSlider" min="0" max="1" step="0.1" value="0.5">
+                    <div class="slider-value" id="brightnessValue">0.5</div>
+                </div>
+                <button class="btn" onclick="getBrightness()">获取亮度</button>
+                <button class="btn btn-success" onclick="setBrightness()">设置亮度</button>
+                <div class="result hidden" id="brightnessResult"></div>
+            </div>
+
+            <!-- 系统控制 -->
+            <div class="card">
+                <h3>⚡ 系统控制</h3>
+                <button class="btn btn-warning" onclick="clearApps()">清理后台应用</button>
+                <div class="result hidden" id="clearAppsResult"></div>
+            </div>
+
+            <!-- 应用安装 -->
+            <div class="card">
+                <h3>📲 应用安装 (TrollStore)</h3>
+                <div class="form-group">
+                    <label>IPA 路径</label>
+                    <input type="text" id="installPath" placeholder="/var/mobile/Documents/app.ipa" value="/var/mobile/Documents/app.ipa">
+                </div>
+                <button class="btn btn-success" onclick="installApp()">安装应用</button>
+                <div class="result hidden" id="installResult"></div>
+            </div>
+
+            <!-- 应用卸载 -->
+            <div class="card">
+                <h3>🗑️ 应用卸载 (TrollStore)</h3>
+                <div class="form-group">
+                    <label>Bundle ID</label>
+                    <input type="text" id="uninstallBundleId" placeholder="com.example.app" value="com.example.app">
+                </div>
+                <button class="btn btn-danger" onclick="uninstallApp()">卸载应用</button>
+                <div class="result hidden" id="uninstallResult"></div>
+            </div>
+
+            <!-- TrollStore 诊断 -->
+            <div class="card">
+                <h3>🔍 TrollStore 诊断</h3>
+                <button class="btn btn-secondary" onclick="checkTrollStoreDiagnostics()">运行诊断</button>
+                <div class="result hidden" id="diagnosticsResult"></div>
+            </div>
+
+            <!-- 文件写入 -->
+            <div class="card">
+                <h3>📝 文件写入</h3>
+                <div class="form-group">
+                    <label>文件路径</label>
+                    <input type="text" id="writeFilePath" placeholder="/var/mobile/Documents/test.txt" value="/var/mobile/Documents/test.txt">
+                </div>
+                <div class="form-group">
+                    <label>内容</label>
+                    <textarea id="writeFileContent" placeholder="输入文件内容..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="writeFileAppend"> 追加模式
+                    </label>
+                </div>
+                <button class="btn btn-success" onclick="writeFile()">写入文件</button>
+                <div class="result hidden" id="writeFileResult"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const serverIp = document.getElementById('serverIp');
+        const serverPort = document.getElementById('serverPort');
+
+        function getBaseUrl() {
+            return `http://${serverIp.value}:${serverPort.value}`;
+        }
+
+        function showResult(elementId, data, isError = false) {
+            const element = document.getElementById(elementId);
+            element.classList.remove('hidden', 'success', 'error');
+            element.classList.add(isError ? 'error' : 'success');
+            
+            if (typeof data === 'object') {
+                element.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            } else {
+                element.innerHTML = `<pre>${data}</pre>`;
+            }
+        }
+
+        async function checkStatus() {
+            const dot = document.getElementById('statusDot');
+            dot.className = 'status-indicator';
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/status`);
+                const data = await response.json();
+                dot.classList.add('status-online');
+                showResult('deviceResult', { status: '已连接', ...data });
+            } catch (error) {
+                dot.classList.add('status-offline');
+                showResult('deviceResult', `连接失败: ${error.message}`, true);
+            }
+        }
+
+        async function takeScreenshot() {
+            const format = document.getElementById('screenshotFormat').value;
+            const quality = document.getElementById('jpegQuality').value;
+            const container = document.getElementById('screenshotContainer');
+            const result = document.getElementById('screenshotResult');
+            
+            result.classList.remove('hidden');
+            result.innerHTML = '<div class="loading"></div> 正在获取截图...';
+            
+            try {
+                let url = `${getBaseUrl()}/api/screenshot?format=${format}`;
+                if (format === 'jpeg') {
+                    url += `&quality=${quality}`;
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('获取截图失败');
+                
+                const blob = await response.blob();
+                const imageUrl = URL.createObjectURL(blob);
+                
+                container.innerHTML = `<img src="${imageUrl}" alt="Screenshot">`;
+                showResult('screenshotResult', { success: true, size: `${(blob.size / 1024).toFixed(2)} KB` });
+            } catch (error) {
+                showResult('screenshotResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function getDeviceInfo() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/device`);
+                const data = await response.json();
+                showResult('deviceResult', data);
+            } catch (error) {
+                showResult('deviceResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function uploadFile() {
+            const path = document.getElementById('uploadPath').value;
+            const fileInput = document.getElementById('uploadFile');
+            
+            if (!fileInput.files[0]) {
+                showResult('uploadResult', '请选择文件', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/upload?path=${encodeURIComponent(path)}`, {
+                    method: 'POST',
+                    body: fileInput.files[0]
+                });
+                const data = await response.json();
+                showResult('uploadResult', data, !data.success);
+            } catch (error) {
+                showResult('uploadResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function sendInput() {
+            const text = document.getElementById('inputText').value;
+            if (!text) {
+                showResult('inputResult', '请输入文本', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/input`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                    body: text
+                });
+                const data = await response.json();
+                showResult('inputResult', data, !data.success);
+            } catch (error) {
+                showResult('inputResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function setClipboard() {
+            const text = document.getElementById('clipboardText').value;
+            if (!text) {
+                showResult('clipboardResult', '请输入内容', true);
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/clipboard_text`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                    body: text
+                });
+                const data = await response.json();
+                showResult('clipboardResult', data, !data.success);
+            } catch (error) {
+                showResult('clipboardResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function sendKey() {
+            const code = document.getElementById('keyCode').value;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/key?code=${code}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('keyResult', data, !data.success);
+            } catch (error) {
+                showResult('keyResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function getVolume() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/volume`);
+                const data = await response.json();
+                showResult('volumeResult', data, !data.success);
+                if (data.volume !== undefined) {
+                    document.getElementById('volumeSlider').value = data.volume;
+                    document.getElementById('volumeValue').textContent = data.volume.toFixed(1);
+                }
+            } catch (error) {
+                showResult('volumeResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function setVolume() {
+            const value = document.getElementById('volumeSlider').value;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/volume?value=${value}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('volumeResult', data, !data.success);
+            } catch (error) {
+                showResult('volumeResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function getBrightness() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/brightness`);
+                const data = await response.json();
+                showResult('brightnessResult', data, !data.success);
+                if (data.brightness !== undefined) {
+                    document.getElementById('brightnessSlider').value = data.brightness;
+                    document.getElementById('brightnessValue').textContent = data.brightness.toFixed(1);
+                }
+            } catch (error) {
+                showResult('brightnessResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function setBrightness() {
+            const value = document.getElementById('brightnessSlider').value;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/brightness?value=${value}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('brightnessResult', data, !data.success);
+            } catch (error) {
+                showResult('brightnessResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function clearApps() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/clearapps`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('clearAppsResult', data, !data.success);
+            } catch (error) {
+                showResult('clearAppsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function installApp() {
+            const path = document.getElementById('installPath').value;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/install?path=${encodeURIComponent(path)}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('installResult', data, !data.success);
+            } catch (error) {
+                showResult('installResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function uninstallApp() {
+            const bundleId = document.getElementById('uninstallBundleId').value;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/uninstall?bundleId=${encodeURIComponent(bundleId)}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('uninstallResult', data, !data.success);
+            } catch (error) {
+                showResult('uninstallResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function checkTrollStoreDiagnostics() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/trollstore/diagnostics`);
+                const data = await response.json();
+                showResult('diagnosticsResult', data);
+            } catch (error) {
+                showResult('diagnosticsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function writeFile() {
+            const path = document.getElementById('writeFilePath').value;
+            const content = document.getElementById('writeFileContent').value;
+            const append = document.getElementById('writeFileAppend').checked;
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/writefile_text?path=${encodeURIComponent(path)}&append=${append}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                    body: content
+                });
+                const data = await response.json();
+                showResult('writeFileResult', data, !data.success);
+            } catch (error) {
+                showResult('writeFileResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        // 滑块事件监听
+        document.getElementById('volumeSlider').addEventListener('input', function() {
+            document.getElementById('volumeValue').textContent = this.value;
+        });
+
+        document.getElementById('brightnessSlider').addEventListener('input', function() {
+            document.getElementById('brightnessValue').textContent = this.value;
+        });
+
+        document.getElementById('jpegQuality').addEventListener('input', function() {
+            document.getElementById('qualityValue').textContent = this.value;
+        });
+
+        document.getElementById('screenshotFormat').addEventListener('change', function() {
+            document.getElementById('qualityGroup').style.display = this.value === 'jpeg' ? 'block' : 'none';
+        });
+
+        // 页面加载时检查状态
+        window.onload = function() {
+            checkStatus();
+        };
+    </script>
+</body>
+</html>

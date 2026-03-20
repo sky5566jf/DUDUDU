@@ -161,6 +161,12 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)isTrollStoreAvailable;
 
+/**
+ 获取 TrollStore 诊断信息
+ @return 包含诊断信息的字典
+ */
+- (NSDictionary *)getTrollStoreDiagnostics;
+
 @end
 
 NS_ASSUME_NONNULL_END
