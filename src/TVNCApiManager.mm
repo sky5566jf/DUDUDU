@@ -50,6 +50,10 @@ size_t IOSurfaceGetAllocSize(IOSurfaceRef surface);
 #import "IOSurfaceSPI.h"
 #import "Logging.h"
 #import "STHIDEventGenerator.h"
+#import <AVFoundation/AVFoundation.h>
+#import <MediaPlayer/MediaPlayer.h>
+#import <mach/mach.h>
+#import <mach/bootstrap.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -736,6 +740,201 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     });
     
     return keyMap[@(keyCode)] ?: @"";
+}
+
+#pragma mark - 系统控制 API
+
+// 清理后台应用
+- (BOOL)clearBackgroundApps {
+    // 在主线程执行
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self clearBackgroundApps];
+        });
+        return result;
+    }
+    
+    @try {
+        // 获取 SpringBoard 服务端口
+        mach_port_t sbPort = MACH_PORT_NULL;
+        kern_return_t kr = bootstrap_look_up(bootstrap_port, "com.apple.SpringBoard", &sbPort);
+        if (kr != KERN_SUCCESS) {
+            TVLog(@"Failed to lookup SpringBoard port: %d", kr);
+            return NO;
+        }
+        
+        // 发送双击 Home 键事件打开应用切换器
+        [self simulateHomeButtonDoubleClick];
+        
+        // 等待应用切换器打开
+        [NSThread sleepForTimeInterval:0.5];
+        
+        // 发送上滑手势关闭所有应用（通过发送多指滑动事件）
+        // 这里使用私有 API 模拟手势
+        [self simulateSwipeUpGesture];
+        
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Clear background apps failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 模拟双击 Home 键
+- (void)simulateHomeButtonDoubleClick {
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 快速两次点击 Home 键区域（屏幕底部中央）
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+        CGPoint homeButtonLocation = CGPointMake(screenWidth / 2, screenHeight - 20);
+        
+        // 第一次点击
+        [generator touchDown:homeButtonLocation];
+        [NSThread sleepForTimeInterval:0.05];
+        [generator touchUp:homeButtonLocation];
+        
+        [NSThread sleepForTimeInterval:0.1];
+        
+        // 第二次点击
+        [generator touchDown:homeButtonLocation];
+        [NSThread sleepForTimeInterval:0.05];
+        [generator touchUp:homeButtonLocation];
+    } @catch (NSException *exception) {
+        TVLog(@"Simulate home button double click failed: %@", exception.reason);
+    }
+}
+
+// 模拟上滑手势
+- (void)simulateSwipeUpGesture {
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+        
+        // 从屏幕底部向上滑动
+        CGPoint startPoint = CGPointMake(screenWidth / 2, screenHeight - 50);
+        CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 2);
+        
+        [generator touchDown:startPoint];
+        
+        // 模拟滑动过程
+        int steps = 10;
+        for (int i = 1; i <= steps; i++) {
+            CGFloat progress = (CGFloat)i / steps;
+            CGPoint currentPoint = CGPointMake(
+                startPoint.x + (endPoint.x - startPoint.x) * progress,
+                startPoint.y + (endPoint.y - startPoint.y) * progress
+            );
+            [generator touchMove:currentPoint];
+            [NSThread sleepForTimeInterval:0.01];
+        }
+        
+        [generator touchUp:endPoint];
+    } @catch (NSException *exception) {
+        TVLog(@"Simulate swipe up gesture failed: %@", exception.reason);
+    }
+}
+
+// 设置音量
+- (BOOL)setVolume:(CGFloat)volume {
+    if (volume < 0.0) volume = 0.0;
+    if (volume > 1.0) volume = 1.0;
+    
+    @try {
+        // 使用 MediaPlayer 框架设置音量
+        [[MPVolumeView new] setVolume:volume];
+        
+        // 或者使用 AVAudioSession
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        NSError *error = nil;
+        [session setActive:YES error:&error];
+        if (error) {
+            TVLog(@"Failed to activate audio session: %@", error.localizedDescription);
+            return NO;
+        }
+        
+        // 通过私有 API 设置系统音量
+        [self setSystemVolume:volume];
+        
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Set volume failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 获取当前音量
+- (CGFloat)getCurrentVolume {
+    @try {
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        return session.outputVolume;
+    } @catch (NSException *exception) {
+        TVLog(@"Get volume failed: %@", exception.reason);
+        return -1;
+    }
+}
+
+// 设置亮度
+- (BOOL)setBrightness:(CGFloat)brightness {
+    if (brightness < 0.0) brightness = 0.0;
+    if (brightness > 1.0) brightness = 1.0;
+    
+    // 在主线程执行
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self setBrightness:brightness];
+        });
+        return result;
+    }
+    
+    @try {
+        [[UIScreen mainScreen] setBrightness:brightness];
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Set brightness failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 获取当前亮度
+- (CGFloat)getCurrentBrightness {
+    @try {
+        return [UIScreen mainScreen].brightness;
+    } @catch (NSException *exception) {
+        TVLog(@"Get brightness failed: %@", exception.reason);
+        return -1;
+    }
+}
+
+// 使用私有 API 设置系统音量
+- (void)setSystemVolume:(CGFloat)volume {
+    // 通过发送音量键事件来调整
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 获取当前音量
+        CGFloat currentVolume = [self getCurrentVolume];
+        
+        // 计算需要按多少次音量键
+        NSInteger steps = (NSInteger)(fabs(volume - currentVolume) * 16); // 假设16级音量
+        BOOL increase = volume > currentVolume;
+        
+        for (NSInteger i = 0; i < steps; i++) {
+            if (increase) {
+                [generator pressVolumeUp];
+            } else {
+                [generator pressVolumeDown];
+            }
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    } @catch (NSException *exception) {
+        TVLog(@"Set system volume via HID failed: %@", exception.reason);
+    }
 }
 
 @end

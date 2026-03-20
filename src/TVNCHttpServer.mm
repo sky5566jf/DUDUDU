@@ -209,6 +209,12 @@
         return [self handleCheckFile];
     } else if ([path isEqualToString:@"/api/upload"]) {
         return [self handleUploadFile:query body:body];
+    } else if ([path isEqualToString:@"/api/clearapps"]) {
+        return [self handleClearApps];
+    } else if ([path isEqualToString:@"/api/volume"]) {
+        return [self handleVolume:query body:body];
+    } else if ([path isEqualToString:@"/api/brightness"]) {
+        return [self handleBrightness:query body:body];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -862,6 +868,99 @@
     return response;
 }
 
+// POST /api/clearapps
+// 清理后台应用（模拟双击Home键上滑关闭）
+- (TVNCHttpResponse *)handleClearApps {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    BOOL success = [[TVNCApiManager sharedManager] clearBackgroundApps];
+    
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+    NSDictionary *result = success ? 
+        @{@"success": @YES, @"message": @"Background apps cleared"} :
+        @{@"success": @NO, @"error": @"Failed to clear background apps"};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/volume - 获取当前音量
+// POST /api/volume?value=0.5 - 设置音量
+- (TVNCHttpResponse *)handleVolume:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *valueStr = query[@"value"];
+    if (valueStr) {
+        // 设置音量
+        CGFloat volume = [valueStr floatValue];
+        if (volume < 0.0 || volume > 1.0) {
+            response.statusCode = 400;
+            response.contentType = @"application/json";
+            NSDictionary *error = @{@"success": @NO, @"error": @"Volume must be between 0.0 and 1.0"};
+            response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+            return response;
+        }
+        
+        BOOL success = [[TVNCApiManager sharedManager] setVolume:volume];
+        response.statusCode = success ? 200 : 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = success ? 
+            @{@"success": @YES, @"volume": @(volume)} :
+            @{@"success": @NO, @"error": @"Failed to set volume"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        // 获取当前音量
+        CGFloat currentVolume = [[TVNCApiManager sharedManager] getCurrentVolume];
+        response.statusCode = (currentVolume >= 0) ? 200 : 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = (currentVolume >= 0) ? 
+            @{@"success": @YES, @"volume": @(currentVolume)} :
+            @{@"success": @NO, @"error": @"Failed to get volume"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
+// GET /api/brightness - 获取当前亮度
+// POST /api/brightness?value=0.5 - 设置亮度
+- (TVNCHttpResponse *)handleBrightness:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *valueStr = query[@"value"];
+    if (valueStr) {
+        // 设置亮度
+        CGFloat brightness = [valueStr floatValue];
+        if (brightness < 0.0 || brightness > 1.0) {
+            response.statusCode = 400;
+            response.contentType = @"application/json";
+            NSDictionary *error = @{@"success": @NO, @"error": @"Brightness must be between 0.0 and 1.0"};
+            response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+            return response;
+        }
+        
+        BOOL success = [[TVNCApiManager sharedManager] setBrightness:brightness];
+        response.statusCode = success ? 200 : 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = success ? 
+            @{@"success": @YES, @"brightness": @(brightness)} :
+            @{@"success": @NO, @"error": @"Failed to set brightness"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        // 获取当前亮度
+        CGFloat currentBrightness = [[TVNCApiManager sharedManager] getCurrentBrightness];
+        response.statusCode = (currentBrightness >= 0) ? 200 : 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = (currentBrightness >= 0) ? 
+            @{@"success": @YES, @"brightness": @(currentBrightness)} :
+            @{@"success": @NO, @"error": @"Failed to get brightness"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
 // GET /
 - (TVNCHttpResponse *)handleRoot {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -882,6 +981,11 @@
         "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本）</li>"
         "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/zhuangtai.txt）</li>"
         "<li><b>POST /api/upload?path=/xxx/xxx</b> - 上传任意文件（自动创建目录）</li>"
+        "<li><b>POST /api/clearapps</b> - 清理后台应用（模拟双击Home键）</li>"
+        "<li><b>GET /api/volume</b> - 获取当前音量</li>"
+        "<li><b>POST /api/volume?value=0.5</b> - 设置音量（0.0-1.0）</li>"
+        "<li><b>GET /api/brightness</b> - 获取当前屏幕亮度</li>"
+        "<li><b>POST /api/brightness?value=0.5</b> - 设置屏幕亮度（0.0-1.0）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;

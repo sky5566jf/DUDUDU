@@ -647,6 +647,154 @@ uploadFile("/var/mobile/photo.jpg", "/var/mobile/Documents/backup/photo.jpg")
 
 ---
 
+### 12. 清理后台应用
+
+模拟双击 Home 键打开应用切换器，然后上滑关闭所有后台应用。
+
+**请求:**
+```
+POST /api/clearapps
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Background apps cleared"
+}
+```
+
+**示例:**
+```bash
+# 清理后台应用
+curl -X POST "http://192.168.1.100:8182/api/clearapps"
+```
+
+```python
+import requests
+
+response = requests.post("http://192.168.1.100:8182/api/clearapps")
+print(response.json())
+```
+
+**注意:**
+- 此功能通过模拟手势实现，可能需要几秒钟完成
+- 部分系统版本可能行为略有不同
+
+---
+
+### 13. 音量控制
+
+获取或设置系统音量。
+
+**获取当前音量:**
+```
+GET /api/volume
+```
+
+**设置音量:**
+```
+POST /api/volume?value=0.5
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| value | float | 否 | 音量值 0.0 ~ 1.0 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "volume": 0.5
+}
+```
+
+**示例:**
+```bash
+# 获取当前音量
+curl "http://192.168.1.100:8182/api/volume"
+
+# 设置音量为 50%
+curl -X POST "http://192.168.1.100:8182/api/volume?value=0.5"
+
+# 静音
+curl -X POST "http://192.168.1.100:8182/api/volume?value=0"
+
+# 最大音量
+curl -X POST "http://192.168.1.100:8182/api/volume?value=1"
+```
+
+```python
+import requests
+
+# 获取当前音量
+response = requests.get("http://192.168.1.100:8182/api/volume")
+print(f"当前音量: {response.json()['volume']}")
+
+# 设置音量为 30%
+response = requests.post("http://192.168.1.100:8182/api/volume?value=0.3")
+print(response.json())
+```
+
+---
+
+### 14. 屏幕亮度控制
+
+获取或设置屏幕亮度。
+
+**获取当前亮度:**
+```
+GET /api/brightness
+```
+
+**设置亮度:**
+```
+POST /api/brightness?value=0.5
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| value | float | 否 | 亮度值 0.0 ~ 1.0 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "brightness": 0.5
+}
+```
+
+**示例:**
+```bash
+# 获取当前亮度
+curl "http://192.168.1.100:8182/api/brightness"
+
+# 设置亮度为 50%
+curl -X POST "http://192.168.1.100:8182/api/brightness?value=0.5"
+
+# 最低亮度
+curl -X POST "http://192.168.1.100:8182/api/brightness?value=0"
+
+# 最高亮度
+curl -X POST "http://192.168.1.100:8182/api/brightness?value=1"
+```
+
+```python
+import requests
+
+# 获取当前亮度
+response = requests.get("http://192.168.1.100:8182/api/brightness")
+print(f"当前亮度: {response.json()['brightness']}")
+
+# 设置亮度为 80%
+response = requests.post("http://192.168.1.100:8182/api/brightness?value=0.8")
+print(response.json())
+```
+
+---
+
 ## 错误响应
 
 所有 API 在出错时返回以下格式的 JSON:

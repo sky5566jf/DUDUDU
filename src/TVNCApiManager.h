@@ -103,6 +103,40 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)sendKeyCombination:(NSArray<NSNumber *> *)keyCodes;
 
+#pragma mark - 系统控制 API
+
+/**
+ 清理后台应用（模拟双击Home键上滑关闭所有应用）
+ @return 是否成功
+ */
+- (BOOL)clearBackgroundApps;
+
+/**
+ 设置系统音量
+ @param volume 音量值 0.0 ~ 1.0
+ @return 是否成功
+ */
+- (BOOL)setVolume:(CGFloat)volume;
+
+/**
+ 获取当前系统音量
+ @return 音量值 0.0 ~ 1.0，失败返回 -1
+ */
+- (CGFloat)getCurrentVolume;
+
+/**
+ 设置屏幕亮度
+ @param brightness 亮度值 0.0 ~ 1.0
+ @return 是否成功
+ */
+- (BOOL)setBrightness:(CGFloat)brightness;
+
+/**
+ 获取当前屏幕亮度
+ @return 亮度值 0.0 ~ 1.0，失败返回 -1
+ */
+- (CGFloat)getCurrentBrightness;
+
 @end
 
 NS_ASSUME_NONNULL_END
