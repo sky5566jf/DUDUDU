@@ -1058,6 +1058,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         }
         return NO;
     }
+}
 
 // 通过 TrollStore 卸载应用
 - (BOOL)uninstallAppWithBundleId:(NSString *)bundleId error:(NSError **)error {
