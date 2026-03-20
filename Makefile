@@ -75,6 +75,7 @@ trollvncserver_LIBRARIES += z
 endif
 
 trollvncserver_FRAMEWORKS += Accelerate
+trollvncserver_FRAMEWORKS += AVFoundation
 trollvncserver_FRAMEWORKS += CoreGraphics
 trollvncserver_FRAMEWORKS += CoreMedia
 trollvncserver_FRAMEWORKS += CoreVideo
@@ -82,6 +83,7 @@ trollvncserver_FRAMEWORKS += Foundation
 trollvncserver_FRAMEWORKS += IOKit
 trollvncserver_FRAMEWORKS += IOSurface
 trollvncserver_FRAMEWORKS += ImageIO
+trollvncserver_FRAMEWORKS += MediaPlayer
 trollvncserver_FRAMEWORKS += QuartzCore
 trollvncserver_FRAMEWORKS += UIKit
 trollvncserver_FRAMEWORKS += UserNotifications
