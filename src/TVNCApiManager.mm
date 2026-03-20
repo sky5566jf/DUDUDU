@@ -761,7 +761,7 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         [generator menuDoublePress];
         
         // 等待应用切换器打开
-        [NSThread sleepForTimeInterval:0.5];
+        [NSThread sleepForTimeInterval:0.8];
         
         // 使用上滑手势关闭应用
         CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
@@ -771,6 +771,12 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 3);
         
         [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
+        
+        // 等待关闭动画完成
+        [NSThread sleepForTimeInterval:0.5];
+        
+        // 点击 Home 键返回桌面
+        [generator menuPress];
         
         return YES;
     } @catch (NSException *exception) {
@@ -812,17 +818,19 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     if (brightness < 0.0) brightness = 0.0;
     if (brightness > 1.0) brightness = 1.0;
     
-    // 在主线程执行
-    if (![NSThread isMainThread]) {
-        __block BOOL result = NO;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            result = [self setBrightness:brightness];
-        });
-        return result;
-    }
-    
     @try {
-        [[UIScreen mainScreen] setBrightness:brightness];
+        // 方法1: 使用 UIScreen（在主线程执行）
+        if ([NSThread isMainThread]) {
+            [[UIScreen mainScreen] setBrightness:brightness];
+        } else {
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                [[UIScreen mainScreen] setBrightness:brightness];
+            });
+        }
+        
+        // 方法2: 使用 HID 事件模拟亮度按键作为备选
+        [self setBrightnessViaHID:brightness];
+        
         return YES;
     } @catch (NSException *exception) {
         TVLog(@"Set brightness failed: %@", exception.reason);
@@ -837,6 +845,32 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     } @catch (NSException *exception) {
         TVLog(@"Get brightness failed: %@", exception.reason);
         return -1;
+    }
+}
+
+// 使用 HID 事件调整亮度
+- (void)setBrightnessViaHID:(CGFloat)brightness {
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 获取当前亮度
+        CGFloat currentBrightness = [self getCurrentBrightness];
+        if (currentBrightness < 0) currentBrightness = 0.5;
+        
+        // 计算需要按多少次亮度键（假设16级亮度）
+        NSInteger steps = (NSInteger)(fabs(brightness - currentBrightness) * 16);
+        BOOL increase = brightness > currentBrightness;
+        
+        for (NSInteger i = 0; i < steps && i < 20; i++) {
+            if (increase) {
+                [generator displayBrightnessIncrementPress];
+            } else {
+                [generator displayBrightnessDecrementPress];
+            }
+            [NSThread sleepForTimeInterval:0.05];
+        }
+    } @catch (NSException *exception) {
+        TVLog(@"Set brightness via HID failed: %@", exception.reason);
     }
 }
 
@@ -864,6 +898,242 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         }
     } @catch (NSException *exception) {
         TVLog(@"Set system volume via HID failed: %@", exception.reason);
+    }
+}
+
+#pragma mark - 应用管理 API (TrollStore)
+
+// TrollStore 帮助程序路径
+#define TROLLSTORE_HELPER_PATH @"/var/containers/Bundle/Application/com.opa334.TrollStore/trollstorehelper"
+#define TROLLSTORE_HELPER_PATH_ALT @"/var/mobile/trollstorehelper"
+
+// 获取 TrollStore 帮助程序路径
+- (NSString *)trollStoreHelperPath {
+    // 检查常见路径
+    NSArray *possiblePaths = @[
+        @"/var/containers/Bundle/Application/com.opa334.TrollStore/trollstorehelper",
+        @"/var/mobile/trollstorehelper",
+        @"/usr/bin/trollstorehelper",
+        @"/usr/local/bin/trollstorehelper"
+    ];
+    
+    for (NSString *path in possiblePaths) {
+        if (access([path UTF8String], X_OK) == 0) {
+            return path;
+        }
+    }
+    
+    // 尝试动态查找 TrollStore 安装路径
+    NSString *tsPath = [self findTrollStoreHelper];
+    if (tsPath) {
+        return tsPath;
+    }
+    
+    return nil;
+}
+
+// 动态查找 TrollStore helper
+- (NSString *)findTrollStoreHelper {
+    // 搜索 /var/containers/Bundle/Application 下的 TrollStore
+    NSString *bundlePath = @"/var/containers/Bundle/Application";
+    NSFileManager *fm = [NSFileManager defaultManager];
+    
+    NSError *error = nil;
+    NSArray *contents = [fm contentsOfDirectoryAtPath:bundlePath error:&error];
+    
+    for (NSString *item in contents) {
+        NSString *fullPath = [bundlePath stringByAppendingPathComponent:item];
+        NSString *tsHelper = [fullPath stringByAppendingPathComponent:@"trollstorehelper"];
+        
+        if (access([tsHelper UTF8String], X_OK) == 0) {
+            return tsHelper;
+        }
+        
+        // 检查子目录
+        NSArray *subContents = [fm contentsOfDirectoryAtPath:fullPath error:nil];
+        for (NSString *subItem in subContents) {
+            if ([subItem hasSuffix:@".app"]) {
+                NSString *appPath = [fullPath stringByAppendingPathComponent:subItem];
+                NSString *helperPath = [appPath stringByAppendingPathComponent:@"trollstorehelper"];
+                if (access([helperPath UTF8String], X_OK) == 0) {
+                    return helperPath;
+                }
+            }
+        }
+    }
+    
+    return nil;
+}
+
+// 检查 TrollStore 是否可用
+- (BOOL)isTrollStoreAvailable {
+    return [self trollStoreHelperPath] != nil;
+}
+
+// 通过 TrollStore 安装 IPA
+- (BOOL)installAppWithIPAPath:(NSString *)ipaPath error:(NSError **)error {
+    if (!ipaPath || ipaPath.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2001
+                                    userInfo:@{NSLocalizedDescriptionKey : @"IPA path is empty"}];
+        }
+        return NO;
+    }
+    
+    // 检查 IPA 文件是否存在
+    if (access([ipaPath UTF8String], F_OK) != 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2002
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"IPA file not found: %@", ipaPath]}];
+        }
+        return NO;
+    }
+    
+    // 获取 TrollStore 帮助程序路径
+    NSString *helperPath = [self trollStoreHelperPath];
+    if (!helperPath) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2003
+                                    userInfo:@{NSLocalizedDescriptionKey : @"TrollStore helper not found. Is TrollStore installed?"}];
+        }
+        return NO;
+    }
+    
+    TVLog(@"Installing IPA using TrollStore: %@", ipaPath);
+    TVLog(@"TrollStore helper: %@", helperPath);
+    
+    // 构建命令: trollstorehelper install <ipa_path>
+    // 使用 NSTask 执行命令
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:helperPath];
+    [task setArguments:@[@"install", ipaPath]];
+    
+    // 捕获输出
+    NSPipe *outputPipe = [NSPipe pipe];
+    NSPipe *errorPipe = [NSPipe pipe];
+    [task setStandardOutput:outputPipe];
+    [task setStandardError:errorPipe];
+    
+    // 执行命令
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        
+        int status = [task terminationStatus];
+        
+        // 读取输出
+        NSData *outputData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
+        NSData *errorData = [[errorPipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
+        NSString *errorOutput = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
+        
+        TVLog(@"TrollStore install output: %@", output);
+        if (errorOutput.length > 0) {
+            TVLog(@"TrollStore install error: %@", errorOutput);
+        }
+        
+        if (status == 0) {
+            TVLog(@"IPA installed successfully: %@", ipaPath);
+            return YES;
+        } else {
+            if (error) {
+                NSString *errMsg = errorOutput.length > 0 ? errorOutput : @"Installation failed";
+                *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                            code:2004
+                                        userInfo:@{NSLocalizedDescriptionKey : errMsg}];
+            }
+            return NO;
+        }
+    } @catch (NSException *exception) {
+        TVLog(@"Failed to install IPA: %@", exception.reason);
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2005
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Exception: %@", exception.reason]}];
+        }
+        return NO;
+    }
+}
+
+// 通过 TrollStore 卸载应用
+- (BOOL)uninstallAppWithBundleId:(NSString *)bundleId error:(NSError **)error {
+    if (!bundleId || bundleId.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2006
+                                    userInfo:@{NSLocalizedDescriptionKey : @"Bundle ID is empty"}];
+        }
+        return NO;
+    }
+    
+    // 获取 TrollStore 帮助程序路径
+    NSString *helperPath = [self trollStoreHelperPath];
+    if (!helperPath) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2003
+                                    userInfo:@{NSLocalizedDescriptionKey : @"TrollStore helper not found. Is TrollStore installed?"}];
+        }
+        return NO;
+    }
+    
+    TVLog(@"Uninstalling app using TrollStore: %@", bundleId);
+    
+    // 构建命令: trollstorehelper uninstall <bundle_id>
+    NSTask *task = [[NSTask alloc] init];
+    [task setLaunchPath:helperPath];
+    [task setArguments:@[@"uninstall", bundleId]];
+    
+    // 捕获输出
+    NSPipe *outputPipe = [NSPipe pipe];
+    NSPipe *errorPipe = [NSPipe pipe];
+    [task setStandardOutput:outputPipe];
+    [task setStandardError:errorPipe];
+    
+    // 执行命令
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        
+        int status = [task terminationStatus];
+        
+        // 读取输出
+        NSData *outputData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
+        NSData *errorData = [[errorPipe fileHandleForReading] readDataToEndOfFile];
+        NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
+        NSString *errorOutput = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
+        
+        TVLog(@"TrollStore uninstall output: %@", output);
+        if (errorOutput.length > 0) {
+            TVLog(@"TrollStore uninstall error: %@", errorOutput);
+        }
+        
+        if (status == 0) {
+            TVLog(@"App uninstalled successfully: %@", bundleId);
+            return YES;
+        } else {
+            if (error) {
+                NSString *errMsg = errorOutput.length > 0 ? errorOutput : @"Uninstallation failed";
+                *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                            code:2007
+                                        userInfo:@{NSLocalizedDescriptionKey : errMsg}];
+            }
+            return NO;
+        }
+    } @catch (NSException *exception) {
+        TVLog(@"Failed to uninstall app: %@", exception.reason);
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                        code:2008
+                                    userInfo:@{NSLocalizedDescriptionKey : 
+                                        [NSString stringWithFormat:@"Exception: %@", exception.reason]}];
+        }
+        return NO;
     }
 }
 

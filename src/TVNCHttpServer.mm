@@ -215,6 +215,10 @@
         return [self handleVolume:query body:body];
     } else if ([path isEqualToString:@"/api/brightness"]) {
         return [self handleBrightness:query body:body];
+    } else if ([path isEqualToString:@"/api/install"]) {
+        return [self handleInstallApp:query];
+    } else if ([path isEqualToString:@"/api/uninstall"]) {
+        return [self handleUninstallApp:query];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -230,7 +234,7 @@
 
 #pragma mark - API Handlers
 
-// GET /api/screenshot?format=png
+// GET /api/screenshot?format=png&quality=0.8
 - (TVNCHttpResponse *)handleScreenshot:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -238,7 +242,15 @@
     NSData *imageData = nil;
     
     if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:0.9];
+        // 解析质量参数，默认0.9
+        CGFloat quality = 0.9;
+        NSString *qualityStr = query[@"quality"];
+        if (qualityStr) {
+            quality = [qualityStr floatValue];
+            if (quality < 0.0) quality = 0.0;
+            if (quality > 1.0) quality = 1.0;
+        }
+        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
     } else {
         imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
     }
@@ -448,7 +460,7 @@
 }
 
 // GET /api/device
-// 返回设备信息：设备名、设备ID、系统版本
+// 返回设备信息：设备名、设备ID、系统版本、电量、充电状态
 - (TVNCHttpResponse *)handleDeviceInfo {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -470,6 +482,32 @@
     // 获取更友好的设备型号名称
     NSString *deviceModelName = [self deviceModelNameFromIdentifier:deviceModel];
     
+    // 获取电量信息
+    [[UIDevice currentDevice] setBatteryMonitoringEnabled:YES];
+    float batteryLevel = [[UIDevice currentDevice] batteryLevel];
+    UIDeviceBatteryState batteryState = [[UIDevice currentDevice] batteryState];
+    [[UIDevice currentDevice] setBatteryMonitoringEnabled:NO];
+    
+    // 转换电量状态为字符串
+    NSString *batteryStateString = @"unknown";
+    switch (batteryState) {
+        case UIDeviceBatteryStateUnplugged:
+            batteryStateString = @"unplugged";  // 未充电
+            break;
+        case UIDeviceBatteryStateCharging:
+            batteryStateString = @"charging";   // 正在充电
+            break;
+        case UIDeviceBatteryStateFull:
+            batteryStateString = @"full";       // 已充满
+            break;
+        default:
+            batteryStateString = @"unknown";
+            break;
+    }
+    
+    // 电量为 -1 表示无法获取
+    NSNumber *batteryLevelNumber = (batteryLevel >= 0) ? @(batteryLevel * 100) : @(-1);
+    
     response.statusCode = 200;
     response.contentType = @"application/json";
     NSDictionary *result = @{
@@ -478,7 +516,9 @@
         @"deviceModel": deviceModel ?: @"Unknown",
         @"deviceModelName": deviceModelName ?: @"Unknown",
         @"systemVersion": systemVersion ?: @"Unknown",
-        @"systemName": [[UIDevice currentDevice] systemName] ?: @"iOS"
+        @"systemName": [[UIDevice currentDevice] systemName] ?: @"iOS",
+        @"batteryLevel": batteryLevelNumber,       // 电量百分比 0-100，-1表示未知
+        @"batteryState": batteryStateString        // unknown/unplugged/charging/full
     };
     response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
     
@@ -961,6 +1001,109 @@
     return response;
 }
 
+// POST /api/install?path=/var/mobile/Documents/app.ipa
+// 通过 TrollStore 安装 IPA 文件
+- (TVNCHttpResponse *)handleInstallApp:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *ipaPath = query[@"path"];
+    if (!ipaPath || ipaPath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter. Usage: /api/install?path=/path/to/app.ipa"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 检查 TrollStore 是否可用
+    if (![[TVNCApiManager sharedManager] isTrollStoreAvailable]) {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"TrollStore is not available. Please ensure TrollStore is installed."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 检查 IPA 文件是否存在
+    if (access([ipaPath UTF8String], F_OK) != 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"IPA file not found", @"path": ipaPath};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Install app request - path: %@", ipaPath);
+    
+    // 执行安装
+    NSError *error = nil;
+    BOOL success = [[TVNCApiManager sharedManager] installAppWithIPAPath:ipaPath error:&error];
+    
+    if (success) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"message": @"App installed successfully", @"path": ipaPath};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        TVLog(@"HTTP Server: App installed successfully: %@", ipaPath);
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSString *errMsg = error ? error.localizedDescription : @"Installation failed";
+        NSDictionary *result = @{@"success": @NO, @"error": errMsg, @"path": ipaPath};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        TVLog(@"HTTP Server: App installation failed: %@", errMsg);
+    }
+    
+    return response;
+}
+
+// POST /api/uninstall?bundleId=com.example.app
+// 通过 TrollStore 卸载应用
+- (TVNCHttpResponse *)handleUninstallApp:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *bundleId = query[@"bundleId"];
+    if (!bundleId || bundleId.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing bundleId parameter. Usage: /api/uninstall?bundleId=com.example.app"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 检查 TrollStore 是否可用
+    if (![[TVNCApiManager sharedManager] isTrollStoreAvailable]) {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"TrollStore is not available. Please ensure TrollStore is installed."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Uninstall app request - bundleId: %@", bundleId);
+    
+    // 执行卸载
+    NSError *error = nil;
+    BOOL success = [[TVNCApiManager sharedManager] uninstallAppWithBundleId:bundleId error:&error];
+    
+    if (success) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"message": @"App uninstalled successfully", @"bundleId": bundleId};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        TVLog(@"HTTP Server: App uninstalled successfully: %@", bundleId);
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSString *errMsg = error ? error.localizedDescription : @"Uninstallation failed";
+        NSDictionary *result = @{@"success": @NO, @"error": errMsg, @"bundleId": bundleId};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        TVLog(@"HTTP Server: App uninstallation failed: %@", errMsg);
+    }
+    
+    return response;
+}
+
 // GET /
 - (TVNCHttpResponse *)handleRoot {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -978,14 +1121,14 @@
         "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
-        "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本）</li>"
-        "<li><b>GET /api/checkfile</b> - 检查文件是否存在（/var/mobile/Media/zhuangtai.txt）</li>"
+        "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本、电量）</li>"
+        "<li><b>GET /api/checkfile</b> - 检查文件是否存在</li>"
         "<li><b>POST /api/upload?path=/xxx/xxx</b> - 上传任意文件（自动创建目录）</li>"
-        "<li><b>POST /api/clearapps</b> - 清理后台应用（模拟双击Home键）</li>"
-        "<li><b>GET /api/volume</b> - 获取当前音量</li>"
-        "<li><b>POST /api/volume?value=0.5</b> - 设置音量（0.0-1.0）</li>"
-        "<li><b>GET /api/brightness</b> - 获取当前屏幕亮度</li>"
-        "<li><b>POST /api/brightness?value=0.5</b> - 设置屏幕亮度（0.0-1.0）</li>"
+        "<li><b>POST /api/clearapps</b> - 清理后台应用</li>"
+        "<li><b>GET/POST /api/volume?value=0.5</b> - 获取/设置音量</li>"
+        "<li><b>GET/POST /api/brightness?value=0.5</b> - 获取/设置亮度</li>"
+        "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
+        "<li><b>POST /api/uninstall?bundleId=com.xxx.app</b> - 通过 TrollStore 卸载应用</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;

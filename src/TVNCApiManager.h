@@ -137,6 +137,30 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (CGFloat)getCurrentBrightness;
 
+#pragma mark - 应用管理 API (TrollStore)
+
+/**
+ 通过 TrollStore 安装 IPA 文件
+ @param ipaPath IPA 文件的完整路径
+ @param error 错误信息输出
+ @return 是否成功
+ */
+- (BOOL)installAppWithIPAPath:(NSString *)ipaPath error:(NSError **)error;
+
+/**
+ 通过 TrollStore 卸载应用
+ @param bundleId 应用的 Bundle ID
+ @param error 错误信息输出
+ @return 是否成功
+ */
+- (BOOL)uninstallAppWithBundleId:(NSString *)bundleId error:(NSError **)error;
+
+/**
+ 检查 TrollStore 是否可用
+ @return 是否可用
+ */
+- (BOOL)isTrollStoreAvailable;
+
 @end
 
 NS_ASSUME_NONNULL_END

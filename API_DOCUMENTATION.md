@@ -17,13 +17,14 @@ TrollVNC 现在提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 **请求:**
 ```
-GET /api/screenshot?format=png
+GET /api/screenshot?format=png&quality=0.8
 ```
 
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
+| quality | float | 否 | JPEG质量 0.0~1.0，默认 `0.9`，仅对jpeg有效 |
 
 **响应:**
 - 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
@@ -34,8 +35,14 @@ GET /api/screenshot?format=png
 # 获取 PNG 截图
 curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?format=png"
 
-# 获取 JPEG 截图
+# 获取 JPEG 截图（默认质量0.9）
 curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg"
+
+# 获取 JPEG 截图（自定义质量0.5，文件更小）
+curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.5"
+
+# 获取高质量 JPEG（质量0.95）
+curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.95"
 ```
 
 ```python
@@ -412,7 +419,7 @@ GET /api/status
 
 ### 9. 获取设备信息
 
-获取设备名称、ID 和系统版本。
+获取设备名称、ID、系统版本、电量和充电状态。
 
 **请求:**
 ```
@@ -422,11 +429,14 @@ GET /api/device
 **响应:**
 ```json
 {
-  "status": "ok",
   "deviceName": "iPhone",
-  "deviceModelName": "iPhone14,2",
+  "deviceId": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+  "deviceModel": "iPhone14,2",
+  "deviceModelName": "iPhone 13 Pro",
   "systemVersion": "15.1.1",
-  "deviceIdentifier": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+  "systemName": "iOS",
+  "batteryLevel": 85,
+  "batteryState": "charging"
 }
 ```
 
@@ -434,9 +444,13 @@ GET /api/device
 | 字段 | 说明 |
 |------|------|
 | deviceName | 设备名称（用户在设置中定义的名称） |
-| deviceModelName | 设备型号（如 iPhone14,2） |
+| deviceId | 设备唯一标识符（UUID） |
+| deviceModel | 设备型号标识符（如 iPhone14,2） |
+| deviceModelName | 设备型号友好名称（如 iPhone 13 Pro） |
 | systemVersion | iOS 系统版本 |
-| deviceIdentifier | 设备唯一标识符（UUID） |
+| systemName | 系统名称 |
+| batteryLevel | 电量百分比（0-100），-1表示未知 |
+| batteryState | 充电状态：unknown/unplugged/charging/full |
 
 **示例:**
 ```bash
@@ -451,6 +465,8 @@ data = response.json()
 print(f"设备: {data['deviceModelName']}")
 print(f"系统: iOS {data['systemVersion']}")
 print(f"名称: {data['deviceName']}")
+print(f"电量: {data['batteryLevel']}%")
+print(f"状态: {data['batteryState']}")
 ```
 
 ---
@@ -649,7 +665,7 @@ uploadFile("/var/mobile/photo.jpg", "/var/mobile/Documents/backup/photo.jpg")
 
 ### 12. 清理后台应用
 
-模拟双击 Home 键打开应用切换器，然后上滑关闭所有后台应用。
+模拟双击 Home 键打开应用切换器，上滑关闭后台应用，然后返回桌面。
 
 **请求:**
 ```
@@ -679,6 +695,7 @@ print(response.json())
 
 **注意:**
 - 此功能通过模拟手势实现，可能需要几秒钟完成
+- 清理完成后会自动返回桌面
 - 部分系统版本可能行为略有不同
 
 ---
@@ -792,6 +809,133 @@ print(f"当前亮度: {response.json()['brightness']}")
 response = requests.post("http://192.168.1.100:8182/api/brightness?value=0.8")
 print(response.json())
 ```
+
+---
+
+### 15. 安装应用 (TrollStore)
+
+通过 TrollStore 安装 IPA 文件。需要设备已安装 TrollStore。
+
+**请求:**
+```
+POST /api/install?path=/var/mobile/Documents/app.ipa
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | IPA 文件的完整路径 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "App installed successfully",
+  "path": "/var/mobile/Documents/app.ipa"
+}
+```
+
+**错误响应:**
+```json
+{
+  "success": false,
+  "error": "TrollStore is not available. Please ensure TrollStore is installed."
+}
+```
+
+**示例:**
+```bash
+# 安装 IPA 文件
+curl -X POST "http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/MyApp.ipa"
+
+# 先上传再安装
+curl -X POST \
+  "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/NewApp.ipa" \
+  -H "Content-Type: application/octet-stream" \
+  --data-binary @NewApp.ipa
+
+curl -X POST "http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/NewApp.ipa"
+```
+
+```python
+import requests
+
+# 安装 IPA
+response = requests.post("http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/app.ipa")
+result = response.json()
+if result['success']:
+    print("安装成功!")
+else:
+    print(f"安装失败: {result['error']}")
+```
+
+**注意事项:**
+- 需要设备已安装 TrollStore
+- IPA 文件必须先上传到设备上（可使用 `/api/upload`）
+- 安装过程可能需要几秒钟
+- 安装成功后应用会出现在主屏幕
+
+---
+
+### 16. 卸载应用 (TrollStore)
+
+通过 TrollStore 卸载已安装的应用。需要设备已安装 TrollStore。
+
+**请求:**
+```
+POST /api/uninstall?bundleId=com.example.app
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| bundleId | string | 是 | 应用的 Bundle ID |
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "App uninstalled successfully",
+  "bundleId": "com.example.app"
+}
+```
+
+**错误响应:**
+```json
+{
+  "success": false,
+  "error": "App not found",
+  "bundleId": "com.example.app"
+}
+```
+
+**示例:**
+```bash
+# 卸载应用
+curl -X POST "http://192.168.1.100:8182/api/uninstall?bundleId=com.example.app"
+
+# 卸载 TrollVNC（示例）
+curl -X POST "http://192.168.1.100:8182/api/uninstall?bundleId=com.yourname.trollvnc"
+```
+
+```python
+import requests
+
+# 卸载应用
+bundle_id = "com.example.app"
+response = requests.post(f"http://192.168.1.100:8182/api/uninstall?bundleId={bundle_id}")
+result = response.json()
+if result['success']:
+    print(f"{bundle_id} 已卸载")
+else:
+    print(f"卸载失败: {result['error']}")
+```
+
+**注意事项:**
+- 需要设备已安装 TrollStore
+- 需要提供正确的 Bundle ID
+- 无法卸载系统应用
+- 卸载后应用数据也会被删除
 
 ---
 
