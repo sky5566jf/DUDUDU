@@ -1007,41 +1007,41 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     TVLog(@"TrollStore helper: %@", helperPath);
     
     // 构建命令: trollstorehelper install <ipa_path>
-    // 使用 NSTask 执行命令
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:helperPath];
-    [task setArguments:@[@"install", ipaPath]];
+    // 使用 POSIX popen 执行命令（iOS 不支持 NSTask）
+    NSString *command = [NSString stringWithFormat:@"\"%@\" install \"%@\" 2>&1", helperPath, ipaPath];
+    TVLog(@"Executing command: %@", command);
     
-    // 捕获输出
-    NSPipe *outputPipe = [NSPipe pipe];
-    NSPipe *errorPipe = [NSPipe pipe];
-    [task setStandardOutput:outputPipe];
-    [task setStandardError:errorPipe];
-    
-    // 执行命令
     @try {
-        [task launch];
-        [task waitUntilExit];
-        
-        int status = [task terminationStatus];
-        
-        // 读取输出
-        NSData *outputData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
-        NSData *errorData = [[errorPipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
-        NSString *errorOutput = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
-        
-        TVLog(@"TrollStore install output: %@", output);
-        if (errorOutput.length > 0) {
-            TVLog(@"TrollStore install error: %@", errorOutput);
+        FILE *fp = popen([command UTF8String], "r");
+        if (fp == NULL) {
+            TVLog(@"Failed to execute install command");
+            if (error) {
+                *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                            code:2004
+                                        userInfo:@{NSLocalizedDescriptionKey : @"Failed to execute install command"}];
+            }
+            return NO;
         }
         
-        if (status == 0) {
+        // 读取输出
+        char buffer[1024];
+        NSMutableString *output = [NSMutableString string];
+        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+            [output appendString:[NSString stringWithUTF8String:buffer]];
+        }
+        
+        int status = pclose(fp);
+        int exitCode = WEXITSTATUS(status);
+        
+        TVLog(@"TrollStore install output: %@", output);
+        TVLog(@"TrollStore install exit code: %d", exitCode);
+        
+        if (exitCode == 0) {
             TVLog(@"IPA installed successfully: %@", ipaPath);
             return YES;
         } else {
             if (error) {
-                NSString *errMsg = errorOutput.length > 0 ? errorOutput : @"Installation failed";
+                NSString *errMsg = output.length > 0 ? output : @"Installation failed";
                 *error = [NSError errorWithDomain:@"TVNCApiManager"
                                             code:2004
                                         userInfo:@{NSLocalizedDescriptionKey : errMsg}];
@@ -1058,7 +1058,6 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         }
         return NO;
     }
-}
 
 // 通过 TrollStore 卸载应用
 - (BOOL)uninstallAppWithBundleId:(NSString *)bundleId error:(NSError **)error {
@@ -1085,40 +1084,41 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     TVLog(@"Uninstalling app using TrollStore: %@", bundleId);
     
     // 构建命令: trollstorehelper uninstall <bundle_id>
-    NSTask *task = [[NSTask alloc] init];
-    [task setLaunchPath:helperPath];
-    [task setArguments:@[@"uninstall", bundleId]];
+    // 使用 POSIX popen 执行命令（iOS 不支持 NSTask）
+    NSString *command = [NSString stringWithFormat:@"\"%@\" uninstall \"%@\" 2>&1", helperPath, bundleId];
+    TVLog(@"Executing command: %@", command);
     
-    // 捕获输出
-    NSPipe *outputPipe = [NSPipe pipe];
-    NSPipe *errorPipe = [NSPipe pipe];
-    [task setStandardOutput:outputPipe];
-    [task setStandardError:errorPipe];
-    
-    // 执行命令
     @try {
-        [task launch];
-        [task waitUntilExit];
-        
-        int status = [task terminationStatus];
-        
-        // 读取输出
-        NSData *outputData = [[outputPipe fileHandleForReading] readDataToEndOfFile];
-        NSData *errorData = [[errorPipe fileHandleForReading] readDataToEndOfFile];
-        NSString *output = [[NSString alloc] initWithData:outputData encoding:NSUTF8StringEncoding];
-        NSString *errorOutput = [[NSString alloc] initWithData:errorData encoding:NSUTF8StringEncoding];
-        
-        TVLog(@"TrollStore uninstall output: %@", output);
-        if (errorOutput.length > 0) {
-            TVLog(@"TrollStore uninstall error: %@", errorOutput);
+        FILE *fp = popen([command UTF8String], "r");
+        if (fp == NULL) {
+            TVLog(@"Failed to execute uninstall command");
+            if (error) {
+                *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                            code:2007
+                                        userInfo:@{NSLocalizedDescriptionKey : @"Failed to execute uninstall command"}];
+            }
+            return NO;
         }
         
-        if (status == 0) {
+        // 读取输出
+        char buffer[1024];
+        NSMutableString *output = [NSMutableString string];
+        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+            [output appendString:[NSString stringWithUTF8String:buffer]];
+        }
+        
+        int status = pclose(fp);
+        int exitCode = WEXITSTATUS(status);
+        
+        TVLog(@"TrollStore uninstall output: %@", output);
+        TVLog(@"TrollStore uninstall exit code: %d", exitCode);
+        
+        if (exitCode == 0) {
             TVLog(@"App uninstalled successfully: %@", bundleId);
             return YES;
         } else {
             if (error) {
-                NSString *errMsg = errorOutput.length > 0 ? errorOutput : @"Uninstallation failed";
+                NSString *errMsg = output.length > 0 ? output : @"Uninstallation failed";
                 *error = [NSError errorWithDomain:@"TVNCApiManager"
                                             code:2007
                                         userInfo:@{NSLocalizedDescriptionKey : errMsg}];
