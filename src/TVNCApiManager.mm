@@ -28,6 +28,7 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
+#import <notify.h>  // 用于 notify_post 系统通知
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -60,6 +61,9 @@ extern "C" {
 #endif
 
 void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef surface, int x, int y);
+
+// SpringBoardServices 函数声明
+extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 #ifdef __cplusplus
 }
@@ -312,7 +316,11 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         }
         
         // 从旋转后的缓冲区创建 CGImage
-        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, NULL);
+        // 注意：CGDataProviderCreateWithData 不会复制数据，所以需要在 CGImage 释放时释放 dstData
+        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, 
+                                                                      ^(void *info, const void *data, size_t size) {
+                                                                          free((void *)data);
+                                                                      });
         rotatedImage = CGImageCreate(dstWidth, dstHeight, 8, 32, dstBytesPerRow, colorSpace,
                                       kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
                                       rotProvider, NULL, false, kCGRenderingIntentDefault);
@@ -358,15 +366,21 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     
     CFRelease(dest);
     if (rotatedImage) {
-        CGImageRelease(rotatedImage);
-        // 释放旋转缓冲区
+        // 先获取 data provider 的引用，再释放 image
         CGDataProviderRef provider = CGImageGetDataProvider(rotatedImage);
+        void *providerData = NULL;
         if (provider) {
+            // 复制数据指针以便后续释放
             CFDataRef data = CGDataProviderCopyData(provider);
             if (data) {
-                free((void *)CFDataGetBytePtr(data));
-                CFRelease(data);
+                providerData = (void *)CFDataGetBytePtr(data);
+                CFRelease(data);  // 释放复制的数据引用
             }
+        }
+        CGImageRelease(rotatedImage);
+        // 释放旋转缓冲区内存
+        if (providerData) {
+            free(providerData);
         }
     }
     CGImageRelease(cgImage);
@@ -1464,58 +1478,41 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 
 // 获取当前前台应用的 Bundle ID
 - (NSString *)getFrontmostAppBundleID {
-    // 使用 SpringBoard 私有 API 获取前台应用
-    // 这里使用 notify 查询当前活跃应用
-    
-    // 方法：通过检查 UIApplication 的状态
-    UIApplication *app = [UIApplication sharedApplication];
-    if (app) {
-        // 获取当前活跃的 scene
-        if (@available(iOS 13.0, *)) {
-            for (UIScene *scene in app.connectedScenes) {
-                if (scene.activationState == UISceneActivationStateForegroundActive) {
-                    // 返回 TrollVNC 自己的 bundle ID
-                    return [[NSBundle mainBundle] bundleIdentifier];
-                }
-            }
-        }
+    // 使用 SpringBoardServices 私有 API 获取前台应用
+    CFStringRef frontmostAppID = SBSCopyFrontmostApplicationDisplayIdentifier();
+    if (frontmostAppID) {
+        NSString *bundleID = (__bridge_transfer NSString *)frontmostAppID;
+        return bundleID;
     }
-    
-    // 尝试通过文件检查当前活跃应用
-    // 这是一个简化的实现，实际可能需要更复杂的逻辑
     return nil;
 }
 
 // 检查是否在桌面（SpringBoard）
 - (BOOL)isOnSpringBoard {
-    // 通过检查当前是否有非系统应用在前台来判断
-    // 简化实现：假设如果在 TrollVNC 内部调用，说明有活跃应用
-    
-    // 实际实现可以通过检查当前显示的窗口来判断
     UIApplication *app = [UIApplication sharedApplication];
     if (!app) return YES;
     
-    // 检查 keyWindow 的 rootViewController
-    UIWindow *keyWindow = nil;
-    if (@available(iOS 13.0, *)) {
-        for (UIScene *scene in app.connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]]) {
-                UIWindowScene *windowScene = (UIWindowScene *)scene;
-                for (UIWindow *window in windowScene.windows) {
-                    if (window.isKeyWindow) {
-                        keyWindow = window;
-                        break;
-                    }
-                }
-            }
-        }
-    } else {
-        keyWindow = app.keyWindow;
+    // 获取当前前台应用的 Bundle ID
+    NSString *frontmostBundleID = [self getFrontmostAppBundleID];
+    
+    // 如果是 SpringBoard 或者 com.apple.springboard，说明在桌面
+    if (!frontmostBundleID || 
+        [frontmostBundleID isEqualToString:@"com.apple.springboard"] ||
+        [frontmostBundleID isEqualToString:@"SpringBoard"]) {
+        return YES;
     }
     
-    // 如果找不到 keyWindow 或者 rootViewController 是空的，可能是在桌面
-    if (!keyWindow || !keyWindow.rootViewController) {
-        return YES;
+    // 检查是否是系统应用（在桌面上运行的）
+    NSArray *systemApps = @[
+        @"com.apple.springboard",
+        @"com.apple.PineBoard",  // tvOS SpringBoard
+        @"com.apple.home.screen"  // iPadOS 可能的桌面标识
+    ];
+    
+    for (NSString *systemApp in systemApps) {
+        if ([frontmostBundleID isEqualToString:systemApp]) {
+            return YES;
+        }
     }
     
     return NO;

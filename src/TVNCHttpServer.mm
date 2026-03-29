@@ -482,9 +482,13 @@
     
     response.statusCode = 200;
     response.contentType = @"application/json";
+    
+    // 使用局部变量避免多线程竞争
+    NSUInteger currentPort = self.port;
+    
     NSDictionary *result = @{
         @"status": @"running",
-        @"httpPort": @(_port),
+        @"httpPort": @(currentPort),
         @"version": @PACKAGE_VERSION
     };
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
@@ -1355,7 +1359,8 @@
         "<li><b>GET/POST /api/brightness?value=0.5</b> - 获取/设置亮度</li>"
         "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
         "<li><b>POST /api/uninstall?bundleId=com.xxx.app</b> - 通过 TrollStore 卸载应用</li>"
-        "<li><b>GET /api/trigger?ip=127.0.0.1&port=3333&delay=5</b> - 触发懒人精灵运行脚本</li>"
+        "<li><b>GET /api/trollstore/diagnostics</b> - 获取 TrollStore 诊断信息</li>"
+        "<li><b>GET /api/trigger?port=3333&delay=5</b> - 触发懒人精灵运行脚本（IP 自动检测）</li>"
         "<li><b>POST /api/reboot</b> - 重启设备</li>"
         "<li><b>POST /api/respring</b> - 注销设备（Respring）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"

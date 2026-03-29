@@ -48,3 +48,9 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
 ## 修改历史
 - 2025-03-29: 添加重启、注销、智能清理后台应用功能
 - 2025-03-29: 修改 `/api/trigger` 自动使用调用者 IP
+- 2025-03-29: 代码优化
+  - 修复旋转截图内存泄漏（使用 CGDataProvider 释放回调）
+  - 添加 notify.h 头文件
+  - 改进 `isOnSpringBoard` 检测逻辑，使用 `SBSCopyFrontmostApplicationDisplayIdentifier`
+  - 改进 `getFrontmostAppBundleID` 使用 SpringBoardServices 私有 API
+  - 修复 TVNCHttpServer 线程安全问题
