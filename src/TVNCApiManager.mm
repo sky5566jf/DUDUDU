@@ -29,6 +29,7 @@
 #import <unistd.h>
 #import <errno.h>
 #import <notify.h>  // 用于 notify_post 系统通知
+#import <spawn.h>   // 用于 posix_spawn
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -317,10 +318,8 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         
         // 从旋转后的缓冲区创建 CGImage
         // 注意：CGDataProviderCreateWithData 不会复制数据，所以需要在 CGImage 释放时释放 dstData
-        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, 
-                                                                      ^(void *info, const void *data, size_t size) {
-                                                                          free((void *)data);
-                                                                      });
+        // 使用 __attribute__((cleanup)) 或手动管理：这里先保存 dstData 指针，在 CGImage 释放后再释放
+        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, NULL);
         rotatedImage = CGImageCreate(dstWidth, dstHeight, 8, 32, dstBytesPerRow, colorSpace,
                                       kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
                                       rotProvider, NULL, false, kCGRenderingIntentDefault);
@@ -328,6 +327,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         
         if (rotatedImage) {
             finalImage = rotatedImage;
+            // 注意：dstData 将在后续 CGImage 释放后手动释放
         } else {
             free(dstData);
         }
@@ -365,16 +365,17 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     BOOL success = CGImageDestinationFinalize(dest);
     
     CFRelease(dest);
+    
+    // 释放旋转后的图像和缓冲区
     if (rotatedImage) {
-        // 先获取 data provider 的引用，再释放 image
+        // 获取 data provider 的数据指针
         CGDataProviderRef provider = CGImageGetDataProvider(rotatedImage);
         void *providerData = NULL;
         if (provider) {
-            // 复制数据指针以便后续释放
             CFDataRef data = CGDataProviderCopyData(provider);
             if (data) {
                 providerData = (void *)CFDataGetBytePtr(data);
-                CFRelease(data);  // 释放复制的数据引用
+                CFRelease(data);
             }
         }
         CGImageRelease(rotatedImage);
@@ -383,6 +384,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             free(providerData);
         }
     }
+    
     CGImageRelease(cgImage);
     CFRelease(surface);
     CGColorSpaceRelease(colorSpace);
@@ -1433,10 +1435,12 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             return YES;
         }
         
-        // 备选方案：使用 system 命令
+        // 备选方案：使用 posix_spawn 执行 reboot 命令
         // 注意：这需要 root 权限
-        int result = system("reboot");
-        if (result == 0) {
+        pid_t pid;
+        const char *args[] = {"/sbin/reboot", NULL};
+        int status = posix_spawn(&pid, "/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        if (status == 0) {
             TVLog(@"Reboot command executed");
             return YES;
         }
@@ -1459,9 +1463,11 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             return YES;
         }
         
-        // 方法2: 使用 killall SpringBoard
-        int result = system("killall -9 SpringBoard");
-        if (result == 0) {
+        // 方法2: 使用 posix_spawn 执行 killall SpringBoard
+        pid_t pid2;
+        const char *killArgs[] = {"/usr/bin/killall", "-9", "SpringBoard", NULL};
+        int killStatus = posix_spawn(&pid2, "/usr/bin/killall", NULL, NULL, (char **)killArgs, NULL);
+        if (killStatus == 0) {
             TVLog(@"SpringBoard killed, respring initiated");
             return YES;
         }
