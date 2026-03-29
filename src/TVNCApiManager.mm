@@ -28,6 +28,7 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
+#import <sys/reboot.h>  // 用于 reboot() 系统调用
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 
@@ -1424,28 +1425,46 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 // 重启设备
 - (BOOL)rebootDevice {
     @try {
-        // 方法1: 使用 HID 事件模拟电源键+Home键组合（如果支持）
-        // 方法2: 使用 POSIX reboot 系统调用
-        // 方法3: 使用 SpringBoard 私有 API
+        TVLog(@"Attempting to reboot device (iOS 15)...");
         
-        // 尝试使用 notify 触发系统重启
-        int ret = notify_post("com.apple.system.reboot");
+        // iOS 15 上 TrollStore 环境可能需要特殊处理
+        // 方法1: 直接使用 reboot() 系统调用（需要 root 权限）
+        TVLog(@"Trying reboot() system call...");
+        int ret = reboot(RB_AUTOBOOT);
+        TVLog(@"reboot() returned: %d, errno: %d", ret, errno);
+        if (ret == 0) {
+            TVLog(@"Reboot system call successful");
+            return YES;
+        }
+        
+        // 方法2: 使用 notify 触发系统重启
+        ret = notify_post("com.apple.system.reboot");
+        TVLog(@"notify_post(com.apple.system.reboot) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
             TVLog(@"Reboot notification sent successfully");
             return YES;
         }
         
-        // 备选方案：使用 posix_spawn 执行 reboot 命令
-        // 注意：这需要 root 权限
+        // 方法3: 尝试其他重启通知
+        ret = notify_post("com.apple.mobile.reboot");
+        TVLog(@"notify_post(com.apple.mobile.reboot) returned: %d", ret);
+        if (ret == NOTIFY_STATUS_OK) {
+            TVLog(@"Mobile reboot notification sent successfully");
+            return YES;
+        }
+        
+        // 方法4: 使用 posix_spawn 执行 reboot 命令
+        TVLog(@"Trying posix_spawn /sbin/reboot...");
         pid_t pid;
         const char *args[] = {"/sbin/reboot", NULL};
         int status = posix_spawn(&pid, "/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        TVLog(@"posix_spawn returned: %d", status);
         if (status == 0) {
             TVLog(@"Reboot command executed");
             return YES;
         }
         
-        TVLog(@"Failed to reboot device");
+        TVLog(@"All reboot methods failed");
         return NO;
     } @catch (NSException *exception) {
         TVLog(@"Reboot failed: %@", exception.reason);
@@ -1456,23 +1475,47 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 // 注销设备（Respring）
 - (BOOL)respringDevice {
     @try {
-        // 方法1: 使用 notify_post 触发 respring
-        int ret = notify_post("com.apple.springboard.respring");
-        if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"Respring notification sent successfully");
-            return YES;
-        }
+        TVLog(@"Attempting to respring device (iOS 15)...");
         
-        // 方法2: 使用 posix_spawn 执行 killall SpringBoard
-        pid_t pid2;
+        // iOS 15 上 killall SpringBoard 是最可靠的方法
+        // 方法1: 使用 posix_spawn 执行 killall SpringBoard
+        TVLog(@"Trying posix_spawn killall SpringBoard...");
+        pid_t pid;
         const char *killArgs[] = {"/usr/bin/killall", "-9", "SpringBoard", NULL};
-        int killStatus = posix_spawn(&pid2, "/usr/bin/killall", NULL, NULL, (char **)killArgs, NULL);
+        int killStatus = posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char **)killArgs, NULL);
+        TVLog(@"posix_spawn(killall SpringBoard) returned: %d", killStatus);
         if (killStatus == 0) {
             TVLog(@"SpringBoard killed, respring initiated");
             return YES;
         }
         
-        TVLog(@"Failed to respring device");
+        // 方法2: 尝试 killall backboardd（也会触发 respring）
+        TVLog(@"Trying posix_spawn killall backboardd...");
+        const char *bbArgs[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
+        killStatus = posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char **)bbArgs, NULL);
+        TVLog(@"posix_spawn(killall backboardd) returned: %d", killStatus);
+        if (killStatus == 0) {
+            TVLog(@"BackBoard killed, respring initiated");
+            return YES;
+        }
+        
+        // 方法3: 使用 notify_post 触发 respring
+        int ret = notify_post("com.apple.springboard.respring");
+        TVLog(@"notify_post(com.apple.springboard.respring) returned: %d", ret);
+        if (ret == NOTIFY_STATUS_OK) {
+            TVLog(@"Respring notification sent successfully");
+            return YES;
+        }
+        
+        // 方法4: 尝试其他 respring 通知
+        ret = notify_post("com.apple.springboard.Restart");
+        TVLog(@"notify_post(com.apple.springboard.Restart) returned: %d", ret);
+        if (ret == NOTIFY_STATUS_OK) {
+            TVLog(@"SpringBoard restart notification sent successfully");
+            return YES;
+        }
+        
+        TVLog(@"All respring methods failed");
         return NO;
     } @catch (NSException *exception) {
         TVLog(@"Respring failed: %@", exception.reason);
@@ -1484,27 +1527,56 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 // 获取当前前台应用的 Bundle ID
 - (NSString *)getFrontmostAppBundleID {
-    // 使用 SpringBoardServices 私有 API 获取前台应用
+    // 方法1: 使用 SpringBoardServices 私有 API 获取前台应用
+    // 在 iOS 15 上这个 API 是可用的
     CFStringRef frontmostAppID = SBSCopyFrontmostApplicationDisplayIdentifier();
     if (frontmostAppID) {
         NSString *bundleID = (__bridge_transfer NSString *)frontmostAppID;
+        TVLog(@"Frontmost app (via SBS): %@", bundleID);
         return bundleID;
     }
+    
+    TVLog(@"Frontmost app: SBSCopyFrontmostApplicationDisplayIdentifier returned nil");
+    
+    // 方法2: 尝试使用 FrontBoardServices（如果可用）
+    // 方法3: 返回 nil 让调用者处理
     return nil;
 }
 
 // 检查是否在桌面（SpringBoard）
 - (BOOL)isOnSpringBoard {
     UIApplication *app = [UIApplication sharedApplication];
-    if (!app) return YES;
+    if (!app) {
+        TVLog(@"isOnSpringBoard: UIApplication is nil, assuming on SpringBoard");
+        return YES;
+    }
     
     // 获取当前前台应用的 Bundle ID
     NSString *frontmostBundleID = [self getFrontmostAppBundleID];
+    TVLog(@"isOnSpringBoard: frontmostBundleID = %@", frontmostBundleID);
+    
+    // 如果无法获取前台应用，尝试通过应用状态判断
+    if (!frontmostBundleID) {
+        // 检查当前应用是否在后台
+        UIApplicationState state = [app applicationState];
+        TVLog(@"isOnSpringBoard: Could not get frontmost app, current app state = %ld", (long)state);
+        
+        // 如果当前应用在后台，可能用户在看别的应用
+        // 如果在前台，可能是 SpringBoard
+        if (state == UIApplicationStateBackground) {
+            TVLog(@"isOnSpringBoard: App in background, assuming not on SpringBoard");
+            return NO;
+        }
+        
+        // 无法确定，默认假设在桌面（跳过清理）
+        TVLog(@"isOnSpringBoard: Assuming on SpringBoard (fallback)");
+        return YES;
+    }
     
     // 如果是 SpringBoard 或者 com.apple.springboard，说明在桌面
-    if (!frontmostBundleID || 
-        [frontmostBundleID isEqualToString:@"com.apple.springboard"] ||
+    if ([frontmostBundleID isEqualToString:@"com.apple.springboard"] ||
         [frontmostBundleID isEqualToString:@"SpringBoard"]) {
+        TVLog(@"isOnSpringBoard: Detected SpringBoard");
         return YES;
     }
     
@@ -1512,15 +1584,18 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     NSArray *systemApps = @[
         @"com.apple.springboard",
         @"com.apple.PineBoard",  // tvOS SpringBoard
-        @"com.apple.home.screen"  // iPadOS 可能的桌面标识
+        @"com.apple.home.screen",  // iPadOS 可能的桌面标识
+        @"com.apple.Home.HomeScreen"
     ];
     
     for (NSString *systemApp in systemApps) {
         if ([frontmostBundleID isEqualToString:systemApp]) {
+            TVLog(@"isOnSpringBoard: Detected system app %@", systemApp);
             return YES;
         }
     }
     
+    TVLog(@"isOnSpringBoard: Not on SpringBoard, frontmost app is %@", frontmostBundleID);
     return NO;
 }
 
@@ -1529,40 +1604,55 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     
     @try {
+        TVLog(@"Smart clear: Starting...");
+        
         // 检查是否在桌面
         BOOL onSpringBoard = [self isOnSpringBoard];
         result[@"onSpringBoard"] = @(onSpringBoard);
+        TVLog(@"Smart clear: onSpringBoard = %d", onSpringBoard);
         
         if (onSpringBoard) {
             result[@"success"] = @YES;
             result[@"message"] = @"Already on SpringBoard, no apps to clear";
             result[@"action"] = @"skipped";
+            TVLog(@"Smart clear: Skipped - already on SpringBoard");
             return result;
         }
         
         // 获取当前前台应用
         NSString *frontmostApp = [self getFrontmostAppBundleID];
         result[@"frontmostApp"] = frontmostApp ?: @"unknown";
+        TVLog(@"Smart clear: frontmostApp = %@", frontmostApp);
         
         // 执行清理操作
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        if (!generator) {
+            TVLog(@"Smart clear: Failed - STHIDEventGenerator is nil");
+            result[@"success"] = @NO;
+            result[@"message"] = @"HID generator not available";
+            return result;
+        }
         
         // 双击 Home 键打开应用切换器
+        TVLog(@"Smart clear: Sending menuDoublePress...");
         [generator menuDoublePress];
         [NSThread sleepForTimeInterval:0.8];
         
         // 获取屏幕尺寸
         CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
         CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+        TVLog(@"Smart clear: Screen size = %.0f x %.0f", screenWidth, screenHeight);
         
         // 上滑关闭当前应用
         CGPoint startPoint = CGPointMake(screenWidth / 2, screenHeight - 100);
         CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 3);
         
+        TVLog(@"Smart clear: Sending swipe gesture...");
         [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
         [NSThread sleepForTimeInterval:0.5];
         
         // 返回桌面
+        TVLog(@"Smart clear: Sending menuPress to return home...");
         [generator menuPress];
         
         result[@"success"] = @YES;
@@ -1570,7 +1660,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         result[@"action"] = @"cleared";
         result[@"closedApp"] = frontmostApp ?: @"unknown";
         
-        TVLog(@"Smart clear background apps: %@", result);
+        TVLog(@"Smart clear: Completed successfully");
         
     } @catch (NSException *exception) {
         result[@"success"] = @NO;
