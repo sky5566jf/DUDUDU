@@ -22,6 +22,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
+#import <arpa/inet.h>
 #import <sys/socket.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
@@ -172,7 +173,8 @@
 - (TVNCHttpResponse *)handleRequest:(NSString *)method 
                                  path:(NSString *)path 
                                 query:(NSDictionary *)query 
-                                 body:(nullable NSData *)body {
+                                 body:(nullable NSData *)body 
+                           clientAddr:(nullable NSString *)clientAddr {
     
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -221,6 +223,14 @@
         return [self handleUninstallApp:query];
     } else if ([path isEqualToString:@"/api/trollstore/diagnostics"]) {
         return [self handleTrollStoreDiagnostics];
+    } else if ([path isEqualToString:@"/api/trigger"]) {
+        return [self handleTrigger:query clientAddr:clientAddr];
+    } else if ([path isEqualToString:@"/api/reboot"]) {
+        return [self handleReboot];
+    } else if ([path isEqualToString:@"/api/respring"]) {
+        return [self handleRespring];
+    } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
+        return [self handleClearAppsSmart];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -236,12 +246,22 @@
 
 #pragma mark - API Handlers
 
-// GET /api/screenshot?format=png&quality=0.8
+// GET /api/screenshot?format=png&quality=0.8&rotation=90
 - (TVNCHttpResponse *)handleScreenshot:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
     NSString *format = query[@"format"] ?: @"png";
     NSData *imageData = nil;
+    
+    // 解析旋转参数，默认0度
+    NSInteger rotation = 0;
+    NSString *rotationStr = query[@"rotation"];
+    if (rotationStr) {
+        rotation = [rotationStr integerValue];
+        // 规范化到 0, 90, 180, 270
+        rotation = ((rotation % 360) + 360) % 360;
+        rotation = (rotation / 90) * 90;
+    }
     
     if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
         // 解析质量参数，默认0.9
@@ -252,9 +272,20 @@
             if (quality < 0.0) quality = 0.0;
             if (quality > 1.0) quality = 1.0;
         }
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+        
+        // 如果有旋转参数，使用带旋转的方法
+        if (rotation != 0) {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
+        } else {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+        }
     } else {
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
+        // PNG 格式也支持旋转
+        if (rotation != 0) {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:1.0 rotation:rotation];
+        } else {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
+        }
     }
     
     if (imageData) {
@@ -1073,6 +1104,185 @@
     return response;
 }
 
+// POST /api/reboot
+// 重启设备
+- (TVNCHttpResponse *)handleReboot {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Reboot request received");
+    
+    BOOL success = [[TVNCApiManager sharedManager] rebootDevice];
+    
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+    
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"message": @"Reboot initiated",
+            @"warning": @"Device will restart immediately"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to initiate reboot"
+        };
+    
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/respring
+// 注销设备（Respring）
+- (TVNCHttpResponse *)handleRespring {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Respring request received");
+    
+    BOOL success = [[TVNCApiManager sharedManager] respringDevice];
+    
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+    
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"message": @"Respring initiated",
+            @"warning": @"SpringBoard will restart"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to initiate respring"
+        };
+    
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/clearapps/smart
+// 智能清理后台应用（识别当前应用，桌面则跳过）
+- (TVNCHttpResponse *)handleClearAppsSmart {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Smart clear apps request received");
+    
+    NSDictionary *result = [[TVNCApiManager sharedManager] clearBackgroundAppsSmart];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/trigger?ip=192.168.x.x&port=3333&delay=5
+// 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行
+- (TVNCHttpResponse *)handleTrigger:(NSDictionary *)query clientAddr:(nullable NSString *)clientAddr {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    // 获取目标 IP（优先级：传入参数 > 调用者IP > 127.0.0.1）
+    NSString *targetIP = query[@"ip"];
+    if (!targetIP || targetIP.length == 0) {
+        // 如果没有传 IP 参数，使用调用者的 IP
+        if (clientAddr && clientAddr.length > 0) {
+            targetIP = clientAddr;
+            TVLog(@"HTTP Server: Using caller's IP: %@", targetIP);
+        } else {
+            targetIP = @"127.0.0.1";
+        }
+    }
+    
+    // 获取目标端口（默认 3333）
+    NSString *portStr = query[@"port"] ?: @"3333";
+    NSInteger port = [portStr integerValue];
+    if (port <= 0 || port > 65535) {
+        port = 3333;
+    }
+    
+    // 获取延迟秒数（默认 5 秒）
+    NSString *delayStr = query[@"delay"] ?: @"5";
+    NSInteger delay = [delayStr integerValue];
+    if (delay < 0) {
+        delay = 5;
+    }
+    
+    TVLog(@"HTTP Server: Trigger request - IP: %@, Port: %ld, Delay: %ld seconds", 
+          targetIP, (long)port, (long)delay);
+    
+    // 在后台线程执行延迟和 HTTP 请求
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // 等待指定秒数
+        if (delay > 0) {
+            TVLog(@"HTTP Server: Waiting %ld seconds before sending request...", (long)delay);
+            [NSThread sleepForTimeInterval:(NSTimeInterval)delay];
+        }
+        
+        // 构建请求 URL
+        NSString *urlString = [NSString stringWithFormat:@"http://%@:%ld/api/command", targetIP, (long)port];
+        NSURL *url = [NSURL URLWithString:urlString];
+        
+        if (!url) {
+            TVLog(@"HTTP Server: Invalid URL: %@", urlString);
+            return;
+        }
+        
+        // 创建请求
+        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+        request.HTTPMethod = @"POST";
+        request.timeoutInterval = 30.0;
+        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        
+        // 构建请求体
+        NSDictionary *bodyDict = @{@"cmd": @"runscript"};
+        NSError *jsonError = nil;
+        NSData *bodyData = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:&jsonError];
+        
+        if (jsonError) {
+            TVLog(@"HTTP Server: Failed to serialize JSON: %@", jsonError.localizedDescription);
+            return;
+        }
+        
+        request.HTTPBody = bodyData;
+        
+        TVLog(@"HTTP Server: Sending POST request to %@", urlString);
+        
+        // 发送请求
+        NSURLSession *session = [NSURLSession sharedSession];
+        NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable urlResponse, NSError * _Nullable error) {
+            if (error) {
+                TVLog(@"HTTP Server: Request failed - %@", error.localizedDescription);
+            } else {
+                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)urlResponse;
+                TVLog(@"HTTP Server: Request completed - Status: %ld", (long)httpResponse.statusCode);
+                if (data && data.length > 0) {
+                    NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                    TVLog(@"HTTP Server: Response - %@", responseString);
+                }
+            }
+        }];
+        
+        [task resume];
+    });
+    
+    // 立即返回响应（不等待后台任务完成）
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    
+    NSDictionary *result = @{
+        @"success": @YES,
+        @"message": @"Trigger scheduled",
+        @"target": @{
+            @"ip": targetIP,
+            @"port": @(port)
+        },
+        @"delay": @(delay),
+        @"command": @"runscript"
+    };
+    
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
 // POST /api/uninstall?bundleId=com.example.app
 // 通过 TrollStore 卸载应用
 - (TVNCHttpResponse *)handleUninstallApp:(NSDictionary *)query {
@@ -1128,7 +1338,7 @@
         "<html><head><meta charset='UTF-8'><title>TrollVNC API</title></head>"
         "<body><h1>TrollVNC HTTP API</h1>"
         "<h2>Endpoints:</h2><ul>"
-        "<li><b>GET /api/screenshot?format=png|jpeg</b> - 获取截图</li>"
+        "<li><b>GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0</b> - 获取截图（rotation: 0/90/180/270）</li>"
         "<li><b>POST /api/writefile?path=/xxx&append=true|false</b> - 写入文件（body: base64）</li>"
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
@@ -1145,6 +1355,10 @@
         "<li><b>GET/POST /api/brightness?value=0.5</b> - 获取/设置亮度</li>"
         "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
         "<li><b>POST /api/uninstall?bundleId=com.xxx.app</b> - 通过 TrollStore 卸载应用</li>"
+        "<li><b>GET /api/trigger?ip=127.0.0.1&port=3333&delay=5</b> - 触发懒人精灵运行脚本</li>"
+        "<li><b>POST /api/reboot</b> - 重启设备</li>"
+        "<li><b>POST /api/respring</b> - 注销设备（Respring）</li>"
+        "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
@@ -1336,8 +1550,18 @@
         body = bodyData;
     }
     
+    // 获取客户端 IP 地址
+    NSString *clientAddr = nil;
+    struct sockaddr_in peerAddr;
+    socklen_t peerLen = sizeof(peerAddr);
+    if (getpeername(_clientSocket, (struct sockaddr *)&peerAddr, &peerLen) == 0) {
+        char ipStr[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &peerAddr.sin_addr, ipStr, INET_ADDRSTRLEN);
+        clientAddr = [NSString stringWithUTF8String:ipStr];
+    }
+    
     // 处理请求
-    TVNCHttpResponse *response = [_server handleRequest:method path:path query:query body:body];
+    TVNCHttpResponse *response = [_server handleRequest:method path:path query:query body:body clientAddr:clientAddr];
     
     // 发送响应
     NSMutableString *responseHeader = [NSMutableString string];

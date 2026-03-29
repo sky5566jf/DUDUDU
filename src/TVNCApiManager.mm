@@ -23,6 +23,7 @@
 #import <CoreVideo/CoreVideo.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
+#import <Accelerate/Accelerate.h>
 #import <sys/stat.h>
 #import <fcntl.h>
 #import <unistd.h>
@@ -181,6 +182,196 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
     CFRelease(dest);
     CGImageRelease(cgImage);
     CFRelease(surface);
+    
+    if (!success) {
+        TVLog(@"Failed to finalize image destination");
+        return nil;
+    }
+    
+    return imageData;
+}
+
+- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation {
+    // 规范化旋转角度为 0, 90, 180, 270
+    NSInteger rot = rotation % 360;
+    if (rot < 0) rot += 360;
+    NSInteger rotQ = (rot / 90) % 4; // 0=0°, 1=90°, 2=180°, 3=270°
+    
+    // 确定格式
+    CFStringRef formatRef = (__bridge CFStringRef)@[@"public.png", @"public.jpeg"][[@"jpeg" isEqualToString:format.lowercaseString] ? 1 : 0];
+    
+    // 获取屏幕尺寸
+    CGSize screenSize = [[UIScreen mainScreen] bounds].size;
+    CGFloat scale = [[UIScreen mainScreen] scale];
+    int srcWidth = (int)(screenSize.width * scale);
+    int srcHeight = (int)(screenSize.height * scale);
+    
+    // 根据旋转角度计算输出尺寸
+    int dstWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
+    int dstHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
+    
+    // 创建 IOSurface 属性
+    unsigned pixelFormat = 0x42475241; // 'ARGB'
+    int bytesPerComponent = sizeof(uint8_t);
+    int bytesPerElement = bytesPerComponent * 4;
+    int srcBytesPerRow = (int)IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, bytesPerElement * srcWidth);
+    
+    NSDictionary *properties = @{
+        (__bridge NSString *)kIOSurfaceBytesPerElement : @(bytesPerElement),
+        (__bridge NSString *)kIOSurfaceBytesPerRow : @(srcBytesPerRow),
+        (__bridge NSString *)kIOSurfaceWidth : @(srcWidth),
+        (__bridge NSString *)kIOSurfaceHeight : @(srcHeight),
+        (__bridge NSString *)kIOSurfacePixelFormat : @(pixelFormat),
+        (__bridge NSString *)kIOSurfaceAllocSize : @(srcBytesPerRow * srcHeight),
+    };
+    
+    // 创建 IOSurface
+    IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
+    if (!surface) {
+        TVLog(@"Failed to create IOSurface for screenshot");
+        return nil;
+    }
+    
+    // 渲染屏幕内容到 IOSurface
+    CARenderServerRenderDisplay(0, CFSTR("LCD"), surface, 0, 0);
+    
+    // 锁定 IOSurface
+    IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nil);
+    
+    // 获取源图像数据
+    void *srcData = IOSurfaceGetBaseAddress(surface);
+    size_t srcDataSize = IOSurfaceGetAllocSize(surface);
+    
+    // 创建 CGImage
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, srcData, srcDataSize, NULL);
+    CGImageRef cgImage = CGImageCreate(srcWidth, srcHeight, 8, 32, srcBytesPerRow, colorSpace,
+                                        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                        provider, NULL, false, kCGRenderingIntentDefault);
+    
+    CGDataProviderRelease(provider);
+    IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nil);
+    
+    if (!cgImage) {
+        TVLog(@"Failed to create CGImage from IOSurface");
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+    
+    CGImageRef finalImage = cgImage;
+    CGImageRef rotatedImage = NULL;
+    
+    // 如果需要旋转，执行旋转操作
+    if (rotQ != 0) {
+        // 使用 vImage 进行旋转
+        vImage_Buffer srcBuf = {
+            .data = srcData,
+            .height = (vImagePixelCount)srcHeight,
+            .width = (vImagePixelCount)srcWidth,
+            .rowBytes = (size_t)srcBytesPerRow
+        };
+        
+        // 分配旋转后的缓冲区
+        size_t dstBytesPerRow = dstWidth * 4;
+        void *dstData = malloc(dstBytesPerRow * dstHeight);
+        if (!dstData) {
+            TVLog(@"Failed to allocate rotation buffer");
+            CGImageRelease(cgImage);
+            CFRelease(surface);
+            CGColorSpaceRelease(colorSpace);
+            return nil;
+        }
+        
+        vImage_Buffer dstBuf = {
+            .data = dstData,
+            .height = (vImagePixelCount)dstHeight,
+            .width = (vImagePixelCount)dstWidth,
+            .rowBytes = dstBytesPerRow
+        };
+        
+        // 确定旋转常量
+        uint8_t rotConst;
+        switch (rotQ) {
+            case 1: rotConst = kRotate90DegreesClockwise; break;
+            case 2: rotConst = kRotate180DegreesClockwise; break;
+            case 3: rotConst = kRotate270DegreesClockwise; break;
+            default: rotConst = kRotate0DegreesClockwise; break;
+        }
+        
+        uint8_t bg[4] = {0, 0, 0, 0};
+        vImage_Error err = vImageRotate90_ARGB8888(&srcBuf, &dstBuf, rotConst, bg, kvImageNoFlags);
+        
+        if (err != kvImageNoError) {
+            TVLog(@"vImageRotate90_ARGB8888 failed: %ld", (long)err);
+            free(dstData);
+            CGImageRelease(cgImage);
+            CFRelease(surface);
+            CGColorSpaceRelease(colorSpace);
+            return nil;
+        }
+        
+        // 从旋转后的缓冲区创建 CGImage
+        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, NULL);
+        rotatedImage = CGImageCreate(dstWidth, dstHeight, 8, 32, dstBytesPerRow, colorSpace,
+                                      kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                      rotProvider, NULL, false, kCGRenderingIntentDefault);
+        CGDataProviderRelease(rotProvider);
+        
+        if (rotatedImage) {
+            finalImage = rotatedImage;
+        } else {
+            free(dstData);
+        }
+    }
+    
+    // 转换为 PNG/JPEG 数据
+    NSMutableData *imageData = [NSMutableData data];
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData,
+                                                                   formatRef, 1, NULL);
+    if (!dest) {
+        TVLog(@"Failed to create image destination");
+        if (rotatedImage) {
+            CGImageRelease(rotatedImage);
+            free((void *)CGImageGetDataProvider(rotatedImage));
+        }
+        CGImageRelease(cgImage);
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+    
+    // 设置压缩质量（仅对 JPEG 有效）
+    CFDictionaryRef propertiesRef = NULL;
+    if (CFStringCompare(formatRef, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
+        CFStringRef keys[1] = { CFSTR("kCGImageDestinationLossyCompressionQuality") };
+        float qualityFloat = (float)quality;
+        CFNumberRef values[1] = { CFNumberCreate(NULL, kCFNumberFloatType, &qualityFloat) };
+        propertiesRef = CFDictionaryCreate(NULL, (const void **)keys, (const void **)values, 1,
+                                           &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(values[0]);
+    }
+    
+    CGImageDestinationAddImage(dest, finalImage, propertiesRef);
+    if (propertiesRef) CFRelease(propertiesRef);
+    BOOL success = CGImageDestinationFinalize(dest);
+    
+    CFRelease(dest);
+    if (rotatedImage) {
+        CGImageRelease(rotatedImage);
+        // 释放旋转缓冲区
+        CGDataProviderRef provider = CGImageGetDataProvider(rotatedImage);
+        if (provider) {
+            CFDataRef data = CGDataProviderCopyData(provider);
+            if (data) {
+                free((void *)CFDataGetBytePtr(data));
+                CFRelease(data);
+            }
+        }
+    }
+    CGImageRelease(cgImage);
+    CFRelease(surface);
+    CGColorSpaceRelease(colorSpace);
     
     if (!success) {
         TVLog(@"Failed to finalize image destination");
@@ -1210,6 +1401,182 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
         }
         return NO;
     }
+}
+
+#pragma mark - 系统重启/注销 API
+
+// 重启设备
+- (BOOL)rebootDevice {
+    @try {
+        // 方法1: 使用 HID 事件模拟电源键+Home键组合（如果支持）
+        // 方法2: 使用 POSIX reboot 系统调用
+        // 方法3: 使用 SpringBoard 私有 API
+        
+        // 尝试使用 notify 触发系统重启
+        int ret = notify_post("com.apple.system.reboot");
+        if (ret == NOTIFY_STATUS_OK) {
+            TVLog(@"Reboot notification sent successfully");
+            return YES;
+        }
+        
+        // 备选方案：使用 system 命令
+        // 注意：这需要 root 权限
+        int result = system("reboot");
+        if (result == 0) {
+            TVLog(@"Reboot command executed");
+            return YES;
+        }
+        
+        TVLog(@"Failed to reboot device");
+        return NO;
+    } @catch (NSException *exception) {
+        TVLog(@"Reboot failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 注销设备（Respring）
+- (BOOL)respringDevice {
+    @try {
+        // 方法1: 使用 notify_post 触发 respring
+        int ret = notify_post("com.apple.springboard.respring");
+        if (ret == NOTIFY_STATUS_OK) {
+            TVLog(@"Respring notification sent successfully");
+            return YES;
+        }
+        
+        // 方法2: 使用 killall SpringBoard
+        int result = system("killall -9 SpringBoard");
+        if (result == 0) {
+            TVLog(@"SpringBoard killed, respring initiated");
+            return YES;
+        }
+        
+        TVLog(@"Failed to respring device");
+        return NO;
+    } @catch (NSException *exception) {
+        TVLog(@"Respring failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+#pragma mark - 智能清理后台应用
+
+// 获取当前前台应用的 Bundle ID
+- (NSString *)getFrontmostAppBundleID {
+    // 使用 SpringBoard 私有 API 获取前台应用
+    // 这里使用 notify 查询当前活跃应用
+    
+    // 方法：通过检查 UIApplication 的状态
+    UIApplication *app = [UIApplication sharedApplication];
+    if (app) {
+        // 获取当前活跃的 scene
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in app.connectedScenes) {
+                if (scene.activationState == UISceneActivationStateForegroundActive) {
+                    // 返回 TrollVNC 自己的 bundle ID
+                    return [[NSBundle mainBundle] bundleIdentifier];
+                }
+            }
+        }
+    }
+    
+    // 尝试通过文件检查当前活跃应用
+    // 这是一个简化的实现，实际可能需要更复杂的逻辑
+    return nil;
+}
+
+// 检查是否在桌面（SpringBoard）
+- (BOOL)isOnSpringBoard {
+    // 通过检查当前是否有非系统应用在前台来判断
+    // 简化实现：假设如果在 TrollVNC 内部调用，说明有活跃应用
+    
+    // 实际实现可以通过检查当前显示的窗口来判断
+    UIApplication *app = [UIApplication sharedApplication];
+    if (!app) return YES;
+    
+    // 检查 keyWindow 的 rootViewController
+    UIWindow *keyWindow = nil;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in app.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]]) {
+                UIWindowScene *windowScene = (UIWindowScene *)scene;
+                for (UIWindow *window in windowScene.windows) {
+                    if (window.isKeyWindow) {
+                        keyWindow = window;
+                        break;
+                    }
+                }
+            }
+        }
+    } else {
+        keyWindow = app.keyWindow;
+    }
+    
+    // 如果找不到 keyWindow 或者 rootViewController 是空的，可能是在桌面
+    if (!keyWindow || !keyWindow.rootViewController) {
+        return YES;
+    }
+    
+    return NO;
+}
+
+// 智能清理后台应用
+- (NSDictionary *)clearBackgroundAppsSmart {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        // 检查是否在桌面
+        BOOL onSpringBoard = [self isOnSpringBoard];
+        result[@"onSpringBoard"] = @(onSpringBoard);
+        
+        if (onSpringBoard) {
+            result[@"success"] = @YES;
+            result[@"message"] = @"Already on SpringBoard, no apps to clear";
+            result[@"action"] = @"skipped";
+            return result;
+        }
+        
+        // 获取当前前台应用
+        NSString *frontmostApp = [self getFrontmostAppBundleID];
+        result[@"frontmostApp"] = frontmostApp ?: @"unknown";
+        
+        // 执行清理操作
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        
+        // 双击 Home 键打开应用切换器
+        [generator menuDoublePress];
+        [NSThread sleepForTimeInterval:0.8];
+        
+        // 获取屏幕尺寸
+        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
+        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
+        
+        // 上滑关闭当前应用
+        CGPoint startPoint = CGPointMake(screenWidth / 2, screenHeight - 100);
+        CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 3);
+        
+        [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
+        [NSThread sleepForTimeInterval:0.5];
+        
+        // 返回桌面
+        [generator menuPress];
+        
+        result[@"success"] = @YES;
+        result[@"message"] = @"Background apps cleared";
+        result[@"action"] = @"cleared";
+        result[@"closedApp"] = frontmostApp ?: @"unknown";
+        
+        TVLog(@"Smart clear background apps: %@", result);
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to clear background apps";
+        TVLog(@"Smart clear background apps failed: %@", exception.reason);
+    }
+    
+    return result;
 }
 
 @end

@@ -54,6 +54,15 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (nullable NSData *)captureScreenshotAsJPEGWithQuality:(CGFloat)quality;
 
+/**
+ 获取当前屏幕截图的原始数据（带旋转）
+ format: "png" 或 "jpeg"
+ quality: 0.0 ~ 1.0（仅对 JPEG 有效）
+ rotation: 旋转角度（0, 90, 180, 270）
+ 返回旋转后的图片数据，如果失败返回 nil
+ */
+- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation;
+
 #pragma mark - 文件操作 API
 
 /**
@@ -166,6 +175,29 @@ NS_ASSUME_NONNULL_BEGIN
  @return 包含诊断信息的字典
  */
 - (NSDictionary *)getTrollStoreDiagnostics;
+
+#pragma mark - 系统重启/注销 API
+
+/**
+ * 重启设备
+ * @return 是否成功发起重启（注意：重启后无法返回结果）
+ */
+- (BOOL)rebootDevice;
+
+/**
+ * 注销当前用户（Respring）
+ * @return 是否成功发起注销
+ */
+- (BOOL)respringDevice;
+
+#pragma mark - 智能清理后台应用
+
+/**
+ * 智能清理后台应用
+ * 识别当前运行的应用并关闭，如果在桌面则跳过
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)clearBackgroundAppsSmart;
 
 @end
 

@@ -241,6 +241,15 @@
                         <div class="slider-value" id="qualityValue">0.9</div>
                     </div>
                 </div>
+                <div class="form-group">
+                    <label>旋转角度</label>
+                    <select id="screenshotRotation">
+                        <option value="0">0° (原图)</option>
+                        <option value="90">90° (顺时针)</option>
+                        <option value="180">180°</option>
+                        <option value="270">270° (逆时针)</option>
+                    </select>
+                </div>
                 <button class="btn" onclick="takeScreenshot()">获取截图</button>
                 <div class="result hidden" id="screenshotResult"></div>
                 <div class="screenshot-container" id="screenshotContainer"></div>
@@ -337,7 +346,29 @@
             <div class="card">
                 <h3>⚡ 系统控制</h3>
                 <button class="btn btn-warning" onclick="clearApps()">清理后台应用</button>
+                <button class="btn btn-warning" onclick="clearAppsSmart()">智能清理</button>
+                <button class="btn btn-danger" onclick="rebootDevice()">重启设备</button>
+                <button class="btn btn-danger" onclick="respringDevice()">注销设备</button>
                 <div class="result hidden" id="clearAppsResult"></div>
+            </div>
+
+            <!-- 触发懒人精灵 -->
+            <div class="card">
+                <h3>🚀 触发懒人精灵</h3>
+                <div class="form-group">
+                    <label>目标 IP</label>
+                    <input type="text" id="triggerIP" value="127.0.0.1" placeholder="127.0.0.1">
+                </div>
+                <div class="form-group">
+                    <label>目标端口</label>
+                    <input type="number" id="triggerPort" value="3333" min="1" max="65535">
+                </div>
+                <div class="form-group">
+                    <label>延迟（秒）</label>
+                    <input type="number" id="triggerDelay" value="5" min="0">
+                </div>
+                <button class="btn btn-success" onclick="triggerLanren()">触发脚本</button>
+                <div class="result hidden" id="triggerResult"></div>
             </div>
 
             <!-- 应用安装 -->
@@ -429,6 +460,7 @@
         async function takeScreenshot() {
             const format = document.getElementById('screenshotFormat').value;
             const quality = document.getElementById('jpegQuality').value;
+            const rotation = document.getElementById('screenshotRotation').value;
             const container = document.getElementById('screenshotContainer');
             const result = document.getElementById('screenshotResult');
             
@@ -440,6 +472,9 @@
                 if (format === 'jpeg') {
                     url += `&quality=${quality}`;
                 }
+                if (rotation !== '0') {
+                    url += `&rotation=${rotation}`;
+                }
                 
                 const response = await fetch(url);
                 if (!response.ok) throw new Error('获取截图失败');
@@ -448,7 +483,7 @@
                 const imageUrl = URL.createObjectURL(blob);
                 
                 container.innerHTML = `<img src="${imageUrl}" alt="Screenshot">`;
-                showResult('screenshotResult', { success: true, size: `${(blob.size / 1024).toFixed(2)} KB` });
+                showResult('screenshotResult', { success: true, size: `${(blob.size / 1024).toFixed(2)} KB`, rotation: rotation + '°' });
             } catch (error) {
                 showResult('screenshotResult', `错误: ${error.message}`, true);
             }
@@ -604,6 +639,58 @@
                 showResult('clearAppsResult', data, !data.success);
             } catch (error) {
                 showResult('clearAppsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function clearAppsSmart() {
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/clearapps/smart`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('clearAppsResult', data, !data.success);
+            } catch (error) {
+                showResult('clearAppsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function rebootDevice() {
+            if (!confirm('确定要重启设备吗？')) return;
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/reboot`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('clearAppsResult', data, !data.success);
+            } catch (error) {
+                showResult('clearAppsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function respringDevice() {
+            if (!confirm('确定要注销设备吗？（SpringBoard 将重启）')) return;
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/respring`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                showResult('clearAppsResult', data, !data.success);
+            } catch (error) {
+                showResult('clearAppsResult', `错误: ${error.message}`, true);
+            }
+        }
+
+        async function triggerLanren() {
+            const ip = document.getElementById('triggerIP').value || '127.0.0.1';
+            const port = document.getElementById('triggerPort').value || '3333';
+            const delay = document.getElementById('triggerDelay').value || '5';
+            
+            try {
+                const response = await fetch(`${getBaseUrl()}/api/trigger?ip=${ip}&port=${port}&delay=${delay}`);
+                const data = await response.json();
+                showResult('triggerResult', data, !data.success);
+            } catch (error) {
+                showResult('triggerResult', `错误: ${error.message}`, true);
             }
         }
 
