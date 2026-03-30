@@ -1662,4 +1662,154 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     return result;
 }
 
+#pragma mark - AssistiveTouch 控制
+
+// 获取 AssistiveTouch 当前状态
+- (NSDictionary *)getAssistiveTouchStatus {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        // 读取系统 Accessibility 设置
+        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        
+        BOOL isEnabled = NO;
+        id value = plist[@"AssistiveTouchEnabled"];
+        if (value) {
+            isEnabled = [value boolValue];
+        }
+        
+        result[@"success"] = @YES;
+        result[@"enabled"] = @(isEnabled);
+        result[@"message"] = isEnabled ? @"AssistiveTouch is enabled" : @"AssistiveTouch is disabled";
+        
+        TVLog(@"AssistiveTouch status: %@", isEnabled ? @"enabled" : @"disabled");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to get AssistiveTouch status";
+        TVLog(@"Get AssistiveTouch status failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+// 禁用 AssistiveTouch（修改系统 plist）
+- (NSDictionary *)disableAssistiveTouchPermanent {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        
+        // 读取现有 plist
+        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        if (!plist) {
+            plist = [NSMutableDictionary dictionary];
+        }
+        
+        // 记录原始值
+        id originalValue = plist[@"AssistiveTouchEnabled"];
+        BOOL wasEnabled = originalValue ? [originalValue boolValue] : NO;
+        
+        // 设置禁用
+        plist[@"AssistiveTouchEnabled"] = @NO;
+        
+        // 同时禁用相关功能
+        plist[@"AssistiveTouchTouchEnabled"] = @NO;
+        plist[@"AssistiveTouchMouseEnabled"] = @NO;
+        
+        // 写入 plist
+        BOOL writeSuccess = [plist writeToFile:plistPath atomically:YES];
+        
+        if (!writeSuccess) {
+            result[@"success"] = @NO;
+            result[@"error"] = @"Failed to write plist file";
+            result[@"message"] = @"Could not modify Accessibility settings";
+            TVLog(@"Failed to write Accessibility plist");
+            return result;
+        }
+        
+        // 修改文件权限（确保系统能读取）
+        chmod([plistPath UTF8String], 0644);
+        
+        // 杀掉 accessibilityd 进程让设置生效
+        // 使用 notify 通知系统设置变更
+        notify_post("com.apple.accessibility.settings.changed");
+        
+        // 尝试杀掉 AssistiveTouch 服务进程
+        system("killall -9 AssistiveTouch 2>/dev/null");
+        system("killall -9 accessibilityd 2>/dev/null");
+        
+        result[@"success"] = @YES;
+        result[@"wasEnabled"] = @(wasEnabled);
+        result[@"message"] = @"AssistiveTouch has been disabled permanently";
+        result[@"warning"] = @"Settings modified at /var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        
+        TVLog(@"AssistiveTouch disabled permanently (was enabled: %d)", wasEnabled);
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to disable AssistiveTouch";
+        TVLog(@"Disable AssistiveTouch failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+// 启用 AssistiveTouch（恢复系统 plist）
+- (NSDictionary *)enableAssistiveTouchPermanent {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        
+        // 读取现有 plist
+        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        if (!plist) {
+            plist = [NSMutableDictionary dictionary];
+        }
+        
+        // 记录原始值
+        id originalValue = plist[@"AssistiveTouchEnabled"];
+        BOOL wasEnabled = originalValue ? [originalValue boolValue] : NO;
+        
+        // 设置启用
+        plist[@"AssistiveTouchEnabled"] = @YES;
+        plist[@"AssistiveTouchTouchEnabled"] = @YES;
+        
+        // 写入 plist
+        BOOL writeSuccess = [plist writeToFile:plistPath atomically:YES];
+        
+        if (!writeSuccess) {
+            result[@"success"] = @NO;
+            result[@"error"] = @"Failed to write plist file";
+            result[@"message"] = @"Could not modify Accessibility settings";
+            TVLog(@"Failed to write Accessibility plist");
+            return result;
+        }
+        
+        // 修改文件权限
+        chmod([plistPath UTF8String], 0644);
+        
+        // 通知系统设置变更
+        notify_post("com.apple.accessibility.settings.changed");
+        
+        result[@"success"] = @YES;
+        result[@"wasEnabled"] = @(wasEnabled);
+        result[@"message"] = @"AssistiveTouch has been enabled permanently";
+        
+        TVLog(@"AssistiveTouch enabled permanently (was enabled: %d)", wasEnabled);
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to enable AssistiveTouch";
+        TVLog(@"Enable AssistiveTouch failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
 @end

@@ -199,6 +199,28 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 
+#pragma mark - AssistiveTouch 控制
+
+/**
+ * 禁用 AssistiveTouch（修改系统 plist）
+ * 直接修改 /var/mobile/Library/Preferences/com.apple.Accessibility.plist
+ * ⚠️ 警告：此操作修改系统文件，可能导致辅助功能异常
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)disableAssistiveTouchPermanent;
+
+/**
+ * 启用 AssistiveTouch（恢复系统 plist）
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)enableAssistiveTouchPermanent;
+
+/**
+ * 获取 AssistiveTouch 当前状态
+ * @return 包含状态信息的字典
+ */
+- (NSDictionary *)getAssistiveTouchStatus;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -231,6 +231,8 @@
         return [self handleRespring];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
+    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
+        return [self handleAssistiveTouch:query];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1165,6 +1167,33 @@
     return response;
 }
 
+// GET/POST /api/assistivetouch?action=disable|enable|status
+// action=disable - 永久禁用 AssistiveTouch（修改系统 plist）
+// action=enable  - 启用 AssistiveTouch
+// action=status  - 获取当前状态（默认）
+- (TVNCHttpResponse *)handleAssistiveTouch:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *action = query[@"action"] ?: @"status";
+    TVLog(@"HTTP Server: AssistiveTouch request - action: %@", action);
+    
+    NSDictionary *result;
+    
+    if ([action isEqualToString:@"disable"]) {
+        result = [[TVNCApiManager sharedManager] disableAssistiveTouchPermanent];
+    } else if ([action isEqualToString:@"enable"]) {
+        result = [[TVNCApiManager sharedManager] enableAssistiveTouchPermanent];
+    } else {
+        result = [[TVNCApiManager sharedManager] getAssistiveTouchStatus];
+    }
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
 // GET /api/trigger?ip=192.168.x.x&port=3333&delay=5
 // 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行
 - (TVNCHttpResponse *)handleTrigger:(NSDictionary *)query clientAddr:(nullable NSString *)clientAddr {
@@ -1351,6 +1380,7 @@
         "<li><b>POST /api/reboot</b> - 重启设备</li>"
         "<li><b>POST /api/respring</b> - 注销设备（Respring）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
+        "<li><b>GET/POST /api/assistivetouch?action=status|disable|enable</b> - AssistiveTouch 控制（⚠️ disable 修改系统 plist）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
