@@ -1737,9 +1737,11 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         // 使用 notify 通知系统设置变更
         notify_post("com.apple.accessibility.settings.changed");
         
-        // 尝试杀掉 AssistiveTouch 服务进程
-        system("killall -9 AssistiveTouch 2>/dev/null");
-        system("killall -9 accessibilityd 2>/dev/null");
+        // 尝试杀掉 AssistiveTouch 服务进程（使用 popen 代替 system）
+        FILE *fp1 = popen("killall -9 AssistiveTouch 2>/dev/null", "r");
+        if (fp1) pclose(fp1);
+        FILE *fp2 = popen("killall -9 accessibilityd 2>/dev/null", "r");
+        if (fp2) pclose(fp2);
         
         result[@"success"] = @YES;
         result[@"wasEnabled"] = @(wasEnabled);
