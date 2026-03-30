@@ -1,64 +1,224 @@
-name: Build
+name: Build TrollVNC
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [release, main, master]
   pull_request:
-    branches: [ main, master ]
+    branches: [main, master]
+  workflow_dispatch:
+    inputs:
+      is_managed:
+        type: boolean
+        description: Build with a bundled Managed.plist (managed configuration)
+        required: false
+        default: false
+      desktop_name:
+        type: string
+        description: Desktop name shown to clients
+        required: false
+        default: TrollVNC
+      port:
+        type: string
+        description: VNC TCP port (1024–65535; default 5901)
+        required: false
+        default: "5901"
+      view_only:
+        type: boolean
+        description: Global view-only (ignore input)
+        required: false
+        default: false
+      scale:
+        type: string
+        description: Output scale (0.1–1.0)
+        required: false
+        default: "1.0"
+      frame_rate_spec:
+        type: string
+        description: Frame rate spec (e.g. 60 | 30-60 | 30:60:120)
+        required: false
+        default: ""
+      modifier_map:
+        type: choice
+        description: Modifier mapping
+        required: false
+        default: std
+        options:
+          - std
+          - altcmd
+      reverse_mode:
+        type: choice
+        description: Reverse connection mode
+        required: false
+        default: none
+        options:
+          - none
+          - viewer
+          - repeater
+      reverse_socket:
+        type: string
+        description: Reverse host:port or [ipv6]:port
+        required: false
+        default: ""
+      reverse_repeater_id:
+        type: string
+        description: Repeater ID (numeric)
+        required: false
+        default: ""
+
+env:
+  FINALPACKAGE: 1
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
 
 jobs:
   build:
-    name: Build with Theos
-    runs-on: macos-latest
+    runs-on: macos-14
+
+    strategy:
+      matrix:
+        scheme: ["default", "rootless", "roothide", "bootstrap"]
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          # Install xcbeautify for build output formatting
+          # Install ldid for iOS code signing
+          # Install 7zip for compression
+          brew install xcbeautify ldid-procursus p7zip make
+
+      - name: Checkout roothide/theos
         uses: actions/checkout@v4
         with:
+          repository: roothide/theos
+          path: theos-roothide
           submodules: recursive
 
-      - name: Setup Theos
-        uses: actions/checkout@v4
+      - name: Install iOS SDKs
+        run: |
+          export THEOS=$GITHUB_WORKSPACE/theos-roothide
+          cd theos-roothide
+          ./bin/install-sdk iPhoneOS16.5
+          ./bin/install-sdk iPhoneOS14.5
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
         with:
-          repository: theos/theos
-          ref: master
-          path: theos
-          submodules: recursive
+          xcode-version: "16.2"
 
-      - name: Cache Theos SDKs
-        id: cache-sdks
-        uses: actions/cache@v4
-        with:
-          path: theos/sdks
-          key: theos-sdks-${{ runner.os }}
-
-      - name: Download iOS SDKs
-        if: steps.cache-sdks.outputs.cache-hit != 'true'
+      - name: Generate Managed.plist (managed build)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.is_managed == true }}
+        env:
+          # Inputs (kept up to 10)
+          TVNC_DESKTOP_NAME: ${{ inputs.desktop_name }}
+          TVNC_PORT: ${{ inputs.port }}
+          TVNC_VIEW_ONLY: ${{ inputs.view_only }}
+          TVNC_SCALE: ${{ inputs.scale }}
+          TVNC_FRAME_RATE_SPEC: ${{ inputs.frame_rate_spec }}
+          TVNC_MODIFIER_MAP: ${{ inputs.modifier_map }}
+          TVNC_REVERSE_MODE: ${{ inputs.reverse_mode }}
+          TVNC_REVERSE_SOCKET: ${{ inputs.reverse_socket }}
+          TVNC_REVERSE_REPEATER_ID: ${{ inputs.reverse_repeater_id }}
+          # Fixed values
+          TVNC_ENABLED: true
+          TVNC_CLIPBOARD_ENABLED: true
+          TVNC_SINGLE_NOTIF_ENABLED: true
+          TVNC_CLIENT_NOTIFS_ENABLED: true
+          TVNC_KEEPALIVE_SEC: 15
+          TVNC_ORIENTATION_SYNC: true
+          TVNC_NATURAL_SCROLL: false
+          TVNC_AUTO_ASSIST_ENABLED: false
+          TVNC_SERVER_CURSOR: false
+          TVNC_BONJOUR_ENABLED: false
+          TVNC_KEY_LOGGING: false
+          # Optional secrets (empty when not defined)
+          TVNC_FULL_PASSWORD: ${{ secrets.TVNC_FULL_PASSWORD }}
+          TVNC_VIEWONLY_PASSWORD: ${{ secrets.TVNC_VIEWONLY_PASSWORD }}
         run: |
-          curl -Lo /tmp/sdks.tar.xz https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
-          tar -xf /tmp/sdks.tar.xz -C theos/sdks/
+          bash devkit/gen-managed-plist.sh
 
-      - name: Setup Environment
+      - name: Build package (${{ matrix.scheme }})
         run: |
-          echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
-          echo "$GITHUB_WORKSPACE/theos/bin" >> $GITHUB_PATH
+          source devkit/${{ matrix.scheme }}.sh
+          FINALPACKAGE=1 gmake clean package
 
-      - name: Install Dependencies
+      - name: Prepare artifacts
         run: |
-          brew install ldid dpkg xz
+          # Create directories for artifacts
+          mkdir -p artifacts/dsym-${{ matrix.scheme }}
+          mkdir -p artifacts/packages-${{ matrix.scheme }}
 
-      - name: Build (rootless)
-        run: |
-          make clean
-          make THEOS_PACKAGE_SCHEME=rootless -j$(sysctl -n hw.ncpu)
+          # Copy dSYM files
+          if [ -d ".theos/obj" ]; then
+            find .theos/obj -name "*.dSYM" -exec cp -r {} artifacts/dsym-${{ matrix.scheme }}/ \;
+          fi
 
-      - name: Package (rootless)
-        run: |
-          make package THEOS_PACKAGE_SCHEME=rootless -j$(sysctl -n hw.ncpu)
+          # Copy packages
+          if [ -d "packages" ]; then
+            if [ "${{ matrix.scheme }}" == "bootstrap" ]; then
+              cp -r packages/*.tipa artifacts/packages-${{ matrix.scheme }}/
+            else
+              cp -r packages/*.deb artifacts/packages-${{ matrix.scheme }}/
+            fi
+          fi
 
-      - name: Upload .deb artifact
+      - name: Upload dSYM artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: MatisuXCS-rootless
-          path: packages/*.deb
+          name: dsym-${{ matrix.scheme }}
+          path: artifacts/dsym-${{ matrix.scheme }}
           if-no-files-found: warn
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.scheme }}
+          path: artifacts/packages-${{ matrix.scheme }}
+          if-no-files-found: warn
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    needs: build
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          path: release-packages
+          merge-multiple: true
+
+      - name: Create release tag
+        id: tag
+        run: |
+          # Read PACKAGE_VERSION from Makefile
+          PACKAGE_VERSION=$(grep 'PACKAGE_VERSION' Makefile | cut -d' ' -f4)
+          TAG_NAME="v$PACKAGE_VERSION"
+          echo "tag_name=$TAG_NAME" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: Release ${{ steps.tag.outputs.tag_name }}
+          body: |
+            Automated build from release branch
+
+            This release contains packages built with:
+            - Default scheme
+            - Rootless scheme
+            - RootHide scheme
+            - Bootstrap (TrollStore)
+
+            Built on: ${{ github.sha }}
+          files: release-packages/**/*
+          draft: false
+          prerelease: false
