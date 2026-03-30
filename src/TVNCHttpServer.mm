@@ -263,30 +263,17 @@
         rotation = (rotation / 90) * 90;
     }
     
-    if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
-        // 解析质量参数，默认0.9
-        CGFloat quality = 0.9;
-        NSString *qualityStr = query[@"quality"];
-        if (qualityStr) {
-            quality = [qualityStr floatValue];
-            if (quality < 0.0) quality = 0.0;
-            if (quality > 1.0) quality = 1.0;
-        }
-        
-        // 如果有旋转参数，使用带旋转的方法
-        if (rotation != 0) {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
-        } else {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
-        }
-    } else {
-        // PNG 格式也支持旋转
-        if (rotation != 0) {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:1.0 rotation:rotation];
-        } else {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
-        }
+    // 解析质量参数，默认0.9
+    CGFloat quality = 0.9;
+    NSString *qualityStr = query[@"quality"];
+    if (qualityStr) {
+        quality = [qualityStr floatValue];
+        if (quality < 0.0) quality = 0.0;
+        if (quality > 1.0) quality = 1.0;
     }
+    
+    // 统一使用带旋转的截图方法，确保方向一致
+    imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
     
     if (imageData) {
         response.statusCode = 200;
