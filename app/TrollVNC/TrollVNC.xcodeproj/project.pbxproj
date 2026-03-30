@@ -467,25 +467,25 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.matisu.vnc;
-				PRODUCT_NAME = TrollVNC;
-				SUPPORTED_PLATFORMS = iphoneos;
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				SYSTEM_HEADER_SEARCH_PATHS = (
-					$THEOS/include,
-					$THEOS/vendor/include,
-				);
-				TARGETED_DEVICE_FAMILY = "1,2";
-				THEOS = $HOME/theos;
-			};
-			name = Debug;
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = com.matisu.xcs;
+			PRODUCT_NAME = TrollVNC;
+			SUPPORTED_PLATFORMS = iphoneos;
+			SUPPORTS_MACCATALYST = NO;
+			SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			SYSTEM_HEADER_SEARCH_PATHS = (
+				$THEOS/include,
+				$THEOS/vendor/include,
+			);
+			TARGETED_DEVICE_FAMILY = "1,2";
+			THEOS = $HOME/theos;
 		};
-		61535F712E6590A100643E64 /* Release */ = {
+		name = Debug;
+	};
+	61535F712E6590A100643E64 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -520,25 +520,25 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.matisu.vnc;
-				PRODUCT_NAME = TrollVNC;
-				SUPPORTED_PLATFORMS = iphoneos;
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				SYSTEM_HEADER_SEARCH_PATHS = (
-					$THEOS/include,
-					$THEOS/vendor/include,
-				);
-				TARGETED_DEVICE_FAMILY = "1,2";
-				THEOS = $HOME/theos;
-			};
-			name = Release;
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = com.matisu.xcs;
+			PRODUCT_NAME = TrollVNC;
+			SUPPORTED_PLATFORMS = iphoneos;
+			SUPPORTS_MACCATALYST = NO;
+			SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			SYSTEM_HEADER_SEARCH_PATHS = (
+				$THEOS/include,
+				$THEOS/vendor/include,
+			);
+			TARGETED_DEVICE_FAMILY = "1,2";
+			THEOS = $HOME/theos;
 		};
-		61535F722E6590A100643E64 /* Debug */ = {
+		name = Release;
+	};
+	61535F722E6590A100643E64 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -696,7 +696,7 @@
 					"$(PROJECT_DIR)/TrollVNC",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.matisu.vnc;
+				PRODUCT_BUNDLE_IDENTIFIER = com.matisu.xcs;
 				PRODUCT_NAME = TrollVNC;
 				SUPPORTED_PLATFORMS = iphonesimulator;
 				SUPPORTS_MACCATALYST = NO;
@@ -748,24 +748,24 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.matisu.vnc;
-				PRODUCT_NAME = TrollVNC;
-				SUPPORTED_PLATFORMS = iphonesimulator;
-				SUPPORTS_MACCATALYST = NO;
-				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_VERSION = 5.0;
-				SYSTEM_HEADER_SEARCH_PATHS = (
-					$THEOS/include,
-					$THEOS/vendor/include,
-				);
-				TARGETED_DEVICE_FAMILY = "1,2";
-				THEOS = $HOME/theos;
-			};
-			name = Release;
+			MARKETING_VERSION = 1.0;
+			PRODUCT_BUNDLE_IDENTIFIER = com.matisu.xcs;
+			PRODUCT_NAME = TrollVNC;
+			SUPPORTED_PLATFORMS = iphonesimulator;
+			SUPPORTS_MACCATALYST = NO;
+			SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+			SWIFT_EMIT_LOC_STRINGS = YES;
+			SWIFT_VERSION = 5.0;
+			SYSTEM_HEADER_SEARCH_PATHS = (
+				$THEOS/include,
+				$THEOS/vendor/include,
+			);
+			TARGETED_DEVICE_FAMILY = "1,2";
+			THEOS = $HOME/theos;
 		};
+		name = Release;
+	};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */

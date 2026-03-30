@@ -521,8 +521,8 @@
 	<true/>
 	<key>keychain-access-groups</key>
 	<array>
-		<string>com.matisu.vnc</string>
-		<string>GXZ23M5TP2.com.matisu.vnc</string>
+		<string>com.matisu.xcs</string>
+		<string>GXZ23M5TP2.com.matisu.xcs</string>
 	</array>
 	<key>platform-application</key>
 	<true/>

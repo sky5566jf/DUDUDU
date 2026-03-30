@@ -34,6 +34,12 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
 ### 触发器
 - `GET /api/trigger?port=3333&delay=5` - 触发懒人精灵（自动使用调用者IP）
 
+## GitHub 信息
+- 账号：sky5566jf
+- 仓库：sky5566jf/TrollVNC（fork 自原版）
+- GitHub CLI 已安装（gh v2.45.0）并已用 PAT 授权
+- Actions 工作流已存在（.github/workflows/build.yml），支持 4 种编译方案
+
 ## 技术要点
 - 使用 STHIDEventGenerator 模拟 HID 事件
 - 截图支持旋转参数
@@ -54,3 +60,7 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
   - 改进 `isOnSpringBoard` 检测逻辑，使用 `SBSCopyFrontmostApplicationDisplayIdentifier`
   - 改进 `getFrontmostAppBundleID` 使用 SpringBoardServices 私有 API
   - 修复 TVNCHttpServer 线程安全问题
+- 2025-03-30: GitHub Actions 配置修复
+  - 修复 SDK 下载 URL（改为 `master-146e41f`）
+  - 修复 `sys/reboot.h` 编译错误（iOS SDK 不支持）
+  - 编译成功（run 23724901481）

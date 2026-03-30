@@ -1,6 +1,6 @@
 # TrollVNC HTTP API 文档
 
-TrollVNC 现在提供 HTTP REST API 接口，默认在 **8182 端口**启动。
+TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 ## 服务器信息
 
@@ -8,6 +8,12 @@ TrollVNC 现在提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 - **协议**: HTTP/1.1
 - **编码**: UTF-8
 - **CORS**: 已启用（支持跨域访问）
+
+## 重要说明
+
+**触摸/滑动控制**: HTTP API 不提供触摸和滑动功能。这些操作需要通过 **VNC/RFB 协议**（默认端口 5901）实现。
+
+---
 
 ## API 端点
 
@@ -17,7 +23,7 @@ TrollVNC 现在提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 **请求:**
 ```
-GET /api/screenshot?format=png&quality=0.8
+GET /api/screenshot?format=png&quality=0.9&rotation=0
 ```
 
 **参数:**
@@ -25,6 +31,7 @@ GET /api/screenshot?format=png&quality=0.8
 |------|------|------|------|
 | format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
 | quality | float | 否 | JPEG质量 0.0~1.0，默认 `0.9`，仅对jpeg有效 |
+| rotation | int | 否 | 旋转角度：`0`, `90`, `180`, `270`，默认 `0` |
 
 **响应:**
 - 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
@@ -33,391 +40,15 @@ GET /api/screenshot?format=png&quality=0.8
 **示例:**
 ```bash
 # 获取 PNG 截图
-curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?format=png"
+curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot"
 
-# 获取 JPEG 截图（默认质量0.9）
-curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg"
-
-# 获取 JPEG 截图（自定义质量0.5，文件更小）
-curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.5"
-
-# 获取高质量 JPEG（质量0.95）
-curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.95"
-```
-
-```python
-import requests
-
-response = requests.get("http://192.168.1.100:8182/api/screenshot?format=png")
-with open("screenshot.png", "wb") as f:
-    f.write(response.content)
+# 获取旋转 90 度的截图
+curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?rotation=90"
 ```
 
 ---
 
-### 2. 写入文件 (Base64)
-
-将 base64 编码的内容写入指定文件路径。
-
-**请求:**
-```
-POST /api/writefile?path=/var/mobile/test.txt&append=false
-Content-Type: text/plain
-
-<base64-encoded-content>
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 是 | 目标文件路径 |
-| append | boolean | 否 | 是否追加模式，默认 `false` |
-
-**请求体:**
-- base64 编码的文件内容
-
-**响应:**
-```json
-{
-  "success": true,
-  "path": "/var/mobile/test.txt",
-  "bytes": 1024
-}
-```
-
-**示例:**
-```bash
-# 写入文本文件（中文支持）
-echo -n "你好，世界！" | base64 | curl -X POST \
-  "http://192.168.1.100:8182/api/writefile?path=/var/mobile/test.txt" \
-  -H "Content-Type: text/plain" \
-  --data-binary @-
-
-# 追加内容
-echo -n "追加的内容" | base64 | curl -X POST \
-  "http://192.168.1.100:8182/api/writefile?path=/var/mobile/test.txt&append=true" \
-  -H "Content-Type: text/plain" \
-  --data-binary @-
-```
-
-```python
-import requests
-import base64
-
-content = "你好，世界！Hello World!"
-encoded = base64.b64encode(content.encode()).decode()
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/writefile?path=/var/mobile/test.txt",
-    data=encoded,
-    headers={"Content-Type": "text/plain"}
-)
-print(response.json())
-```
-
----
-
-### 3. 写入文件 (纯文本 - 推荐)
-
-直接发送纯文本内容到指定文件路径，**无需 base64 编码**。
-
-**请求:**
-```
-POST /api/writefile_text?path=/var/mobile/test.txt&append=false
-Content-Type: text/plain; charset=utf-8
-
-纯文本内容，支持中文！
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 是 | 目标文件路径 |
-| append | boolean | 否 | 是否追加模式，默认 `false` |
-
-**请求体:**
-- 纯文本内容（UTF-8 编码）
-
-**响应:**
-```json
-{
-  "success": true,
-  "path": "/var/mobile/test.txt",
-  "bytes": 27
-}
-```
-
-**示例:**
-```bash
-# 直接写入文本（推荐，更简单）
-curl -X POST \
-  "http://192.168.1.100:8182/api/writefile_text?path=/var/mobile/test.txt" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "你好，世界！Hello World!"
-
-# 追加内容
-curl -X POST \
-  "http://192.168.1.100:8182/api/writefile_text?path=/var/mobile/test.txt&append=true" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "这是追加的内容"
-```
-
-```python
-import requests
-
-content = "你好，世界！Hello World!"
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/writefile_text?path=/var/mobile/test.txt",
-    data=content,
-    headers={"Content-Type": "text/plain; charset=utf-8"}
-)
-print(response.json())
-```
-
----
-
-### 4. 设置剪贴板 (Base64)
-
-设置 iOS 系统剪贴板内容。
-
-**请求:**
-```
-POST /api/clipboard
-Content-Type: text/plain
-
-<base64-encoded-text>
-```
-
-**请求体:**
-- base64 编码的文本内容
-
-**响应:**
-```json
-{
-  "success": true
-}
-```
-
-**示例:**
-```bash
-# 设置剪贴板（中文）
-echo -n "复制的文本内容" | base64 | curl -X POST \
-  "http://192.168.1.100:8182/api/clipboard" \
-  -H "Content-Type: text/plain" \
-  --data-binary @-
-```
-
-```python
-import requests
-import base64
-
-text = "要复制到剪贴板的文本"
-encoded = base64.b64encode(text.encode()).decode()
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/clipboard",
-    data=encoded,
-    headers={"Content-Type": "text/plain"}
-)
-print(response.json())
-```
-
----
-
-### 5. 设置剪贴板 (纯文本 - 推荐)
-
-直接设置剪贴板，**无需 base64 编码**。
-
-**请求:**
-```
-POST /api/clipboard_text
-Content-Type: text/plain; charset=utf-8
-
-纯文本内容
-```
-
-**请求体:**
-- 纯文本内容（UTF-8 编码）
-
-**响应:**
-```json
-{
-  "success": true
-}
-```
-
-**示例:**
-```bash
-# 直接设置剪贴板（推荐，更简单）
-curl -X POST \
-  "http://192.168.1.100:8182/api/clipboard_text" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "你好，世界！Hello World!"
-```
-
-```python
-import requests
-
-text = "你好，世界！Hello World!"
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/clipboard_text",
-    data=text,
-    headers={"Content-Type": "text/plain; charset=utf-8"}
-)
-print(response.json())
-```
-
----
-
-### 6. 文本输入
-
-将文本输入到当前焦点输入框。支持中英文输入：
-- **英文/数字**: 直接模拟键盘输入
-- **中文**: 自动使用剪贴板+粘贴方式
-
-**请求:**
-```
-POST /api/input
-Content-Type: text/plain; charset=utf-8
-
-要输入的文本
-```
-
-**请求体:**
-- 要输入的文本（UTF-8 编码）
-
-**响应:**
-```json
-{
-  "success": true,
-  "method": "keyboard",  // 或 "clipboard" 用于中文
-  "text": "输入的文本"
-}
-```
-
-**示例:**
-```bash
-# 输入英文/数字（使用 HID 键盘事件）
-curl -X POST \
-  "http://192.168.1.100:8182/api/input" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "Hello123"
-
-# 输入中文（使用剪贴板+粘贴）
-curl -X POST \
-  "http://192.168.1.100:8182/api/input" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "你好，世界！"
-
-# 输入多行文本
-curl -X POST \
-  "http://192.168.1.100:8182/api/input" \
-  -H "Content-Type: text/plain; charset=utf-8" \
-  -d "第一行
-第二行
-第三行"
-```
-
-```python
-import requests
-
-text = "你好，世界！Hello World!"
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/input",
-    data=text,
-    headers={"Content-Type": "text/plain; charset=utf-8"}
-)
-print(response.json())
-```
-
-**重要提示:**
-- 输入前请确保目标输入框已获得焦点（看到键盘弹出）
-- 某些 App 可能有限制，不支持外部输入
-- 如果输入失败，尝试重新点击输入框获取焦点
-
----
-
-### 7. 发送按键
-
-发送单个按键事件到设备。
-
-**请求:**
-```
-POST /api/key?code=<key-code>
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| code | integer | 是 | 按键代码（见下表） |
-
-**常用按键代码:**
-| 代码 | 按键 |
-|------|------|
-| 13 | 回车键 (Enter) |
-| 8 | 退格键 (Backspace) |
-| 9 | Tab 键 |
-| 27 | Escape 键 |
-| 32 | 空格键 |
-
-**响应:**
-```json
-{
-  "success": true,
-  "code": 13
-}
-```
-
-**示例:**
-```bash
-# 发送回车键
-curl -X POST "http://192.168.1.100:8182/api/key?code=13"
-
-# 发送退格键
-curl -X POST "http://192.168.1.100:8182/api/key?code=8"
-
-# 发送 Tab 键
-curl -X POST "http://192.168.1.100:8182/api/key?code=9"
-```
-
-```python
-import requests
-
-# 发送回车键
-response = requests.post("http://192.168.1.100:8182/api/key?code=13")
-print(response.json())
-
-# 发送退格键
-response = requests.post("http://192.168.1.100:8182/api/key?code=8")
-print(response.json())
-```
-
----
-
-### 8. 获取服务器状态
-
-获取 HTTP 服务器运行状态。
-
-**请求:**
-```
-GET /api/status
-```
-
-**响应:**
-```json
-{
-  "status": "running",
-  "httpPort": 8182,
-  "version": "3.1"
-}
-```
-
----
-
-### 9. 获取设备信息
+### 2. 获取设备信息
 
 获取设备名称、ID、系统版本、电量和充电状态。
 
@@ -443,83 +74,198 @@ GET /api/device
 **字段说明:**
 | 字段 | 说明 |
 |------|------|
-| deviceName | 设备名称（用户在设置中定义的名称） |
-| deviceId | 设备唯一标识符（UUID） |
-| deviceModel | 设备型号标识符（如 iPhone14,2） |
-| deviceModelName | 设备型号友好名称（如 iPhone 13 Pro） |
+| deviceName | 设备名称 |
+| deviceId | 设备唯一标识符 |
+| deviceModel | 设备型号标识符 |
+| deviceModelName | 设备型号友好名称 |
 | systemVersion | iOS 系统版本 |
 | systemName | 系统名称 |
 | batteryLevel | 电量百分比（0-100），-1表示未知 |
 | batteryState | 充电状态：unknown/unplugged/charging/full |
 
-**示例:**
-```bash
-curl "http://192.168.1.100:8182/api/device"
-```
-
-```python
-import requests
-
-response = requests.get("http://192.168.1.100:8182/api/device")
-data = response.json()
-print(f"设备: {data['deviceModelName']}")
-print(f"系统: iOS {data['systemVersion']}")
-print(f"名称: {data['deviceName']}")
-print(f"电量: {data['batteryLevel']}%")
-print(f"状态: {data['batteryState']}")
-```
-
 ---
 
-### 10. 检查文件
+### 3. 获取服务器状态
 
-检查 `/var/mobile/Media/zhuangtai.txt` 文件是否存在。
+获取 HTTP 服务器运行状态。
 
 **请求:**
 ```
-GET /api/checkfile
+GET /api/status
 ```
 
 **响应:**
 ```json
 {
-  "status": "ok"  // 文件存在
+  "status": "running",
+  "httpPort": 8182,
+  "version": "3.1"
 }
-```
-
-或
-
-```json
-{
-  "status": "no"  // 文件不存在
-}
-```
-
-**示例:**
-```bash
-curl "http://192.168.1.100:8182/api/checkfile"
-```
-
-```python
-import requests
-
-response = requests.get("http://192.168.1.100:8182/api/checkfile")
-data = response.json()
-if data['status'] == 'ok':
-    print("文件存在")
-else:
-    print("文件不存在")
 ```
 
 ---
 
-### 11. 上传文件
+### 4. 写入文件 (Base64)
+
+将 base64 编码的内容写入指定文件路径。
+
+**请求:**
+```
+POST /api/writefile?path=/var/mobile/test.txt&append=false
+Content-Type: text/plain
+
+<base64-encoded-content>
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 目标文件路径 |
+| append | boolean | 否 | 是否追加模式，默认 `false` |
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/test.txt",
+  "bytes": 1024
+}
+```
+
+---
+
+### 5. 写入文件 (纯文本 - 推荐)
+
+直接发送纯文本内容到指定文件路径，**无需 base64 编码**。
+
+**请求:**
+```
+POST /api/writefile_text?path=/var/mobile/test.txt&append=false
+Content-Type: text/plain; charset=utf-8
+
+纯文本内容，支持中文！
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/test.txt",
+  "bytes": 27
+}
+```
+
+---
+
+### 6. 设置剪贴板 (Base64)
+
+设置 iOS 系统剪贴板内容。
+
+**请求:**
+```
+POST /api/clipboard
+Content-Type: text/plain
+
+<base64-encoded-text>
+```
+
+**响应:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### 7. 设置剪贴板 (纯文本 - 推荐)
+
+直接设置剪贴板，**无需 base64 编码**。
+
+**请求:**
+```
+POST /api/clipboard_text
+Content-Type: text/plain; charset=utf-8
+
+纯文本内容
+```
+
+**响应:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### 8. 文本输入
+
+将文本输入到当前焦点输入框。
+
+**请求:**
+```
+POST /api/input
+Content-Type: text/plain; charset=utf-8
+
+要输入的文本
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "text": "输入的文本",
+  "length": 5
+}
+```
+
+**重要提示:**
+- 输入前请确保目标输入框已获得焦点（看到键盘弹出）
+- 某些 App 可能有限制，不支持外部输入
+
+---
+
+### 9. 发送按键
+
+发送单个按键事件到设备。
+
+**请求:**
+```
+POST /api/key?code=<key-code>
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| code | integer | 是 | 按键代码 |
+
+**常用按键代码:**
+| 代码 | 按键 |
+|------|------|
+| 13 | 回车键 (Enter) |
+| 8 | 退格键 (Backspace) |
+| 9 | Tab 键 |
+| 27 | Escape 键 |
+| 32 | 空格键 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "keyCode": 13
+}
+```
+
+---
+
+### 10. 上传文件
 
 上传任意文件到指定路径。如果目标文件夹不存在，会自动创建。
 
 **请求:**
 ```
-POST /api/upload?path=/var/mobile/Documents/myfolder/file.bin
+POST /api/upload?path=/var/mobile/Documents/file.bin
 Content-Type: application/octet-stream
 
 <binary-file-content>
@@ -528,144 +274,24 @@ Content-Type: application/octet-stream
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| path | string | 是 | 目标文件完整路径（包含文件名） |
-
-**请求体:**
-- 文件的二进制内容
+| path | string | 是 | 目标文件完整路径 |
 
 **响应:**
 ```json
 {
   "success": true,
-  "path": "/var/mobile/Documents/myfolder/file.bin",
+  "path": "/var/mobile/Documents/file.bin",
   "bytes": 102456,
-  "directory": "/var/mobile/Documents/myfolder",
-  "created": true,  // 目录是否是本次创建的
-  "modified": "2025-03-20 10:30:45"
+  "directory": "/var/mobile/Documents",
+  "created": true
 }
 ```
-
-**错误响应:**
-```json
-{
-  "success": false,
-  "error": "Failed to create directory",
-  "details": "Permission denied",
-  "path": "/var/mobile/Documents/myfolder"
-}
-```
-
-**示例:**
-```bash
-# 上传单个文件
-curl -X POST \
-  "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/photo.jpg" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @photo.jpg
-
-# 上传文件到不存在的目录（自动创建）
-curl -X POST \
-  "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/newfolder/data.txt" \
-  -H "Content-Type: text/plain" \
-  -d "Hello World!"
-
-# 上传二进制文件
-curl -X POST \
-  "http://192.168.1.100:8182/api/upload?path=/var/mobile/Media/video.mp4" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @video.mp4
-```
-
-```python
-import requests
-
-# 上传文件
-with open("photo.jpg", "rb") as f:
-    file_data = f.read()
-
-response = requests.post(
-    "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/photos/photo.jpg",
-    data=file_data,
-    headers={"Content-Type": "application/octet-stream"}
-)
-result = response.json()
-if result['success']:
-    print(f"上传成功: {result['path']}")
-    print(f"文件大小: {result['bytes']} 字节")
-    if result['created']:
-        print(f"自动创建目录: {result['directory']}")
-else:
-    print(f"上传失败: {result['error']}")
-
-# 直接上传文本内容
-text_content = "这是要保存的文本内容"
-response = requests.post(
-    "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/notes.txt",
-    data=text_content.encode('utf-8'),
-    headers={"Content-Type": "text/plain; charset=utf-8"}
-)
-print(response.json())
-```
-
-**Lua 示例:**
-```lua
-local http = require("socket.http")
-local ltn12 = require("ltn12")
-
-local function uploadFile(localPath, remotePath)
-    local file = io.open(localPath, "rb")
-    if not file then
-        print("无法打开文件: " .. localPath)
-        return
-    end
-    
-    local content = file:read("*all")
-    file:close()
-    
-    local response = {}
-    local _, status = http.request{
-        url = "http://192.168.1.100:8182/api/upload?path=" .. remotePath,
-        method = "POST",
-        headers = {
-            ["Content-Type"] = "application/octet-stream",
-            ["Content-Length"] = tostring(#content)
-        },
-        source = ltn12.source.string(content),
-        sink = ltn12.sink.table(response)
-    }
-    
-    if status == 200 then
-        local json = require("json")
-        local result = json.decode(table.concat(response))
-        if result.success then
-            print("上传成功: " .. result.path)
-            print("文件大小: " .. result.bytes .. " 字节")
-        else
-            print("上传失败: " .. (result.error or "未知错误"))
-        end
-    else
-        print("HTTP 错误: " .. tostring(status))
-    end
-end
-
--- 使用示例
-uploadFile("/var/mobile/photo.jpg", "/var/mobile/Documents/backup/photo.jpg")
-```
-
-**注意事项:**
-- 支持任意文件类型（图片、视频、文本、二进制等）
-- 如果目标目录不存在，会自动创建所有中间目录
-- 如果文件已存在，会被覆盖
-- 建议设置正确的 `Content-Type` 头，但不是必须的
-- **大文件上传**: 超过 10MB 的文件会使用流式处理，最大支持约 500MB（受内存限制）
-- **超时时间**: 5 分钟，大文件上传请确保网络稳定
-- **推荐**: 对于超大文件（>100MB），建议分片上传或使用其他传输方式
 
 ---
 
-### 12. 清理后台应用
+### 11. 清理后台应用
 
-模拟双击 Home 键打开应用切换器，上滑关闭后台应用，然后返回桌面。
+模拟双击 Home 键打开应用切换器，上滑关闭后台应用。
 
 **请求:**
 ```
@@ -680,23 +306,25 @@ POST /api/clearapps
 }
 ```
 
-**示例:**
-```bash
-# 清理后台应用
-curl -X POST "http://192.168.1.100:8182/api/clearapps"
+---
+
+### 12. 智能清理后台应用
+
+识别当前应用，如果在桌面则跳过清理。
+
+**请求:**
+```
+POST /api/clearapps/smart
 ```
 
-```python
-import requests
-
-response = requests.post("http://192.168.1.100:8182/api/clearapps")
-print(response.json())
+**响应:**
+```json
+{
+  "success": true,
+  "action": "cleared",
+  "frontmostApp": "com.apple.springboard"
+}
 ```
-
-**注意:**
-- 此功能通过模拟手势实现，可能需要几秒钟完成
-- 清理完成后会自动返回桌面
-- 部分系统版本可能行为略有不同
 
 ---
 
@@ -725,33 +353,6 @@ POST /api/volume?value=0.5
   "success": true,
   "volume": 0.5
 }
-```
-
-**示例:**
-```bash
-# 获取当前音量
-curl "http://192.168.1.100:8182/api/volume"
-
-# 设置音量为 50%
-curl -X POST "http://192.168.1.100:8182/api/volume?value=0.5"
-
-# 静音
-curl -X POST "http://192.168.1.100:8182/api/volume?value=0"
-
-# 最大音量
-curl -X POST "http://192.168.1.100:8182/api/volume?value=1"
-```
-
-```python
-import requests
-
-# 获取当前音量
-response = requests.get("http://192.168.1.100:8182/api/volume")
-print(f"当前音量: {response.json()['volume']}")
-
-# 设置音量为 30%
-response = requests.post("http://192.168.1.100:8182/api/volume?value=0.3")
-print(response.json())
 ```
 
 ---
@@ -783,38 +384,11 @@ POST /api/brightness?value=0.5
 }
 ```
 
-**示例:**
-```bash
-# 获取当前亮度
-curl "http://192.168.1.100:8182/api/brightness"
-
-# 设置亮度为 50%
-curl -X POST "http://192.168.1.100:8182/api/brightness?value=0.5"
-
-# 最低亮度
-curl -X POST "http://192.168.1.100:8182/api/brightness?value=0"
-
-# 最高亮度
-curl -X POST "http://192.168.1.100:8182/api/brightness?value=1"
-```
-
-```python
-import requests
-
-# 获取当前亮度
-response = requests.get("http://192.168.1.100:8182/api/brightness")
-print(f"当前亮度: {response.json()['brightness']}")
-
-# 设置亮度为 80%
-response = requests.post("http://192.168.1.100:8182/api/brightness?value=0.8")
-print(response.json())
-```
-
 ---
 
 ### 15. 安装应用 (TrollStore)
 
-通过 TrollStore 安装 IPA 文件。需要设备已安装 TrollStore。
+通过 TrollStore 安装 IPA 文件。
 
 **请求:**
 ```
@@ -835,51 +409,11 @@ POST /api/install?path=/var/mobile/Documents/app.ipa
 }
 ```
 
-**错误响应:**
-```json
-{
-  "success": false,
-  "error": "TrollStore is not available. Please ensure TrollStore is installed."
-}
-```
-
-**示例:**
-```bash
-# 安装 IPA 文件
-curl -X POST "http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/MyApp.ipa"
-
-# 先上传再安装
-curl -X POST \
-  "http://192.168.1.100:8182/api/upload?path=/var/mobile/Documents/NewApp.ipa" \
-  -H "Content-Type: application/octet-stream" \
-  --data-binary @NewApp.ipa
-
-curl -X POST "http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/NewApp.ipa"
-```
-
-```python
-import requests
-
-# 安装 IPA
-response = requests.post("http://192.168.1.100:8182/api/install?path=/var/mobile/Documents/app.ipa")
-result = response.json()
-if result['success']:
-    print("安装成功!")
-else:
-    print(f"安装失败: {result['error']}")
-```
-
-**注意事项:**
-- 需要设备已安装 TrollStore
-- IPA 文件必须先上传到设备上（可使用 `/api/upload`）
-- 安装过程可能需要几秒钟
-- 安装成功后应用会出现在主屏幕
-
 ---
 
 ### 16. 卸载应用 (TrollStore)
 
-通过 TrollStore 卸载已安装的应用。需要设备已安装 TrollStore。
+通过 TrollStore 卸载已安装的应用。
 
 **请求:**
 ```
@@ -900,42 +434,165 @@ POST /api/uninstall?bundleId=com.example.app
 }
 ```
 
-**错误响应:**
+---
+
+### 17. TrollStore 诊断
+
+获取 TrollStore 诊断信息。
+
+**请求:**
+```
+GET /api/trollstore/diagnostics
+```
+
+**响应:**
 ```json
 {
-  "success": false,
-  "error": "App not found",
-  "bundleId": "com.example.app"
+  "available": true,
+  "version": "2.0",
+  "helperInstalled": true
 }
 ```
 
-**示例:**
-```bash
-# 卸载应用
-curl -X POST "http://192.168.1.100:8182/api/uninstall?bundleId=com.example.app"
+---
 
-# 卸载 TrollVNC（示例）
-curl -X POST "http://192.168.1.100:8182/api/uninstall?bundleId=com.yourname.trollvnc"
+### 18. 重启设备
+
+重启 iOS 设备。
+
+**请求:**
+```
+POST /api/reboot
 ```
 
-```python
-import requests
-
-# 卸载应用
-bundle_id = "com.example.app"
-response = requests.post(f"http://192.168.1.100:8182/api/uninstall?bundleId={bundle_id}")
-result = response.json()
-if result['success']:
-    print(f"{bundle_id} 已卸载")
-else:
-    print(f"卸载失败: {result['error']}")
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Reboot initiated",
+  "warning": "Device will restart immediately"
+}
 ```
 
-**注意事项:**
-- 需要设备已安装 TrollStore
-- 需要提供正确的 Bundle ID
-- 无法卸载系统应用
-- 卸载后应用数据也会被删除
+---
+
+### 19. 注销设备 (Respring)
+
+重启 SpringBoard（注销）。
+
+**请求:**
+```
+POST /api/respring
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Respring initiated",
+  "warning": "SpringBoard will restart"
+}
+```
+
+---
+
+### 20. AssistiveTouch 控制
+
+控制 AssistiveTouch 功能。
+
+**请求:**
+```
+GET /api/assistivetouch?action=status
+POST /api/assistivetouch?action=disable
+POST /api/assistivetouch?action=enable
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| action | string | 否 | `status`/`disable`/`enable`，默认 `status` |
+
+**⚠️ 警告**: `disable` 会修改系统 plist 文件！
+
+**响应:**
+```json
+{
+  "success": true,
+  "enabled": false,
+  "action": "status"
+}
+```
+
+---
+
+### 21. 触发懒人精灵
+
+等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行。
+
+**请求:**
+```
+GET /api/trigger?port=3333&delay=5
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| port | int | 否 | 懒人精灵端口，默认 `3333` |
+| delay | int | 否 | 延迟秒数，默认 `5` |
+
+**说明:** IP 地址会自动检测为调用者的 IP。
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Trigger scheduled",
+  "target": {
+    "ip": "192.168.1.100",
+    "port": 3333
+  },
+  "delay": 5
+}
+```
+
+---
+
+### 22. 检查文件
+
+检查 `/var/mobile/Media/zhuangtai.txt` 文件是否存在。
+
+**请求:**
+```
+GET /api/checkfile
+```
+
+**响应:**
+```json
+{
+  "status": "ok",
+  "message": "File exists",
+  "path": "/var/mobile/Media/zhuangtai.txt"
+}
+```
+
+---
+
+### 23. 获取客户端列表
+
+获取当前连接的 VNC 客户端列表。
+
+**请求:**
+```
+GET /api/clients
+```
+
+**响应:**
+```json
+{
+  "clients": [],
+  "count": 0
+}
+```
 
 ---
 
@@ -945,161 +602,36 @@ else:
 
 ```json
 {
-  "error": "错误描述",
-  "details": "详细错误信息（可选）"
+  "success": false,
+  "error": "错误描述"
 }
 ```
 
 HTTP 状态码:
 - `200` - 成功
 - `400` - 请求参数错误
+- `404` - 接口不存在
 - `500` - 服务器内部错误
 
 ---
 
-## 使用示例
+## VNC 连接说明
 
-### Lua 示例 (在 iOS 设备上运行)
+**触摸和滑动控制需要通过 VNC 协议实现：**
 
-```lua
-local http = require("socket.http")
-local ltn12 = require("ltn12")
-local base64 = require("base64")
+- **VNC 端口**: 5901（默认）
+- **协议**: RFB (Remote Framebuffer)
+- **认证**: 可选密码认证
 
-local API_BASE = "http://192.168.1.100:8182"
-
--- 获取截图
-local function getScreenshot()
-    local response = {}
-    local _, status = http.request{
-        url = API_BASE .. "/api/screenshot?format=png",
-        sink = ltn12.sink.table(response)
-    }
-    if status == 200 then
-        local file = io.open("/var/mobile/screenshot.png", "wb")
-        file:write(table.concat(response))
-        file:close()
-        print("截图已保存")
-    end
-end
-
--- 写入文件
-local function writeFile(path, content)
-    local encoded = base64.encode(content)
-    local response = {}
-    local _, status = http.request{
-        url = API_BASE .. "/api/writefile?path=" .. path,
-        method = "POST",
-        headers = {
-            ["Content-Type"] = "text/plain",
-            ["Content-Length"] = tostring(#encoded)
-        },
-        source = ltn12.source.string(encoded),
-        sink = ltn12.sink.table(response)
-    }
-    print("写入状态:", status)
-end
-
--- 设置剪贴板
-local function setClipboard(text)
-    local encoded = base64.encode(text)
-    http.request{
-        url = API_BASE .. "/api/clipboard",
-        method = "POST",
-        headers = { ["Content-Type"] = "text/plain" },
-        source = ltn12.source.string(encoded)
-    }
-end
-
--- 输入文本
-local function inputText(text)
-    http.request{
-        url = API_BASE .. "/api/input",
-        method = "POST",
-        headers = { ["Content-Type"] = "text/plain; charset=utf-8" },
-        source = ltn12.source.string(text)
-    }
-end
-
--- 使用示例
-getScreenshot()
-writeFile("/var/mobile/test.txt", "Hello World!")
-setClipboard("复制这段文本")
-inputText("你好，世界！")
-```
-
----
-
-### JavaScript 示例 (浏览器/Node.js)
-
-```javascript
-const API_BASE = 'http://192.168.1.100:8182';
-
-// 获取截图
-async function getScreenshot() {
-    const response = await fetch(`${API_BASE}/api/screenshot?format=png`);
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    
-    // 显示或下载图片
-    const img = document.createElement('img');
-    img.src = url;
-    document.body.appendChild(img);
-}
-
-// 写入文件（纯文本 - 推荐）
-async function writeFileText(path, content) {
-    const response = await fetch(`${API_BASE}/api/writefile_text?path=${encodeURIComponent(path)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: content
-    });
-    return response.json();
-}
-
-// 设置剪贴板（纯文本 - 推荐）
-async function setClipboardText(text) {
-    const response = await fetch(`${API_BASE}/api/clipboard_text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: text
-    });
-    return response.json();
-}
-
-// 输入文本到当前焦点输入框
-async function inputText(text) {
-    const response = await fetch(`${API_BASE}/api/input`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
-        body: text
-    });
-    return response.json();
-}
-
-// 发送按键
-async function sendKey(keyCode) {
-    const response = await fetch(`${API_BASE}/api/key?code=${keyCode}`, {
-        method: 'POST'
-    });
-    return response.json();
-}
-
-// 使用示例
-// inputText("你好，世界！");
-// sendKey(13);  // 回车键
-```
+使用任何标准 VNC 客户端连接后即可进行触摸控制。
 
 ---
 
 ## 安全注意事项
 
-1. **HTTP 服务器默认监听所有网络接口** (`0.0.0.0`)，局域网内任何设备都可以访问
-2. **没有内置身份验证**，请确保在受信任的网络中使用
-3. **建议措施**:
-   - 仅在受信任的局域网中使用
-   - 使用防火墙限制访问
-   - 通过 VPN 或 SSH 隧道访问
+1. HTTP 服务器默认监听所有网络接口，局域网内任何设备都可以访问
+2. 没有内置身份验证，请确保在受信任的网络中使用
+3. 建议通过 VPN 或防火墙限制访问
 
 ---
 
@@ -1110,7 +642,6 @@ async function sendKey(keyCode) {
 1. 确认 TrollVNC 服务器已启动
 2. 检查防火墙设置
 3. 确认端口 8182 未被占用
-4. 查看日志确认 HTTP 服务器是否成功启动
 
 ### 截图失败
 
@@ -1121,38 +652,9 @@ async function sendKey(keyCode) {
 
 1. 确认目标路径有写入权限
 2. 检查磁盘空间
-3. 确认路径存在或父目录可写
-4. **TrollStore 安装的应用**: 通过 TrollStore 安装的应用拥有更高的文件系统权限，可以访问更多路径
+3. TrollStore 安装的应用拥有更高权限
 
-### 文本输入失败
-
-1. **确保手机上有输入框获得焦点** - 必须先点击输入框，看到键盘弹出
-2. 检查输入框类型是否支持（UITextField、UITextView 等）
-3. 某些 App 可能有自定义输入框，可能不支持
-4. 尝试重新点击输入框获取焦点
-
-### 关于 TrollStore 安装
-
-**TrollStore 安装的应用具有以下优势：**
-
-- 可以访问沙盒外的文件系统
-- 不需要越狱
-- 拥有更多系统权限
-
-**推荐的可写路径：**
-
-```
-/var/mobile/Documents/       # 用户文档目录
-/var/mobile/Media/           # 媒体目录
-/var/mobile/Library/         # 库目录（谨慎操作）
-/var/tmp/                    # 临时目录
-```
-
-**注意：** 即使通过 TrollStore 安装，某些系统关键路径仍然受保护，不建议写入系统目录。
-
----
-
-## 旧版 TCP 控制套接字
-
-HTTP API 是新增的接口，原有的 TCP 控制套接字（默认 5555 端口）仍然可用。两者可以共存，互不影响。
-
+**推荐的可写路径:**
+- `/var/mobile/Documents/`
+- `/var/mobile/Media/`
+- `/var/tmp/`

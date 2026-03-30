@@ -296,11 +296,12 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         };
         
         // 确定旋转常量
+        // rotQ: 0=0°, 1=90°, 2=180°, 3=270°
         uint8_t rotConst;
         switch (rotQ) {
-            case 1: rotConst = kRotate90DegreesClockwise; break;
-            case 2: rotConst = kRotate180DegreesClockwise; break;
-            case 3: rotConst = kRotate270DegreesClockwise; break;
+            case 1: rotConst = kRotate90DegreesClockwise; break;   // 90° 顺时针
+            case 2: rotConst = kRotate180DegreesClockwise; break;  // 180°
+            case 3: rotConst = kRotate270DegreesClockwise; break;  // 270° 顺时针
             default: rotConst = kRotate0DegreesClockwise; break;
         }
         

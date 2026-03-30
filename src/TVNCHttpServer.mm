@@ -274,8 +274,17 @@
         if (quality > 1.0) quality = 1.0;
     }
     
-    // 统一使用带旋转的截图方法，确保方向一致
-    imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
+    // 根据是否有旋转参数选择方法
+    if (rotation != 0) {
+        imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
+    } else {
+        // 无旋转时使用原始方法
+        if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+        } else {
+            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
+        }
+    }
     
     if (imageData) {
         response.statusCode = 200;
