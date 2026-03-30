@@ -35,7 +35,7 @@ jobs:
       - name: Download iOS SDKs
         if: steps.cache-sdks.outputs.cache-hit != 'true'
         run: |
-          curl -Lo /tmp/sdks.tar.xz https://github.com/theos/sdks/releases/download/2024-06-05/iPhoneOS16.5.sdk.tar.xz
+          curl -Lo /tmp/sdks.tar.xz https://github.com/theos/sdks/releases/download/master-146e41f/iPhoneOS16.5.sdk.tar.xz
           tar -xf /tmp/sdks.tar.xz -C theos/sdks/
 
       - name: Setup Environment
