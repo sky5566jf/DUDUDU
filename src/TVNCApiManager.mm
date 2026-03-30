@@ -28,7 +28,6 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
-#import <sys/reboot.h>  // 用于 reboot() 系统调用
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 
@@ -1427,18 +1426,9 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     @try {
         TVLog(@"Attempting to reboot device (iOS 15)...");
         
-        // iOS 15 上 TrollStore 环境可能需要特殊处理
-        // 方法1: 直接使用 reboot() 系统调用（需要 root 权限）
-        TVLog(@"Trying reboot() system call...");
-        int ret = reboot(RB_AUTOBOOT);
-        TVLog(@"reboot() returned: %d, errno: %d", ret, errno);
-        if (ret == 0) {
-            TVLog(@"Reboot system call successful");
-            return YES;
-        }
-        
-        // 方法2: 使用 notify 触发系统重启
-        ret = notify_post("com.apple.system.reboot");
+        // iOS 15 上 TrollStore 环境使用以下方式重启
+        // 方法1: 使用 notify 触发系统重启
+        int ret = notify_post("com.apple.system.reboot");
         TVLog(@"notify_post(com.apple.system.reboot) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
             TVLog(@"Reboot notification sent successfully");
