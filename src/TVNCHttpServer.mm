@@ -248,7 +248,7 @@
 
 #pragma mark - API Handlers
 
-// GET /api/screenshot?format=png&quality=0.8&rotation=90
+// GET /api/screenshot?format=png&quality=0.8&rotation=90&scale=0.5
 - (TVNCHttpResponse *)handleScreenshot:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -274,11 +274,20 @@
         if (quality > 1.0) quality = 1.0;
     }
     
-    // 如果有旋转参数，使用带旋转的方法
-    if (rotation != 0) {
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation];
+    // 解析缩放参数，默认1.0（不缩放）
+    CGFloat scale = 1.0;
+    NSString *scaleStr = query[@"scale"];
+    if (scaleStr) {
+        scale = [scaleStr floatValue];
+        if (scale < 0.1) scale = 0.1;
+        if (scale > 1.0) scale = 1.0;
+    }
+    
+    // 如果有缩放参数，使用带缩放+旋转的方法
+    if (scale < 1.0 || rotation != 0) {
+        imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation scale:scale];
     } else {
-        // 无旋转时使用原始方法
+        // 无旋转无缩放时使用原始方法
         if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
             imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
         } else {
@@ -1367,7 +1376,7 @@
         "<html><head><meta charset='UTF-8'><title>TrollVNC API</title></head>"
         "<body><h1>TrollVNC HTTP API</h1>"
         "<h2>Endpoints:</h2><ul>"
-        "<li><b>GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0</b> - 获取截图（rotation: 0=Home下, 90=Home右, 180=Home上, 270=Home左）</li>"
+        "<li><b>GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0&scale=1.0</b> - 获取截图（rotation: 0=Home下, 90=Home右, 180=Home上, 270=Home左; scale: 0.1~1.0 缩放比例）</li>"
         "<li><b>POST /api/writefile?path=/xxx&append=true|false</b> - 写入文件（body: base64）</li>"
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"

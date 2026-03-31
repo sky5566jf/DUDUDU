@@ -399,6 +399,257 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     return imageData;
 }
 
+- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation scale:(CGFloat)scale {
+    // 限制 scale 范围
+    if (scale <= 0.0) scale = 1.0;
+    if (scale > 1.0) scale = 1.0;
+
+    // 如果 scale == 1.0，直接走不带缩放的逻辑
+    if (scale >= 1.0) {
+        return [self captureScreenshotWithFormat:format quality:quality rotation:rotation];
+    }
+
+    // 规范化旋转角度
+    NSInteger rot = rotation % 360;
+    if (rot < 0) rot += 360;
+    NSInteger rotQ = (rot / 90) % 4;
+
+    // 确定格式
+    CFStringRef formatRef = (__bridge CFStringRef)@[@"public.png", @"public.jpeg"][[@"jpeg" isEqualToString:format.lowercaseString] ? 1 : 0];
+
+    // 获取屏幕尺寸
+    CGSize screenSize = [[UIScreen mainScreen] bounds].size;
+    CGFloat screenScale = [[UIScreen mainScreen] scale];
+    int srcWidth = (int)(screenSize.width * screenScale);
+    int srcHeight = (int)(screenSize.height * screenScale);
+
+    // 旋转后的尺寸
+    int rotWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
+    int rotHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
+
+    // 缩放后的最终尺寸
+    int dstWidth = MAX(1, (int)(rotWidth * scale));
+    int dstHeight = MAX(1, (int)(rotHeight * scale));
+
+    // 创建 IOSurface
+    unsigned pixelFormat = 0x42475241; // 'ARGB'
+    int bytesPerComponent = sizeof(uint8_t);
+    int bytesPerElement = bytesPerComponent * 4;
+    int srcBytesPerRow = (int)IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, bytesPerElement * srcWidth);
+
+    NSDictionary *properties = @{
+        (__bridge NSString *)kIOSurfaceBytesPerElement : @(bytesPerElement),
+        (__bridge NSString *)kIOSurfaceBytesPerRow : @(srcBytesPerRow),
+        (__bridge NSString *)kIOSurfaceWidth : @(srcWidth),
+        (__bridge NSString *)kIOSurfaceHeight : @(srcHeight),
+        (__bridge NSString *)kIOSurfacePixelFormat : @(pixelFormat),
+        (__bridge NSString *)kIOSurfaceAllocSize : @(srcBytesPerRow * srcHeight),
+    };
+
+    IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
+    if (!surface) {
+        TVLog(@"Failed to create IOSurface for screenshot");
+        return nil;
+    }
+
+    CARenderServerRenderDisplay(0, CFSTR("LCD"), surface, 0, 0);
+    IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nil);
+
+    void *srcData = IOSurfaceGetBaseAddress(surface);
+    size_t srcDataSize = IOSurfaceGetAllocSize(surface);
+
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, srcData, srcDataSize, NULL);
+    CGImageRef cgImage = CGImageCreate(srcWidth, srcHeight, 8, 32, srcBytesPerRow, colorSpace,
+                                        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                        provider, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(provider);
+    IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nil);
+
+    if (!cgImage) {
+        TVLog(@"Failed to create CGImage from IOSurface");
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+
+    // 步骤1: 如果需要旋转，先旋转
+    void *rotatedData = NULL;
+    size_t rotatedDataSize = 0;
+    int rotatedBytesPerRow = 0;
+    int imgWidth = srcWidth;
+    int imgHeight = srcHeight;
+    CGImageRef workImage = cgImage;
+
+    if (rotQ != 0) {
+        rotatedBytesPerRow = rotWidth * 4;
+        rotatedDataSize = (size_t)(rotatedBytesPerRow * rotHeight);
+        rotatedData = malloc(rotatedDataSize);
+        if (!rotatedData) {
+            TVLog(@"Failed to allocate rotation buffer");
+            CGImageRelease(cgImage);
+            CFRelease(surface);
+            CGColorSpaceRelease(colorSpace);
+            return nil;
+        }
+
+        vImage_Buffer srcBuf = {
+            .data = srcData,
+            .height = (vImagePixelCount)srcHeight,
+            .width = (vImagePixelCount)srcWidth,
+            .rowBytes = (size_t)srcBytesPerRow
+        };
+        vImage_Buffer rotBuf = {
+            .data = rotatedData,
+            .height = (vImagePixelCount)rotHeight,
+            .width = (vImagePixelCount)rotWidth,
+            .rowBytes = (size_t)rotatedBytesPerRow
+        };
+
+        uint8_t rotConst;
+        switch (rotQ) {
+            case 1: rotConst = kRotate270DegreesClockwise; break;
+            case 2: rotConst = kRotate180DegreesClockwise; break;
+            case 3: rotConst = kRotate90DegreesClockwise; break;
+            default: rotConst = kRotate0DegreesClockwise; break;
+        }
+
+        uint8_t bg[4] = {0, 0, 0, 0};
+        vImage_Error err = vImageRotate90_ARGB8888(&srcBuf, &rotBuf, rotConst, bg, kvImageNoFlags);
+        if (err != kvImageNoError) {
+            TVLog(@"vImageRotate90_ARGB8888 failed: %ld", (long)err);
+            free(rotatedData);
+            CGImageRelease(cgImage);
+            CFRelease(surface);
+            CGColorSpaceRelease(colorSpace);
+            return nil;
+        }
+
+        CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, rotatedData, rotatedDataSize, NULL);
+        CGImageRef rotatedImage = CGImageCreate(rotWidth, rotHeight, 8, 32, rotatedBytesPerRow, colorSpace,
+                                                kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                                rotProvider, NULL, false, kCGRenderingIntentDefault);
+        CGDataProviderRelease(rotProvider);
+
+        if (rotatedImage) {
+            workImage = rotatedImage;
+            imgWidth = rotWidth;
+            imgHeight = rotHeight;
+        } else {
+            free(rotatedData);
+            rotatedData = NULL;
+        }
+    }
+
+    // 步骤2: 缩放（使用 vImageScale_ARGB8888）
+    // 获取旋转后图像的原始像素数据作为缩放源
+    void *scaleSrcData = rotatedData ? rotatedData : srcData;
+    int scaleSrcBytesPerRow = rotatedData ? rotatedBytesPerRow : srcBytesPerRow;
+    // 注意: rotatedData 已经解锁了 IOSurface，但 srcData 在 surface 还活着时仍然有效（surface 未释放）
+
+    int dstBytesPerRow = dstWidth * 4;
+    size_t dstDataSize = (size_t)(dstBytesPerRow * dstHeight);
+    void *dstData = malloc(dstDataSize);
+    if (!dstData) {
+        TVLog(@"Failed to allocate scale buffer");
+        if (rotatedData) free(rotatedData);
+        if (workImage != cgImage) CGImageRelease(workImage);
+        CGImageRelease(cgImage);
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+
+    vImage_Buffer scaleSrcBuf = {
+        .data = scaleSrcData,
+        .height = (vImagePixelCount)imgHeight,
+        .width = (vImagePixelCount)imgWidth,
+        .rowBytes = (size_t)scaleSrcBytesPerRow
+    };
+    vImage_Buffer scaleDstBuf = {
+        .data = dstData,
+        .height = (vImagePixelCount)dstHeight,
+        .width = (vImagePixelCount)dstWidth,
+        .rowBytes = (size_t)dstBytesPerRow
+    };
+
+    // 获取 vImage 缩放所需的临时缓冲区大小
+    vImage_Error tempErr = vImageScale_ARGB8888(&scaleSrcBuf, &scaleDstBuf, NULL, kvImageHighQualityResampling | kvImageGetTempBufferSize);
+    void *tempBuf = NULL;
+    if (tempErr > 0) {
+        tempBuf = malloc((size_t)tempErr);
+    }
+
+    vImage_Error scaleErr = vImageScale_ARGB8888(&scaleSrcBuf, &scaleDstBuf, tempBuf, kvImageHighQualityResampling);
+    if (tempBuf) free(tempBuf);
+
+    if (scaleErr != kvImageNoError) {
+        TVLog(@"vImageScale_ARGB8888 failed: %ld", (long)scaleErr);
+        free(dstData);
+        if (rotatedData) free(rotatedData);
+        if (workImage != cgImage) CGImageRelease(workImage);
+        CGImageRelease(cgImage);
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+
+    // 从缩放后的缓冲区创建最终 CGImage
+    CGDataProviderRef dstProvider = CGDataProviderCreateWithData(NULL, dstData, dstDataSize, NULL);
+    CGImageRef finalImage = CGImageCreate(dstWidth, dstHeight, 8, 32, dstBytesPerRow, colorSpace,
+                                           kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                           dstProvider, NULL, false, kCGRenderingIntentDefault);
+    CGDataProviderRelease(dstProvider);
+
+    // 转换为图片数据
+    NSMutableData *imageData = [NSMutableData data];
+    CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData,
+                                                                   formatRef, 1, NULL);
+    if (!dest || !finalImage) {
+        TVLog(@"Failed to create image destination or final image");
+        if (dest) CFRelease(dest);
+        if (finalImage) CGImageRelease(finalImage);
+        free(dstData);
+        if (rotatedData) free(rotatedData);
+        CGImageRelease(cgImage);
+        CFRelease(surface);
+        CGColorSpaceRelease(colorSpace);
+        return nil;
+    }
+
+    CFDictionaryRef propertiesRef = NULL;
+    if (CFStringCompare(formatRef, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
+        CFStringRef keys[1] = { CFSTR("kCGImageDestinationLossyCompressionQuality") };
+        float qualityFloat = (float)quality;
+        CFNumberRef values[1] = { CFNumberCreate(NULL, kCFNumberFloatType, &qualityFloat) };
+        propertiesRef = CFDictionaryCreate(NULL, (const void **)keys, (const void **)values, 1,
+                                           &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+        CFRelease(values[0]);
+    }
+
+    CGImageDestinationAddImage(dest, finalImage, propertiesRef);
+    if (propertiesRef) CFRelease(propertiesRef);
+    BOOL success = CGImageDestinationFinalize(dest);
+
+    CFRelease(dest);
+    CGImageRelease(finalImage);
+    free(dstData);
+    if (rotatedData) free(rotatedData);
+    if (workImage != cgImage) CGImageRelease(workImage);
+    CGImageRelease(cgImage);
+    CFRelease(surface);
+    CGColorSpaceRelease(colorSpace);
+
+    if (!success) {
+        TVLog(@"Failed to finalize image destination");
+        return nil;
+    }
+
+    TVLog(@"Screenshot: %dx%d -> %dx%d (scale=%.2f, rotation=%ld)", srcWidth, srcHeight, dstWidth, dstHeight, scale, (long)rotation);
+
+    return imageData;
+}
+
 #pragma mark - 文件操作 API
 
 - (BOOL)writeContent:(id)content toFilePath:(NSString *)filePath append:(BOOL)append error:(NSError **)error {

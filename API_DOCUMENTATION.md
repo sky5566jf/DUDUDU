@@ -23,7 +23,7 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 **请求:**
 ```
-GET /api/screenshot?format=png&quality=0.9&rotation=0
+GET /api/screenshot?format=png&quality=0.9&rotation=0&scale=1.0
 ```
 
 **参数:**
@@ -32,6 +32,7 @@ GET /api/screenshot?format=png&quality=0.9&rotation=0
 | format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
 | quality | float | 否 | JPEG质量 0.0~1.0，默认 `0.9`，仅对jpeg有效 |
 | rotation | int | 否 | 旋转角度（Home键位置）：`0`(下), `90`(右), `180`(上), `270`(左)，默认 `0` |
+| scale | float | 否 | 缩放比例 0.1~1.0，默认 `1.0`（不缩放）。使用 vImageScale 高质量缩放，可大幅减小图片体积 |
 
 **响应:**
 - 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
@@ -47,7 +48,21 @@ curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?rotation=90"
 
 # 获取旋转 270 度且 JPEG 格式的截图（Home 在左侧）
 curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.8&rotation=270"
+
+# 获取缩小到 50% 大小的 JPEG 截图（体积大幅减小，适合远程预览）
+curl -o screenshot_small.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.7&scale=0.5"
+
+# 获取缩小到 30% 大小的 JPEG 截图（极小体积，适合低带宽场景）
+curl -o screenshot_tiny.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.5&scale=0.3"
 ```
+
+**体积参考（iPhone 13 Pro 1170x2532 @3x，原始截图约 1170x2532 像素）:**
+| 参数 | 像素尺寸 | 约体积 |
+|------|----------|--------|
+| PNG (默认) | 1170x2532 | 2~4 MB |
+| JPEG quality=0.9 | 1170x2532 | 500 KB~1 MB |
+| JPEG quality=0.7, scale=0.5 | 585x1266 | 30~80 KB |
+| JPEG quality=0.5, scale=0.3 | 351x760 | 10~30 KB |
 
 ---
 
