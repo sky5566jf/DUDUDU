@@ -23,7 +23,7 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 **请求:**
 ```
-GET /api/screenshot?format=png&quality=0.9&rotation=0
+GET /api/screenshot?format=png&quality=0.9&rotation=0&scale=1.0
 ```
 
 **参数:**
@@ -32,6 +32,7 @@ GET /api/screenshot?format=png&quality=0.9&rotation=0
 | format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
 | quality | float | 否 | JPEG质量 0.0~1.0，默认 `0.9`，仅对jpeg有效 |
 | rotation | int | 否 | 旋转角度：`0`, `90`, `180`, `270`，默认 `0` |
+| scale | float | 否 | 缩放比例：`0.1` ~ `1.0`，默认 `1.0`（原始尺寸）|
 
 **响应:**
 - 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
@@ -44,6 +45,12 @@ curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot"
 
 # 获取旋转 90 度的截图
 curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?rotation=90"
+
+# 获取 50% 缩放的截图（节省带宽）
+curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?scale=0.5"
+
+# 获取旋转 180 度且 50% 缩放的 JPEG 截图
+curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.8&rotation=180&scale=0.5"
 ```
 
 ---

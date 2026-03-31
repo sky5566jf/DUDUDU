@@ -36,6 +36,7 @@
         button.danger { background: #ff3b30; }
         button.success { background: #34c759; }
         button.warning { background: #ff9500; }
+        button.info { background: #5856d6; }
         #screen {
             max-width: 100%; max-height: 500px; border: 2px solid #444;
             border-radius: 5px; background: #1a1a1a;
@@ -67,6 +68,21 @@
         .slider-value { min-width: 50px; text-align: center; }
         .note { color: #888; font-size: 12px; margin-top: 5px; }
         .warning { color: #ff9500; font-size: 12px; margin-top: 5px; }
+        .info-box { background: #2a3f5f; padding: 10px; border-radius: 5px; margin-top: 10px; }
+        .info-box pre { margin: 0; font-size: 12px; color: #8ab4f8; overflow-x: auto; }
+        .response-display {
+            background: #1a1a1a; border: 1px solid #444; border-radius: 5px;
+            padding: 10px; margin-top: 10px; max-height: 200px; overflow-y: auto;
+            font-family: 'Consolas', monospace; font-size: 12px; white-space: pre-wrap;
+        }
+        .touchpad {
+            width: 100%; height: 400px; background: #1a1a1a;
+            border: 2px solid #444; border-radius: 5px;
+            position: relative; cursor: crosshair;
+            display: flex; align-items: center; justify-content: center;
+            color: #666; user-select: none;
+        }
+        .touchpad.active { border-color: #007AFF; }
     </style>
 </head>
 <body>
@@ -80,7 +96,12 @@
                 <input type="number" id="port" value="8182" min="1" max="65535" style="width:100px;">
                 <button onclick="connect()">连接</button>
                 <button onclick="disconnect()" class="danger">断开</button>
+                <button onclick="getDeviceInfo()" class="info">设备信息</button>
+                <button onclick="getServerStatus()" class="info">服务器状态</button>
                 <span id="status" class="status disconnected">未连接</span>
+            </div>
+            <div id="deviceInfo" class="info-box" style="display:none;">
+                <pre id="deviceInfoContent"></pre>
             </div>
             <div class="input-group">
                 <label>刷新率:</label>
@@ -91,12 +112,21 @@
             </div>
             <div class="input-group">
                 <label>旋转:</label>
-                <select id="rotation" style="width:100px;">
-                    <option value="0">0°</option>
-                    <option value="90">90°</option>
-                    <option value="180">180°</option>
-                    <option value="270">270°</option>
+                <select id="rotation" style="width:120px;">
+                    <option value="0">0° (原始)</option>
+                    <option value="90">90° (Home左)</option>
+                    <option value="180">180° (颠倒)</option>
+                    <option value="270">270° (Home右)</option>
                 </select>
+                <label>格式:</label>
+                <select id="format" style="width:80px;">
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG</option>
+                </select>
+                <label>质量:</label>
+                <input type="number" id="quality" value="0.9" min="0.1" max="1.0" step="0.1" style="width:70px;">
+                <label>缩放:</label>
+                <input type="number" id="scale" value="1.0" min="0.1" max="1.0" step="0.1" style="width:70px;" title="0.1-1.0，越小图片越小">
             </div>
         </div>
 
@@ -104,6 +134,45 @@
             <h2>屏幕截图 <span id="screenSize"></span></h2>
             <div id="screen" class="no-image">点击连接后显示屏幕</div>
             <p class="note">提示: 触摸/滑动控制请使用 VNC 客户端连接 5901 端口</p>
+        </div>
+
+        <div class="panel">
+            <h2>触摸控制</h2>
+            <div class="api-section">
+                <h3>👆 触摸板 (点击屏幕进行触摸)</h3>
+                <div id="touchpad" class="touchpad">
+                    <span>连接后在此处点击/滑动进行触摸控制</span>
+                </div>
+                <p class="note">提示: 点击触摸板对应位置会发送触摸事件到设备</p>
+            </div>
+            
+            <div class="api-section">
+                <h3>📱 手势操作</h3>
+                <div class="controls-grid">
+                    <button onclick="pressHome()">🏠 Home 键</button>
+                    <button onclick="pressLock()">🔒 锁屏键</button>
+                    <button onclick="pressBoth()">🔒+🏠 同时按</button>
+                    <button onclick="doubleClick()">2️⃣ 双击 Home</button>
+                    <button onclick="tripleClick()">3️⃣ 三击 Home</button>
+                </div>
+            </div>
+            
+            <div class="api-section">
+                <h3>↔️ 滑动操作</h3>
+                <div class="input-group">
+                    <label>起点 X:</label>
+                    <input type="number" id="swipeX1" value="200" style="width:80px;">
+                    <label>Y:</label>
+                    <input type="number" id="swipeY1" value="400" style="width:80px;">
+                    <label>终点 X:</label>
+                    <input type="number" id="swipeX2" value="200" style="width:80px;">
+                    <label>Y:</label>
+                    <input type="number" id="swipeY2" value="200" style="width:80px;">
+                    <label>时长(ms):</label>
+                    <input type="number" id="swipeDuration" value="300" style="width:80px;">
+                    <button onclick="swipe()">滑动</button>
+                </div>
+            </div>
         </div>
 
         <div class="panel">
@@ -151,6 +220,17 @@
         </div>
 
         <div class="panel">
+            <h2>系统信息</h2>
+            <div class="controls-grid">
+                <button onclick="getDeviceInfo()">📱 设备信息</button>
+                <button onclick="getBattery()">🔋 电池状态</button>
+                <button onclick="getMemory()">💾 内存状态</button>
+                <button onclick="getStorage()">💿 存储状态</button>
+            </div>
+            <div id="systemInfoResponse" class="response-display" style="display:none;"></div>
+        </div>
+
+        <div class="panel">
             <h2>文本操作</h2>
             
             <div class="api-section">
@@ -165,10 +245,11 @@
             </div>
 
             <div class="api-section">
-                <h3>📋 设置剪贴板</h3>
+                <h3>📋 剪贴板操作</h3>
                 <textarea id="clipboardText" placeholder="输入要复制到剪贴板的文本..."></textarea>
                 <div class="input-group" style="margin-top:10px;">
                     <button onclick="setClipboard()">设置剪贴板</button>
+                    <button onclick="getClipboard()">获取剪贴板</button>
                 </div>
             </div>
         </div>
@@ -185,7 +266,9 @@
                 <div class="input-group" style="margin-top:10px;">
                     <button onclick="writeFile(false)">写入</button>
                     <button onclick="writeFile(true)">追加</button>
+                    <button onclick="readFile()">读取</button>
                 </div>
+                <div id="fileContent" class="response-display" style="display:none;"></div>
             </div>
 
             <div class="api-section">
@@ -208,6 +291,14 @@
                 <div class="input-group">
                     <input type="text" id="installPath" placeholder="IPA 文件路径 (如: /var/mobile/Documents/app.ipa)">
                     <button onclick="installApp()">安装</button>
+                </div>
+            </div>
+
+            <div class="api-section">
+                <h3>🚀 启动应用</h3>
+                <div class="input-group">
+                    <input type="text" id="launchBundleId" placeholder="Bundle ID (如: com.apple.mobilesafari)">
+                    <button onclick="launchApp()">启动</button>
                 </div>
             </div>
 
@@ -252,6 +343,7 @@
 
     <script>
         let baseUrl = '', autoRefreshInterval = null, isAutoRefreshing = false;
+        let screenWidth = 0, screenHeight = 0;
 
         function log(msg, type = 'info') {
             const el = document.getElementById('log');
@@ -281,6 +373,18 @@
                     log(`成功: ${data.deviceName} (${data.deviceModelName}) iOS ${data.systemVersion}`, 'success');
                     document.getElementById('status').textContent = '已连接';
                     document.getElementById('status').className = 'status connected';
+                    
+                    // 保存屏幕尺寸
+                    screenWidth = data.screenWidth || 0;
+                    screenHeight = data.screenHeight || 0;
+                    
+                    // 显示设备信息
+                    document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
+                    document.getElementById('deviceInfo').style.display = 'block';
+                    
+                    // 初始化触摸板
+                    initTouchpad();
+                    
                     refreshScreen();
                 } else throw new Error('HTTP ' + res.status);
             } catch (err) {
@@ -296,6 +400,8 @@
             document.getElementById('status').className = 'status disconnected';
             document.getElementById('screen').textContent = '点击连接后显示屏幕';
             document.getElementById('screen').className = 'no-image';
+            document.getElementById('deviceInfo').style.display = 'none';
+            document.getElementById('touchpad').innerHTML = '<span>连接后在此处点击/滑动进行触摸控制</span>';
             log('已断开', 'info');
         }
 
@@ -303,7 +409,10 @@
             if (!baseUrl) return;
             try {
                 const rotation = document.getElementById('rotation').value;
-                const res = await fetch(`${baseUrl}/api/screenshot?${Date.now()}&rotation=${rotation}`);
+                const format = document.getElementById('format').value;
+                const quality = document.getElementById('quality').value;
+                const scale = document.getElementById('scale').value;
+                const res = await fetch(`${baseUrl}/api/screenshot?${Date.now()}&rotation=${rotation}&format=${format}&quality=${quality}&scale=${scale}`);
                 if (res.ok) {
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
@@ -364,6 +473,76 @@
             document.getElementById(id).textContent = value + '%';
         }
 
+        // 触摸控制
+        function initTouchpad() {
+            const touchpad = document.getElementById('touchpad');
+            touchpad.innerHTML = '';
+            touchpad.classList.add('active');
+            
+            let isTouching = false;
+            
+            touchpad.addEventListener('mousedown', async (e) => {
+                if (!baseUrl) return;
+                isTouching = true;
+                const rect = touchpad.getBoundingClientRect();
+                const x = Math.round((e.clientX - rect.left) / rect.width * (screenWidth || 375));
+                const y = Math.round((e.clientY - rect.top) / rect.height * (screenHeight || 812));
+                await touch(x, y);
+            });
+            
+            touchpad.addEventListener('mousemove', async (e) => {
+                if (!isTouching || !baseUrl) return;
+                const rect = touchpad.getBoundingClientRect();
+                const x = Math.round((e.clientX - rect.left) / rect.width * (screenWidth || 375));
+                const y = Math.round((e.clientY - rect.top) / rect.height * (screenHeight || 812));
+                await touch(x, y);
+            });
+            
+            touchpad.addEventListener('mouseup', () => {
+                isTouching = false;
+            });
+            
+            touchpad.addEventListener('mouseleave', () => {
+                isTouching = false;
+            });
+        }
+
+        async function touch(x, y) {
+            try {
+                await fetch(`${baseUrl}/api/touch?x=${x}&y=${y}`, { method: 'POST' });
+            } catch (err) { console.error(err); }
+        }
+
+        async function swipe() {
+            const x1 = document.getElementById('swipeX1').value;
+            const y1 = document.getElementById('swipeY1').value;
+            const x2 = document.getElementById('swipeX2').value;
+            const y2 = document.getElementById('swipeY2').value;
+            const duration = document.getElementById('swipeDuration').value;
+            await apiCall('POST', 'swipe', null, `?x1=${x1}&y1=${y1}&x2=${x2}&y2=${y2}&duration=${duration}`);
+        }
+
+        async function pressHome() {
+            await apiCall('POST', 'presshome');
+        }
+
+        async function pressLock() {
+            await apiCall('POST', 'presslock');
+        }
+
+        async function pressBoth() {
+            await apiCall('POST', 'pressboth');
+        }
+
+        async function doubleClick() {
+            await apiCall('POST', 'doubleclick');
+        }
+
+        async function tripleClick() {
+            await apiCall('POST', 'tripleclick');
+        }
+
+        // 系统控制
         async function setVolume() {
             const value = document.getElementById('volumeSlider').value / 100;
             await apiCall('POST', 'volume', null, `?value=${value}`);
@@ -393,6 +572,50 @@
             if (data) log(`AssistiveTouch: ${data.enabled ? '启用' : '禁用'}`, 'info');
         }
 
+        // 系统信息
+        async function getDeviceInfo() {
+            const data = await apiCall('GET', 'device');
+            if (data) {
+                document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('deviceInfo').style.display = 'block';
+                screenWidth = data.screenWidth || 0;
+                screenHeight = data.screenHeight || 0;
+            }
+        }
+
+        async function getServerStatus() {
+            const data = await apiCall('GET', 'status');
+            if (data) {
+                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('systemInfoResponse').style.display = 'block';
+            }
+        }
+
+        async function getBattery() {
+            const data = await apiCall('GET', 'battery');
+            if (data) {
+                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('systemInfoResponse').style.display = 'block';
+            }
+        }
+
+        async function getMemory() {
+            const data = await apiCall('GET', 'memory');
+            if (data) {
+                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('systemInfoResponse').style.display = 'block';
+            }
+        }
+
+        async function getStorage() {
+            const data = await apiCall('GET', 'storage');
+            if (data) {
+                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('systemInfoResponse').style.display = 'block';
+            }
+        }
+
+        // 文本操作
         async function sendInput() {
             const text = document.getElementById('inputText').value;
             if (!text) { alert('请输入文本'); return; }
@@ -409,11 +632,30 @@
             await apiCall('POST', 'clipboard_text', text);
         }
 
+        async function getClipboard() {
+            const data = await apiCall('GET', 'clipboard_text');
+            if (data && data.text !== undefined) {
+                document.getElementById('clipboardText').value = data.text;
+            }
+        }
+
+        // 文件操作
         async function writeFile(append) {
             const path = document.getElementById('writeFilePath').value;
             const content = document.getElementById('writeFileContent').value;
             if (!path) { alert('请输入文件路径'); return; }
             await apiCall('POST', 'writefile_text', content, `?path=${encodeURIComponent(path)}&append=${append}`);
+        }
+
+        async function readFile() {
+            const path = document.getElementById('writeFilePath').value;
+            if (!path) { alert('请输入文件路径'); return; }
+            const data = await apiCall('GET', 'readfile_text', null, `?path=${encodeURIComponent(path)}`);
+            if (data && data.content !== undefined) {
+                document.getElementById('writeFileContent').value = data.content;
+                document.getElementById('fileContent').textContent = data.content;
+                document.getElementById('fileContent').style.display = 'block';
+            }
         }
 
         async function uploadFile() {
@@ -436,10 +678,17 @@
             } catch (err) { log(`上传失败: ${err.message}`, 'error'); }
         }
 
+        // 应用管理
         async function installApp() {
             const path = document.getElementById('installPath').value;
             if (!path) { alert('请输入 IPA 路径'); return; }
             await apiCall('POST', 'install', null, `?path=${encodeURIComponent(path)}`);
+        }
+
+        async function launchApp() {
+            const bundleId = document.getElementById('launchBundleId').value;
+            if (!bundleId) { alert('请输入 Bundle ID'); return; }
+            await apiCall('POST', 'launchapp', null, `?bundleId=${encodeURIComponent(bundleId)}`);
         }
 
         async function uninstallApp() {
@@ -453,6 +702,7 @@
             await apiCall('GET', 'trollstore/diagnostics');
         }
 
+        // 其他
         async function triggerLazyElf() {
             const port = document.getElementById('triggerPort').value;
             const delay = document.getElementById('triggerDelay').value;

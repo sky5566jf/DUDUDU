@@ -197,23 +197,40 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 }
 
 - (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation {
+    return [self captureScreenshotWithFormat:format quality:quality rotation:rotation scale:1.0];
+}
+
+- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation scale:(CGFloat)scale {
     // 规范化旋转角度为 0, 90, 180, 270
     NSInteger rot = rotation % 360;
     if (rot < 0) rot += 360;
     NSInteger rotQ = (rot / 90) % 4; // 0=0°, 1=90°, 2=180°, 3=270°
+    
+    // 规范化缩放比例
+    CGFloat scaleFactor = scale;
+    if (scaleFactor < 0.1) scaleFactor = 0.1;
+    if (scaleFactor > 1.0) scaleFactor = 1.0;
     
     // 确定格式
     CFStringRef formatRef = (__bridge CFStringRef)@[@"public.png", @"public.jpeg"][[@"jpeg" isEqualToString:format.lowercaseString] ? 1 : 0];
     
     // 获取屏幕尺寸
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
-    CGFloat scale = [[UIScreen mainScreen] scale];
-    int srcWidth = (int)(screenSize.width * scale);
-    int srcHeight = (int)(screenSize.height * scale);
+    CGFloat screenScale = [[UIScreen mainScreen] scale];
+    int srcWidth = (int)(screenSize.width * screenScale);
+    int srcHeight = (int)(screenSize.height * screenScale);
     
     // 根据旋转角度计算输出尺寸
-    int dstWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
-    int dstHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
+    int rotWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
+    int rotHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
+    
+    // 应用缩放
+    int dstWidth = (int)(rotWidth * scaleFactor);
+    int dstHeight = (int)(rotHeight * scaleFactor);
+    
+    // 确保尺寸至少为 1
+    if (dstWidth < 1) dstWidth = 1;
+    if (dstHeight < 1) dstHeight = 1;
     
     // 创建 IOSurface 属性
     unsigned pixelFormat = 0x42475241; // 'ARGB'

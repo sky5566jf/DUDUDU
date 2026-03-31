@@ -63,6 +63,16 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation;
 
+/**
+ 获取当前屏幕截图的原始数据（带旋转和缩放）
+ format: "png" 或 "jpeg"
+ quality: 0.0 ~ 1.0（仅对 JPEG 有效）
+ rotation: 旋转角度（0, 90, 180, 270）
+ scale: 缩放比例（0.1 ~ 1.0，1.0 表示原始尺寸）
+ 返回旋转和缩放后的图片数据，如果失败返回 nil
+ */
+- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation scale:(CGFloat)scale;
+
 #pragma mark - 文件操作 API
 
 /**
