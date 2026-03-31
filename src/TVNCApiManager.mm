@@ -197,47 +197,30 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 }
 
 - (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation {
-    return [self captureScreenshotWithFormat:format quality:quality rotation:rotation scale:1.0];
-}
-
-- (nullable NSData *)captureScreenshotWithFormat:(NSString *)format quality:(CGFloat)quality rotation:(NSInteger)rotation scale:(CGFloat)scale {
     // 规范化旋转角度为 0, 90, 180, 270
     NSInteger rot = rotation % 360;
     if (rot < 0) rot += 360;
     NSInteger rotQ = (rot / 90) % 4; // 0=0°, 1=90°, 2=180°, 3=270°
-    
-    // 规范化缩放比例
-    CGFloat scaleFactor = scale;
-    if (scaleFactor < 0.1) scaleFactor = 0.1;
-    if (scaleFactor > 1.0) scaleFactor = 1.0;
-    
+
     // 确定格式
     CFStringRef formatRef = (__bridge CFStringRef)@[@"public.png", @"public.jpeg"][[@"jpeg" isEqualToString:format.lowercaseString] ? 1 : 0];
-    
+
     // 获取屏幕尺寸
     CGSize screenSize = [[UIScreen mainScreen] bounds].size;
     CGFloat screenScale = [[UIScreen mainScreen] scale];
     int srcWidth = (int)(screenSize.width * screenScale);
     int srcHeight = (int)(screenSize.height * screenScale);
-    
+
     // 根据旋转角度计算输出尺寸
-    int rotWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
-    int rotHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
-    
-    // 应用缩放
-    int dstWidth = (int)(rotWidth * scaleFactor);
-    int dstHeight = (int)(rotHeight * scaleFactor);
-    
-    // 确保尺寸至少为 1
-    if (dstWidth < 1) dstWidth = 1;
-    if (dstHeight < 1) dstHeight = 1;
-    
+    int dstWidth = (rotQ % 2 == 0) ? srcWidth : srcHeight;
+    int dstHeight = (rotQ % 2 == 0) ? srcHeight : srcWidth;
+
     // 创建 IOSurface 属性
     unsigned pixelFormat = 0x42475241; // 'ARGB'
     int bytesPerComponent = sizeof(uint8_t);
     int bytesPerElement = bytesPerComponent * 4;
     int srcBytesPerRow = (int)IOSurfaceAlignProperty(kIOSurfaceBytesPerRow, bytesPerElement * srcWidth);
-    
+
     NSDictionary *properties = @{
         (__bridge NSString *)kIOSurfaceBytesPerElement : @(bytesPerElement),
         (__bridge NSString *)kIOSurfaceBytesPerRow : @(srcBytesPerRow),
@@ -246,44 +229,44 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         (__bridge NSString *)kIOSurfacePixelFormat : @(pixelFormat),
         (__bridge NSString *)kIOSurfaceAllocSize : @(srcBytesPerRow * srcHeight),
     };
-    
+
     // 创建 IOSurface
     IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
     if (!surface) {
         TVLog(@"Failed to create IOSurface for screenshot");
         return nil;
     }
-    
+
     // 渲染屏幕内容到 IOSurface
     CARenderServerRenderDisplay(0, CFSTR("LCD"), surface, 0, 0);
-    
+
     // 锁定 IOSurface
     IOSurfaceLock(surface, kIOSurfaceLockReadOnly, nil);
-    
+
     // 获取源图像数据
     void *srcData = IOSurfaceGetBaseAddress(surface);
     size_t srcDataSize = IOSurfaceGetAllocSize(surface);
-    
+
     // 创建 CGImage
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, srcData, srcDataSize, NULL);
     CGImageRef cgImage = CGImageCreate(srcWidth, srcHeight, 8, 32, srcBytesPerRow, colorSpace,
                                         kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
                                         provider, NULL, false, kCGRenderingIntentDefault);
-    
+
     CGDataProviderRelease(provider);
     IOSurfaceUnlock(surface, kIOSurfaceLockReadOnly, nil);
-    
+
     if (!cgImage) {
         TVLog(@"Failed to create CGImage from IOSurface");
         CFRelease(surface);
         CGColorSpaceRelease(colorSpace);
         return nil;
     }
-    
+
     CGImageRef finalImage = cgImage;
     CGImageRef rotatedImage = NULL;
-    
+
     // 如果需要旋转，执行旋转操作
     if (rotQ != 0) {
         // 使用 vImage 进行旋转
@@ -293,7 +276,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             .width = (vImagePixelCount)srcWidth,
             .rowBytes = (size_t)srcBytesPerRow
         };
-        
+
         // 分配旋转后的缓冲区
         size_t dstBytesPerRow = dstWidth * 4;
         void *dstData = malloc(dstBytesPerRow * dstHeight);
@@ -304,27 +287,31 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             CGColorSpaceRelease(colorSpace);
             return nil;
         }
-        
+
         vImage_Buffer dstBuf = {
             .data = dstData,
             .height = (vImagePixelCount)dstHeight,
             .width = (vImagePixelCount)dstWidth,
             .rowBytes = dstBytesPerRow
         };
-        
+
         // 确定旋转常量
-        // rotQ: 0=0°, 1=90°, 2=180°, 3=270°
+        // rotation 参数含义：Home 键在哪个方向
+        //   0°   → Home 在下面（不旋转，原始竖屏）
+        //   90°  → Home 在右侧 → 图像需要逆时针旋转 90°（即 vImage 顺时针 270°）
+        //   180° → Home 在上面 → 图像旋转 180°
+        //   270° → Home 在左侧 → 图像需要顺时针旋转 90°
         uint8_t rotConst;
         switch (rotQ) {
-            case 1: rotConst = kRotate90DegreesClockwise; break;   // 90° 顺时针
-            case 2: rotConst = kRotate180DegreesClockwise; break;  // 180°
-            case 3: rotConst = kRotate270DegreesClockwise; break;  // 270° 顺时针
+            case 1: rotConst = kRotate270DegreesClockwise; break;  // Home在右 → 逆时针90°
+            case 2: rotConst = kRotate180DegreesClockwise; break;  // Home在上
+            case 3: rotConst = kRotate90DegreesClockwise; break;   // Home在左 → 顺时针90°
             default: rotConst = kRotate0DegreesClockwise; break;
         }
-        
+
         uint8_t bg[4] = {0, 0, 0, 0};
         vImage_Error err = vImageRotate90_ARGB8888(&srcBuf, &dstBuf, rotConst, bg, kvImageNoFlags);
-        
+
         if (err != kvImageNoError) {
             TVLog(@"vImageRotate90_ARGB8888 failed: %ld", (long)err);
             free(dstData);
@@ -333,24 +320,21 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             CGColorSpaceRelease(colorSpace);
             return nil;
         }
-        
+
         // 从旋转后的缓冲区创建 CGImage
-        // 注意：CGDataProviderCreateWithData 不会复制数据，所以需要在 CGImage 释放时释放 dstData
-        // 使用 __attribute__((cleanup)) 或手动管理：这里先保存 dstData 指针，在 CGImage 释放后再释放
         CGDataProviderRef rotProvider = CGDataProviderCreateWithData(NULL, dstData, dstBytesPerRow * dstHeight, NULL);
         rotatedImage = CGImageCreate(dstWidth, dstHeight, 8, 32, dstBytesPerRow, colorSpace,
                                       kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
                                       rotProvider, NULL, false, kCGRenderingIntentDefault);
         CGDataProviderRelease(rotProvider);
-        
+
         if (rotatedImage) {
             finalImage = rotatedImage;
-            // 注意：dstData 将在后续 CGImage 释放后手动释放
         } else {
             free(dstData);
         }
     }
-    
+
     // 转换为 PNG/JPEG 数据
     NSMutableData *imageData = [NSMutableData data];
     CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData,
@@ -366,7 +350,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         CGColorSpaceRelease(colorSpace);
         return nil;
     }
-    
+
     // 设置压缩质量（仅对 JPEG 有效）
     CFDictionaryRef propertiesRef = NULL;
     if (CFStringCompare(formatRef, (__bridge CFStringRef)@"public.jpeg", 0) == kCFCompareEqualTo) {
@@ -377,20 +361,20 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
                                            &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         CFRelease(values[0]);
     }
-    
+
     CGImageDestinationAddImage(dest, finalImage, propertiesRef);
     if (propertiesRef) CFRelease(propertiesRef);
     BOOL success = CGImageDestinationFinalize(dest);
-    
+
     CFRelease(dest);
-    
+
     // 释放旋转后的图像和缓冲区
     if (rotatedImage) {
         // 获取 data provider 的数据指针
-        CGDataProviderRef provider = CGImageGetDataProvider(rotatedImage);
+        CGDataProviderRef rProvider = CGImageGetDataProvider(rotatedImage);
         void *providerData = NULL;
-        if (provider) {
-            CFDataRef data = CGDataProviderCopyData(provider);
+        if (rProvider) {
+            CFDataRef data = CGDataProviderCopyData(rProvider);
             if (data) {
                 providerData = (void *)CFDataGetBytePtr(data);
                 CFRelease(data);
@@ -402,16 +386,16 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             free(providerData);
         }
     }
-    
+
     CGImageRelease(cgImage);
     CFRelease(surface);
     CGColorSpaceRelease(colorSpace);
-    
+
     if (!success) {
         TVLog(@"Failed to finalize image destination");
         return nil;
     }
-    
+
     return imageData;
 }
 
