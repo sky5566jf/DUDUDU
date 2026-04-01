@@ -2103,11 +2103,10 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         
         // 发送通知
         notify_post("com.apple.accessibility.settings.changed");
-        
-        // 尝试杀掉 AssistiveTouch 服务
-        popen("killall -9 AssistiveTouch 2>/dev/null", "r");
-        popen("killall -9 accessibilityd 2>/dev/null", "r");
-        
+
+        // 注销设备让 SpringBoard 重启，悬浮球立即消失
+        [self respringDevice];
+
         result[@"success"] = @YES;
         result[@"message"] = @"AssistiveTouch locked";
         result[@"warning"] = @"plist file set to read-only (444)";
@@ -2159,7 +2158,10 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         
         // 发送通知
         notify_post("com.apple.accessibility.settings.changed");
-        
+
+        // 注销设备让 SpringBoard 重启，AssistiveTouch 悬浮球立即显示
+        [self respringDevice];
+
         result[@"success"] = @YES;
         result[@"message"] = @"AssistiveTouch unlocked and enabled";
         
