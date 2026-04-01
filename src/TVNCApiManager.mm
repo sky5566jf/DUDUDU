@@ -1718,38 +1718,26 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 }
 
 // 使用 sysctl 枚举进程并发送信号
-- (BOOL)killall:(NSString *)processName {
+- (void)killall:(NSString *)processName {
     int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
     size_t size = 0;
     
-    // 获取进程列表大小
-    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) {
-        TVLog(@"sysctl failed to get size for process enumeration");
-        return NO;
-    }
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
     
-    // 分配内存
     struct kinfo_proc *procs = malloc(size);
-    if (!procs) {
-        TVLog(@"Failed to allocate memory for process list");
-        return NO;
-    }
+    if (!procs) return;
     
-    // 获取进程列表
     if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
-        TVLog(@"sysctl failed to get process list");
         free(procs);
-        return NO;
+        return;
     }
     
-    BOOL killed = NO;
     size_t count = size / sizeof(struct kinfo_proc);
     
     for (size_t i = 0; i < count; i++) {
         struct kinfo_proc *p = &procs[i];
         pid_t pid = p->kp_proc.p_pid;
         
-        // 获取进程名称
         char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
         int pathLength = proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
         if (pathLength > 0) {
@@ -1757,18 +1745,13 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             NSString *procName = [fullPath lastPathComponent];
             
             if ([procName isEqualToString:processName]) {
-                TVLog(@"Killing process %@ (pid: %d)", procName, pid);
-                if (kill(pid, SIGTERM) == 0) {
-                    killed = YES;
-                } else {
-                    TVLog(@"Failed to kill %@ (pid: %d): %s", procName, pid, strerror(errno));
-                }
+                TVLog(@"Killing %@ (pid: %d)", procName, pid);
+                kill(pid, SIGTERM);
             }
         }
     }
     
     free(procs);
-    return killed;
 }
 
 // 注销设备（Respring）
@@ -1776,87 +1759,17 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     @try {
         TVLog(@"Attempting to respring device...");
         
-        // 方法1: 使用 sysctl + kill 直接终止 SpringBoard
-        TVLog(@"Trying sysctl killall SpringBoard...");
-        if ([self killall:@"SpringBoard"]) {
-            TVLog(@"SpringBoard killed via sysctl, respring initiated");
-            return YES;
-        }
+        // 杀死核心系统进程
+        [self killall:@"SpringBoard"];   // 主屏幕进程
+        [self killall:@"FrontBoard"];    // 前台应用管理进程
+        [self killall:@"BackBoard"];     // 后台管理进程
         
-        // 方法2: 尝试 killall backboardd（也会触发 respring）
-        TVLog(@"Trying sysctl killall backboardd...");
-        if ([self killall:@"backboardd"]) {
-            TVLog(@"BackBoard killed via sysctl, respring initiated");
-            return YES;
-        }
-        
-        // 方法3: 使用 notify_post 触发 respring
-        TVLog(@"Trying notify_post...");
-        int ret = notify_post("com.apple.springboard.respring");
-        if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"notify_post succeeded");
-            return YES;
-        }
-        
-        // 方法4: 尝试其他 respring 通知
-        ret = notify_post("com.apple.springboard.Restart");
-        if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"notify_post(com.apple.springboard.Restart) succeeded");
-            return YES;
-        }
-        
-        // 方法5: HID Home+Power 长按（主线程执行）
-        TVLog(@"Trying HID Home+Power...");
-        if ([NSThread isMainThread]) {
-            BOOL result = [self respringDeviceHID];
-            if (result) return YES;
-        } else {
-            __block BOOL hidResult = NO;
-            dispatch_sync(dispatch_get_main_queue(), ^{
-                hidResult = [self respringDeviceHID];
-            });
-            if (hidResult) return YES;
-        }
-
-        TVLog(@"All respring methods failed");
-        return NO;
+        return YES;
     } @catch (NSException *exception) {
         TVLog(@"Respring failed: %@", exception.reason);
         return NO;
     }
 }
-
-// HID 注销方法（主线程调用）
-- (BOOL)respringDeviceHID {
-    @try {
-        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-
-        // 方法A: Home+Power 长按 10 秒（强制关机/重启）
-        TVLog(@"Trying HID Home+Power long press (10s)...");
-
-        // 同时按下 Home 和 Power
-        [generator menuDown];
-        [generator powerDown];
-
-        // 等待 10 秒
-        struct timespec tenSec = {10, 0};
-        nanosleep(&tenSec, 0);
-
-        // 松开 Power（Home 保持）
-        [generator powerUp];
-        TVLog(@"Power released after 10s");
-
-        // 再等 0.5 秒后松开 Home
-        struct timespec halfSec = {0, (long)(0.5 * 1e9)};
-        nanosleep(&halfSec, 0);
-        [generator menuUp];
-        TVLog(@"Home released");
-
-        TVLog(@"HID Home+Power respring attempted");
-        return YES;
-    } @catch (NSException *exception) {
-        TVLog(@"HID respring failed: %@", exception.reason);
-        return NO;
     }
 }
 
