@@ -1719,9 +1719,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 // 注销设备（Respring）
 - (BOOL)respringDevice {
     @try {
-        // 先解锁屏幕，确保注销后显示解锁界面
-        [self unlockDeviceScreen];
-
         TVLog(@"Attempting to respring device (iOS 15)...");
         
         // iOS 15 上 killall SpringBoard 是最可靠的方法
@@ -2170,11 +2167,19 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         notify_post("com.apple.accessibility.settings.changed");
 
         // 注销设备让 SpringBoard 重启，悬浮球立即消失
-        [self respringDevice];
+        BOOL respringSuccess = [self respringDevice];
+
+        // Respring 后等待 30 秒再解锁屏幕
+        if (respringSuccess) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                TVLog(@"AssistiveTouch lock: respring done, unlocking screen after 30s");
+                [self unlockDeviceScreen];
+            });
+        }
 
         result[@"success"] = @YES;
         result[@"message"] = @"AssistiveTouch locked";
-        result[@"warning"] = @"plist file set to read-only (444)";
+        result[@"warning"] = @"Screen will unlock after 30 seconds";
         
         TVLog(@"AssistiveTouch locked successfully");
         
@@ -2225,11 +2230,20 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         notify_post("com.apple.accessibility.settings.changed");
 
         // 注销设备让 SpringBoard 重启，AssistiveTouch 悬浮球立即显示
-        [self respringDevice];
+        BOOL respringSuccess = [self respringDevice];
+
+        // Respring 后等待 30 秒再解锁屏幕
+        if (respringSuccess) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                TVLog(@"AssistiveTouch unlock: respring done, unlocking screen after 30s");
+                [self unlockDeviceScreen];
+            });
+        }
 
         result[@"success"] = @YES;
         result[@"message"] = @"AssistiveTouch unlocked and enabled";
-        
+        result[@"warning"] = @"Screen will unlock after 30 seconds";
+
         TVLog(@"AssistiveTouch unlocked successfully");
         
     } @catch (NSException *exception) {

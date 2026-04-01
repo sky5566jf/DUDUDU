@@ -1151,28 +1151,36 @@
 }
 
 // POST /api/respring
-// 注销设备（Respring）
+// 注销设备（Respring），完成后等待 30 秒再解锁屏幕
 - (TVNCHttpResponse *)handleRespring {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+
     TVLog(@"HTTP Server: Respring request received");
-    
+
     BOOL success = [[TVNCApiManager sharedManager] respringDevice];
-    
+
+    // 注销后等待 30 秒，然后解锁屏幕
+    if (success) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+            TVLog(@"Respring completed, unlocking screen after 30s delay");
+            [[TVNCApiManager sharedManager] unlockDeviceScreen];
+        });
+    }
+
     response.statusCode = success ? 200 : 500;
     response.contentType = @"application/json";
-    
+
     NSDictionary *result = success ?
         @{
             @"success": @YES,
             @"message": @"Respring initiated",
-            @"warning": @"SpringBoard will restart"
+            @"warning": @"Screen will unlock after 30 seconds"
         } :
         @{
             @"success": @NO,
             @"error": @"Failed to initiate respring"
         };
-    
+
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
