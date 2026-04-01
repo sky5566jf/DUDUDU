@@ -32,6 +32,7 @@
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
+#import <libproc.h>     // 用于 proc_pidpath
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -1724,7 +1725,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     
     if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
     
-    struct kinfo_proc *procs = malloc(size);
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
     if (!procs) return;
     
     if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
@@ -1768,8 +1769,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     } @catch (NSException *exception) {
         TVLog(@"Respring failed: %@", exception.reason);
         return NO;
-    }
-}
     }
 }
 
