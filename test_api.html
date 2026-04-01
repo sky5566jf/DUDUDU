@@ -215,7 +215,11 @@
                     <button onclick="assistiveTouch('enable')">启用</button>
                     <button onclick="assistiveTouch('disable')" class="warning">永久禁用 ⚠️</button>
                 </div>
-                <p class="warning">⚠️ 禁用会修改系统 plist 文件，请谨慎使用！</p>
+                <div class="controls-grid">
+                    <button onclick="assistiveTouch('lock')" class="danger">🔒 锁定</button>
+                    <button onclick="assistiveTouch('unlock')" class="success">🔓 解锁</button>
+                </div>
+                <p class="warning">⚠️ 锁定会将 plist 设为只读（444），解锁后才能重新启用！</p>
             </div>
         </div>
 
@@ -568,8 +572,30 @@
         }
 
         async function assistiveTouch(action) {
-            const data = await apiCall(action === 'status' ? 'GET' : 'POST', 'assistivetouch', null, `?action=${action}`);
-            if (data) log(`AssistiveTouch: ${data.enabled ? '启用' : '禁用'}`, 'info');
+            let url, method;
+            if (action === 'lock') {
+                url = 'assistivetouch/lock';
+                method = 'POST';
+            } else if (action === 'unlock') {
+                url = 'assistivetouch/unlock';
+                method = 'POST';
+            } else {
+                url = 'assistivetouch';
+                method = action === 'status' ? 'GET' : 'POST';
+                url += `?action=${action}`;
+            }
+            const data = await apiCall(method, url);
+            if (data) {
+                if (action === 'status') {
+                    log(`AssistiveTouch: ${data.enabled ? '启用' : '禁用'}`, 'info');
+                } else if (action === 'lock') {
+                    log(data.message || 'AssistiveTouch 已锁定', data.success ? 'success' : 'error');
+                } else if (action === 'unlock') {
+                    log(data.message || 'AssistiveTouch 已解锁', data.success ? 'success' : 'error');
+                } else {
+                    log(data.message || `AssistiveTouch 已${action === 'enable' ? '启用' : '禁用'}`, data.success ? 'success' : 'error');
+                }
+            }
         }
 
         // 系统信息
