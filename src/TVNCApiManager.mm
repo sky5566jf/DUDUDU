@@ -1759,10 +1759,78 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             return YES;
         }
         
+        // 方法5: 使用 popen 执行 killall SpringBoard（iOS 不支持 NSTask）
+        TVLog(@"Trying popen killall SpringBoard...");
+        FILE *fp = popen("killall -9 SpringBoard 2>&1", "r");
+        if (fp) {
+            char buffer[256];
+            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+                TVLog(@"killall output: %s", buffer);
+            }
+            int ret = pclose(fp);
+            TVLog(@"popen killall returned: %d", ret);
+            if (ret == 0) {
+                TVLog(@"SpringBoard killed via popen, respring initiated");
+                return YES;
+            }
+        }
+
+        // 方法6: HID 按 Power 键（可能触发锁屏或电源菜单）
+        // HID 操作需要在主线程
+        if ([NSThread isMainThread]) {
+            STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+            TVLog(@"Trying HID power press...");
+            [generator powerPress];
+            struct timespec halfSec = {0, (long)(0.5 * 1e9)};
+            nanosleep(&halfSec, 0);
+            TVLog(@"Trying HID menu press...");
+            [generator menuPress];
+        } else {
+            __block BOOL hidResult = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                hidResult = [self respringDeviceHID];
+            });
+            if (hidResult) return YES;
+        }
+
         TVLog(@"All respring methods failed");
         return NO;
     } @catch (NSException *exception) {
         TVLog(@"Respring failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// HID 注销方法（主线程调用）
+- (BOOL)respringDeviceHID {
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+
+        // 方法A: Home+Power 长按 10 秒（强制关机/重启）
+        TVLog(@"Trying HID Home+Power long press (10s)...");
+
+        // 同时按下 Home 和 Power
+        [generator menuDown];
+        [generator powerDown];
+
+        // 等待 10 秒
+        struct timespec tenSec = {10, 0};
+        nanosleep(&tenSec, 0);
+
+        // 松开 Power（Home 保持）
+        [generator powerUp];
+        TVLog(@"Power released after 10s");
+
+        // 再等 0.5 秒后松开 Home
+        struct timespec halfSec = {0, (long)(0.5 * 1e9)};
+        nanosleep(&halfSec, 0);
+        [generator menuUp];
+        TVLog(@"Home released");
+
+        TVLog(@"HID Home+Power respring attempted");
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"HID respring failed: %@", exception.reason);
         return NO;
     }
 }
@@ -1815,9 +1883,17 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         struct timespec waitDelay = {0, (long)(0.5 * 1e9)};
         nanosleep(&waitDelay, 0);
 
-        // Step 3: Home 键双击解锁
-        [generator menuDoublePress];
-        TVLog(@"Home double-press to unlock sent");
+        // Step 3: 按一次 Home
+        [generator menuPress];
+        TVLog(@"Home press 1 sent");
+
+        // Step 4: 等待 1.5 秒
+        struct timespec delay15 = {1, (long)(0.5 * 1e9)};
+        nanosleep(&delay15, 0);
+
+        // Step 5: 再按一次 Home
+        [generator menuPress];
+        TVLog(@"Home press 2 sent");
 
         return YES;
     } @catch (NSException *exception) {
