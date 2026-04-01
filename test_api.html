@@ -10,7 +10,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #1a1a1a; color: #fff; min-height: 100vh; padding: 20px;
         }
-        .container { max-width: 1200px; margin: 0 auto; }
+        .container { max-width: 1400px; margin: 0 auto; }
         h1 { text-align: center; margin-bottom: 20px; color: #007AFF; }
         h2 { color: #007AFF; margin: 20px 0 10px 0; font-size: 18px; }
         .panel {
@@ -83,6 +83,8 @@
             color: #666; user-select: none;
         }
         .touchpad.active { border-color: #007AFF; }
+        .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .two-cols { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -136,102 +138,152 @@
             <p class="note">提示: 触摸/滑动控制请使用 VNC 客户端连接 5901 端口</p>
         </div>
 
-        <div class="panel">
-            <h2>触摸控制</h2>
-            <div class="api-section">
-                <h3>👆 触摸板 (点击屏幕进行触摸)</h3>
-                <div id="touchpad" class="touchpad">
-                    <span>连接后在此处点击/滑动进行触摸控制</span>
+        <div class="two-cols">
+            <!-- 左列 -->
+            <div>
+                <div class="panel">
+                    <h2>触摸控制</h2>
+                    <div class="api-section">
+                        <h3>👆 触摸板 (点击屏幕进行触摸)</h3>
+                        <div id="touchpad" class="touchpad">
+                            <span>连接后在此处点击/滑动进行触摸控制</span>
+                        </div>
+                        <p class="note">提示: 点击触摸板对应位置会发送触摸事件到设备</p>
+                    </div>
+                    
+                    <div class="api-section">
+                        <h3>📱 手势操作</h3>
+                        <div class="controls-grid">
+                            <button onclick="pressHome()">🏠 Home 键</button>
+                            <button onclick="pressLock()">🔒 锁屏键</button>
+                            <button onclick="pressBoth()">🔒+🏠 同时按</button>
+                            <button onclick="doubleClick()">2️⃣ 双击 Home</button>
+                            <button onclick="tripleClick()">3️⃣ 三击 Home</button>
+                        </div>
+                    </div>
+                    
+                    <div class="api-section">
+                        <h3>↔️ 滑动操作</h3>
+                        <div class="input-group">
+                            <label>X1:</label>
+                            <input type="number" id="swipeX1" value="200" style="width:70px;">
+                            <label>Y1:</label>
+                            <input type="number" id="swipeY1" value="400" style="width:70px;">
+                            <label>X2:</label>
+                            <input type="number" id="swipeX2" value="200" style="width:70px;">
+                            <label>Y2:</label>
+                            <input type="number" id="swipeY2" value="200" style="width:70px;">
+                            <label>时长:</label>
+                            <input type="number" id="swipeDuration" value="300" style="width:70px;">
+                        </div>
+                        <button onclick="swipe()">滑动</button>
+                    </div>
                 </div>
-                <p class="note">提示: 点击触摸板对应位置会发送触摸事件到设备</p>
-            </div>
-            
-            <div class="api-section">
-                <h3>📱 手势操作</h3>
-                <div class="controls-grid">
-                    <button onclick="pressHome()">🏠 Home 键</button>
-                    <button onclick="pressLock()">🔒 锁屏键</button>
-                    <button onclick="pressBoth()">🔒+🏠 同时按</button>
-                    <button onclick="doubleClick()">2️⃣ 双击 Home</button>
-                    <button onclick="tripleClick()">3️⃣ 三击 Home</button>
-                </div>
-            </div>
-            
-            <div class="api-section">
-                <h3>↔️ 滑动操作</h3>
-                <div class="input-group">
-                    <label>起点 X:</label>
-                    <input type="number" id="swipeX1" value="200" style="width:80px;">
-                    <label>Y:</label>
-                    <input type="number" id="swipeY1" value="400" style="width:80px;">
-                    <label>终点 X:</label>
-                    <input type="number" id="swipeX2" value="200" style="width:80px;">
-                    <label>Y:</label>
-                    <input type="number" id="swipeY2" value="200" style="width:80px;">
-                    <label>时长(ms):</label>
-                    <input type="number" id="swipeDuration" value="300" style="width:80px;">
-                    <button onclick="swipe()">滑动</button>
-                </div>
-            </div>
-        </div>
 
-        <div class="panel">
-            <h2>快捷操作</h2>
-            <div class="controls-grid">
-                <button onclick="apiCall('POST', 'clearapps')">🧹 清理后台</button>
-                <button onclick="apiCall('POST', 'clearapps/smart')">🧹 智能清理</button>
-                <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
-                <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
-            </div>
-        </div>
-
-        <div class="panel">
-            <h2>系统控制</h2>
-            
-            <div class="api-section">
-                <h3>🔊 音量控制</h3>
-                <div class="slider-container">
-                    <input type="range" id="volumeSlider" min="0" max="100" value="50" oninput="updateSliderValue('volumeValue', this.value)">
-                    <span class="slider-value" id="volumeValue">50%</span>
-                    <button onclick="setVolume()">设置</button>
-                    <button onclick="getVolume()">获取</button>
+                <div class="panel">
+                    <h2>快捷操作</h2>
+                    <div class="controls-grid">
+                        <button onclick="apiCall('POST', 'clearapps')">🧹 清理后台</button>
+                        <button onclick="apiCall('POST', 'clearapps/smart')">🧹 智能清理</button>
+                        <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
+                        <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
+                    </div>
                 </div>
-            </div>
 
-            <div class="api-section">
-                <h3>🔆 亮度控制</h3>
-                <div class="slider-container">
-                    <input type="range" id="brightnessSlider" min="0" max="100" value="50" oninput="updateSliderValue('brightnessValue', this.value)">
-                    <span class="slider-value" id="brightnessValue">50%</span>
-                    <button onclick="setBrightness()">设置</button>
-                    <button onclick="getBrightness()">获取</button>
+                <div class="panel">
+                    <h2>系统信息</h2>
+                    <div class="controls-grid">
+                        <button onclick="getDeviceInfo()">📱 设备</button>
+                        <button onclick="getBattery()">🔋 电池</button>
+                        <button onclick="getMemory()">💾 内存</button>
+                        <button onclick="getStorage()">💿 存储</button>
+                        <button onclick="getClients()">👥 客户端</button>
+                    </div>
+                    <div id="systemInfoResponse" class="response-display" style="display:none;"></div>
                 </div>
             </div>
 
-            <div class="api-section">
-                <h3>♿ AssistiveTouch</h3>
-                <div class="controls-grid">
-                    <button onclick="assistiveTouch('status')">获取状态</button>
-                    <button onclick="assistiveTouch('enable')">启用</button>
-                    <button onclick="assistiveTouch('disable')" class="warning">永久禁用 ⚠️</button>
-                </div>
-                <div class="controls-grid">
-                    <button onclick="assistiveTouch('lock')" class="danger">🔒 锁定</button>
-                    <button onclick="assistiveTouch('unlock')" class="success">🔓 解锁</button>
-                </div>
-                <p class="warning">⚠️ 锁定会将 plist 设为只读（444），解锁后才能重新启用！</p>
-            </div>
-        </div>
+            <!-- 右列 -->
+            <div>
+                <div class="panel">
+                    <h2>系统控制</h2>
+                    
+                    <div class="api-section">
+                        <h3>🔊 音量控制</h3>
+                        <div class="slider-container">
+                            <input type="range" id="volumeSlider" min="0" max="100" value="50" oninput="updateSliderValue('volumeValue', this.value)">
+                            <span class="slider-value" id="volumeValue">50%</span>
+                            <button onclick="setVolume()">设置</button>
+                            <button onclick="getVolume()">获取</button>
+                        </div>
+                    </div>
 
-        <div class="panel">
-            <h2>系统信息</h2>
-            <div class="controls-grid">
-                <button onclick="getDeviceInfo()">📱 设备信息</button>
-                <button onclick="getBattery()">🔋 电池状态</button>
-                <button onclick="getMemory()">💾 内存状态</button>
-                <button onclick="getStorage()">💿 存储状态</button>
+                    <div class="api-section">
+                        <h3>🔆 亮度控制</h3>
+                        <div class="slider-container">
+                            <input type="range" id="brightnessSlider" min="0" max="100" value="50" oninput="updateSliderValue('brightnessValue', this.value)">
+                            <span class="slider-value" id="brightnessValue">50%</span>
+                            <button onclick="setBrightness()">设置</button>
+                            <button onclick="getBrightness()">获取</button>
+                        </div>
+                    </div>
+
+                    <div class="api-section">
+                        <h3>🔒 屏幕控制</h3>
+                        <div class="controls-grid">
+                            <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
+                            <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
+                        </div>
+                    </div>
+
+                    <div class="api-section">
+                        <h3>♿ AssistiveTouch</h3>
+                        <div class="controls-grid">
+                            <button onclick="assistiveTouch('status')">状态</button>
+                            <button onclick="assistiveTouch('enable')">启用</button>
+                            <button onclick="assistiveTouch('disable')" class="warning">禁用 ⚠️</button>
+                        </div>
+                        <div class="controls-grid" style="margin-top:10px;">
+                            <button onclick="assistiveTouch('lock')" class="danger">🔒 锁定</button>
+                            <button onclick="assistiveTouch('unlock')" class="success">🔓 解锁</button>
+                        </div>
+                        <p class="warning">⚠️ 锁定会将 plist 设为只读！</p>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <h2>应用管理 (TrollStore)</h2>
+                    
+                    <div class="api-section">
+                        <h3>📲 安装 IPA</h3>
+                        <div class="input-group">
+                            <input type="text" id="installPath" placeholder="IPA 文件路径" style="flex:2;">
+                            <button onclick="installApp()">安装</button>
+                        </div>
+                    </div>
+
+                    <div class="api-section">
+                        <h3>🚀 启动应用</h3>
+                        <div class="input-group">
+                            <input type="text" id="launchBundleId" placeholder="Bundle ID" style="flex:2;">
+                            <button onclick="launchApp()">启动</button>
+                        </div>
+                    </div>
+
+                    <div class="api-section">
+                        <h3>🗑️ 卸载应用</h3>
+                        <div class="input-group">
+                            <input type="text" id="uninstallBundleId" placeholder="Bundle ID" style="flex:2;">
+                            <button onclick="uninstallApp()" class="danger">卸载</button>
+                        </div>
+                    </div>
+
+                    <div class="api-section">
+                        <h3>🔍 TrollStore 诊断</h3>
+                        <button onclick="trollStoreDiagnostics()">诊断</button>
+                    </div>
+                </div>
             </div>
-            <div id="systemInfoResponse" class="response-display" style="display:none;"></div>
         </div>
 
         <div class="panel">
@@ -244,8 +296,10 @@
                     <button onclick="sendInput()">发送输入</button>
                     <button onclick="sendKey(13)">⏎ 回车</button>
                     <button onclick="sendKey(8)">⌫ 退格</button>
+                    <button onclick="sendKey(9)">⇥ Tab</button>
+                    <button onclick="sendKey(27)">ESC</button>
                 </div>
-                <p class="note">提示: 发送前请确保设备上有输入框获得焦点（看到键盘弹出）</p>
+                <p class="note">提示: 发送前请确保设备上有输入框获得焦点</p>
             </div>
 
             <div class="api-section">
@@ -262,7 +316,7 @@
             <h2>文件操作</h2>
             
             <div class="api-section">
-                <h3>📝 写入文本文件</h3>
+                <h3>📝 写入/读取文本文件</h3>
                 <div class="input-group">
                     <input type="text" id="writeFilePath" placeholder="文件路径 (如: /var/mobile/Documents/test.txt)">
                 </div>
@@ -285,38 +339,10 @@
                     <button onclick="uploadFile()">上传</button>
                 </div>
             </div>
-        </div>
-
-        <div class="panel">
-            <h2>应用管理 (TrollStore)</h2>
-            
-            <div class="api-section">
-                <h3>📲 安装 IPA</h3>
-                <div class="input-group">
-                    <input type="text" id="installPath" placeholder="IPA 文件路径 (如: /var/mobile/Documents/app.ipa)">
-                    <button onclick="installApp()">安装</button>
-                </div>
-            </div>
 
             <div class="api-section">
-                <h3>🚀 启动应用</h3>
-                <div class="input-group">
-                    <input type="text" id="launchBundleId" placeholder="Bundle ID (如: com.apple.mobilesafari)">
-                    <button onclick="launchApp()">启动</button>
-                </div>
-            </div>
-
-            <div class="api-section">
-                <h3>🗑️ 卸载应用</h3>
-                <div class="input-group">
-                    <input type="text" id="uninstallBundleId" placeholder="Bundle ID (如: com.example.app)">
-                    <button onclick="uninstallApp()" class="danger">卸载</button>
-                </div>
-            </div>
-
-            <div class="api-section">
-                <h3>🔍 TrollStore 诊断</h3>
-                <button onclick="trollStoreDiagnostics()">获取诊断信息</button>
+                <h3>📄 检查文件</h3>
+                <button onclick="checkFile()">检查 zhuangtai.txt</button>
             </div>
         </div>
 
@@ -326,16 +352,13 @@
             <div class="api-section">
                 <h3>🤖 触发懒人精灵</h3>
                 <div class="input-group">
-                    <input type="number" id="triggerPort" value="3333" placeholder="端口" style="width:80px;">
-                    <input type="number" id="triggerDelay" value="5" placeholder="延迟(秒)" style="width:100px;">
+                    <label>端口:</label>
+                    <input type="number" id="triggerPort" value="3333" style="width:80px;">
+                    <label>延迟(秒):</label>
+                    <input type="number" id="triggerDelay" value="5" style="width:80px;">
                     <button onclick="triggerLazyElf()">触发</button>
                 </div>
                 <p class="note">IP 会自动检测为调用者的 IP</p>
-            </div>
-
-            <div class="api-section">
-                <h3>📄 检查文件</h3>
-                <button onclick="checkFile()">检查 zhuangtai.txt</button>
             </div>
         </div>
 
@@ -378,17 +401,13 @@
                     document.getElementById('status').textContent = '已连接';
                     document.getElementById('status').className = 'status connected';
                     
-                    // 保存屏幕尺寸
                     screenWidth = data.screenWidth || 0;
                     screenHeight = data.screenHeight || 0;
                     
-                    // 显示设备信息
                     document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
                     document.getElementById('deviceInfo').style.display = 'block';
                     
-                    // 初始化触摸板
                     initTouchpad();
-                    
                     refreshScreen();
                 } else throw new Error('HTTP ' + res.status);
             } catch (err) {
@@ -456,7 +475,7 @@
 
         async function apiCall(method, endpoint, body = null, params = '') {
             if (!baseUrl) { alert('请先连接'); return; }
-            log(`${method} /api/${endpoint}`, 'info');
+            log(`${method} /api/${endpoint}${params}`, 'info');
             try {
                 const opts = { method: method };
                 if (body) {
@@ -465,7 +484,7 @@
                 }
                 const res = await fetch(`${baseUrl}/api/${endpoint}${params}`, opts);
                 const data = await res.json().catch(() => ({}));
-                log(`${endpoint}: ${res.ok ? '成功' : '失败 ' + res.status} ${JSON.stringify(data).slice(0, 100)}`, res.ok ? 'success' : 'error');
+                log(`${endpoint}: ${res.ok ? '成功' : '失败 ' + res.status} ${JSON.stringify(data).slice(0, 150)}`, res.ok ? 'success' : 'error');
                 return data;
             } catch (err) { 
                 log(`${endpoint}: ${err.message}`, 'error'); 
@@ -477,7 +496,6 @@
             document.getElementById(id).textContent = value + '%';
         }
 
-        // 触摸控制
         function initTouchpad() {
             const touchpad = document.getElementById('touchpad');
             touchpad.innerHTML = '';
@@ -502,13 +520,8 @@
                 await touch(x, y);
             });
             
-            touchpad.addEventListener('mouseup', () => {
-                isTouching = false;
-            });
-            
-            touchpad.addEventListener('mouseleave', () => {
-                isTouching = false;
-            });
+            touchpad.addEventListener('mouseup', () => { isTouching = false; });
+            touchpad.addEventListener('mouseleave', () => { isTouching = false; });
         }
 
         async function touch(x, y) {
@@ -526,27 +539,12 @@
             await apiCall('POST', 'swipe', null, `?x1=${x1}&y1=${y1}&x2=${x2}&y2=${y2}&duration=${duration}`);
         }
 
-        async function pressHome() {
-            await apiCall('POST', 'presshome');
-        }
+        async function pressHome() { await apiCall('POST', 'presshome'); }
+        async function pressLock() { await apiCall('POST', 'presslock'); }
+        async function pressBoth() { await apiCall('POST', 'pressboth'); }
+        async function doubleClick() { await apiCall('POST', 'doubleclick'); }
+        async function tripleClick() { await apiCall('POST', 'tripleclick'); }
 
-        async function pressLock() {
-            await apiCall('POST', 'presslock');
-        }
-
-        async function pressBoth() {
-            await apiCall('POST', 'pressboth');
-        }
-
-        async function doubleClick() {
-            await apiCall('POST', 'doubleclick');
-        }
-
-        async function tripleClick() {
-            await apiCall('POST', 'tripleclick');
-        }
-
-        // 系统控制
         async function setVolume() {
             const value = document.getElementById('volumeSlider').value / 100;
             await apiCall('POST', 'volume', null, `?value=${value}`);
@@ -588,17 +586,12 @@
             if (data) {
                 if (action === 'status') {
                     log(`AssistiveTouch: ${data.enabled ? '启用' : '禁用'}`, 'info');
-                } else if (action === 'lock') {
-                    log(data.message || 'AssistiveTouch 已锁定', data.success ? 'success' : 'error');
-                } else if (action === 'unlock') {
-                    log(data.message || 'AssistiveTouch 已解锁', data.success ? 'success' : 'error');
                 } else {
-                    log(data.message || `AssistiveTouch 已${action === 'enable' ? '启用' : '禁用'}`, data.success ? 'success' : 'error');
+                    log(data.message || `操作完成`, data.success ? 'success' : 'error');
                 }
             }
         }
 
-        // 系统信息
         async function getDeviceInfo() {
             const data = await apiCall('GET', 'device');
             if (data) {
@@ -611,37 +604,19 @@
 
         async function getServerStatus() {
             const data = await apiCall('GET', 'status');
-            if (data) {
-                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('systemInfoResponse').style.display = 'block';
-            }
+            if (data) showResponse('systemInfoResponse', data);
         }
 
-        async function getBattery() {
-            const data = await apiCall('GET', 'battery');
-            if (data) {
-                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('systemInfoResponse').style.display = 'block';
-            }
+        async function getBattery() { const data = await apiCall('GET', 'battery'); if (data) showResponse('systemInfoResponse', data); }
+        async function getMemory() { const data = await apiCall('GET', 'memory'); if (data) showResponse('systemInfoResponse', data); }
+        async function getStorage() { const data = await apiCall('GET', 'storage'); if (data) showResponse('systemInfoResponse', data); }
+        async function getClients() { const data = await apiCall('GET', 'clients'); if (data) showResponse('systemInfoResponse', data); }
+
+        function showResponse(id, data) {
+            document.getElementById(id).textContent = JSON.stringify(data, null, 2);
+            document.getElementById(id).style.display = 'block';
         }
 
-        async function getMemory() {
-            const data = await apiCall('GET', 'memory');
-            if (data) {
-                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('systemInfoResponse').style.display = 'block';
-            }
-        }
-
-        async function getStorage() {
-            const data = await apiCall('GET', 'storage');
-            if (data) {
-                document.getElementById('systemInfoResponse').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('systemInfoResponse').style.display = 'block';
-            }
-        }
-
-        // 文本操作
         async function sendInput() {
             const text = document.getElementById('inputText').value;
             if (!text) { alert('请输入文本'); return; }
@@ -665,7 +640,6 @@
             }
         }
 
-        // 文件操作
         async function writeFile(append) {
             const path = document.getElementById('writeFilePath').value;
             const content = document.getElementById('writeFileContent').value;
@@ -704,7 +678,8 @@
             } catch (err) { log(`上传失败: ${err.message}`, 'error'); }
         }
 
-        // 应用管理
+        async function checkFile() { await apiCall('GET', 'checkfile'); }
+
         async function installApp() {
             const path = document.getElementById('installPath').value;
             if (!path) { alert('请输入 IPA 路径'); return; }
@@ -724,19 +699,12 @@
             await apiCall('POST', 'uninstall', null, `?bundleId=${encodeURIComponent(bundleId)}`);
         }
 
-        async function trollStoreDiagnostics() {
-            await apiCall('GET', 'trollstore/diagnostics');
-        }
+        async function trollStoreDiagnostics() { await apiCall('GET', 'trollstore/diagnostics'); }
 
-        // 其他
         async function triggerLazyElf() {
             const port = document.getElementById('triggerPort').value;
             const delay = document.getElementById('triggerDelay').value;
             await apiCall('GET', 'trigger', null, `?port=${port}&delay=${delay}`);
-        }
-
-        async function checkFile() {
-            await apiCall('GET', 'checkfile');
         }
     </script>
 </body>

@@ -5,70 +5,35 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 ## 服务器信息
 
 - **默认端口**: 8182
+- **VNC 端口**: 5901
 - **协议**: HTTP/1.1
 - **编码**: UTF-8
 - **CORS**: 已启用（支持跨域访问）
 
-## 重要说明
+---
 
-**触摸/滑动控制**: HTTP API 不提供触摸和滑动功能。这些操作需要通过 **VNC/RFB 协议**（默认端口 5901）实现。
+## API 分类总览
+
+| 分类 | 端点数量 | 说明 |
+|------|----------|------|
+| [设备信息](#1-设备信息) | 6 | 设备、电池、内存、存储、状态 |
+| [截图](#2-截图) | 1 | 获取屏幕截图 |
+| [触摸手势](#3-触摸手势) | 7 | 通过 VNC 协议控制 |
+| [文本输入](#4-文本输入) | 4 | 文本输入、按键、剪贴板 |
+| [文件操作](#5-文件操作) | 5 | 读写文件、上传、检查 |
+| [系统控制](#6-系统控制) | 7 | 重启、注销、屏幕、音量、亮度 |
+| [应用管理](#7-应用管理) | 4 | 安装、卸载、启动、TrollStore |
+| [后台管理](#8-后台管理) | 2 | 清理后台应用 |
+| [辅助功能](#9-辅助功能) | 4 | AssistiveTouch 控制 |
+| [其他](#10-其他) | 1 | 触发懒人精灵 |
 
 ---
 
-## API 端点
+## 1. 设备信息
 
-### 1. 获取截图
+### 1.1 获取设备信息
 
-获取当前屏幕截图。
-
-**请求:**
-```
-GET /api/screenshot?format=png&quality=0.9&rotation=0&scale=1.0
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
-| quality | float | 否 | JPEG质量 0.0~1.0，默认 `0.9`，仅对jpeg有效 |
-| rotation | int | 否 | 旋转角度（Home键位置）：`0`(下), `90`(右), `180`(上), `270`(左)，默认 `0` |
-| scale | float | 否 | 缩放比例 0.1~1.0，默认 `1.0`（不缩放）。使用 vImageScale 高质量缩放，可大幅减小图片体积 |
-
-**响应:**
-- 成功: 返回图片二进制数据 (`Content-Type: image/png` 或 `image/jpeg`)
-- 失败: 返回 JSON 错误信息
-
-**示例:**
-```bash
-# 获取 PNG 截图（Home 在下面）
-curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot"
-
-# 获取旋转 90 度的截图（Home 在右侧）
-curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?rotation=90"
-
-# 获取旋转 270 度且 JPEG 格式的截图（Home 在左侧）
-curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.8&rotation=270"
-
-# 获取缩小到 50% 大小的 JPEG 截图（体积大幅减小，适合远程预览）
-curl -o screenshot_small.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.7&scale=0.5"
-
-# 获取缩小到 30% 大小的 JPEG 截图（极小体积，适合低带宽场景）
-curl -o screenshot_tiny.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.5&scale=0.3"
-```
-
-**体积参考（iPhone 13 Pro 1170x2532 @3x，原始截图约 1170x2532 像素）:**
-| 参数 | 像素尺寸 | 约体积 |
-|------|----------|--------|
-| PNG (默认) | 1170x2532 | 2~4 MB |
-| JPEG quality=0.9 | 1170x2532 | 500 KB~1 MB |
-| JPEG quality=0.7, scale=0.5 | 585x1266 | 30~80 KB |
-| JPEG quality=0.5, scale=0.3 | 351x760 | 10~30 KB |
-
----
-
-### 2. 获取设备信息
-
-获取设备名称、ID、系统版本、电量和充电状态。
+获取设备名称、ID、系统版本、电量和屏幕信息。
 
 **请求:**
 ```
@@ -82,30 +47,18 @@ GET /api/device
   "deviceId": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
   "deviceModel": "iPhone14,2",
   "deviceModelName": "iPhone 13 Pro",
-  "systemVersion": "15.1.1",
+  "systemVersion": "17.4.1",
   "systemName": "iOS",
   "batteryLevel": 85,
-  "batteryState": "charging"
+  "batteryState": "charging",
+  "screenWidth": 1170,
+  "screenHeight": 2532
 }
 ```
 
-**字段说明:**
-| 字段 | 说明 |
-|------|------|
-| deviceName | 设备名称 |
-| deviceId | 设备唯一标识符 |
-| deviceModel | 设备型号标识符 |
-| deviceModelName | 设备型号友好名称 |
-| systemVersion | iOS 系统版本 |
-| systemName | 系统名称 |
-| batteryLevel | 电量百分比（0-100），-1表示未知 |
-| batteryState | 充电状态：unknown/unplugged/charging/full |
-
 ---
 
-### 3. 获取服务器状态
-
-获取 HTTP 服务器运行状态。
+### 1.2 获取服务器状态
 
 **请求:**
 ```
@@ -123,101 +76,211 @@ GET /api/status
 
 ---
 
-### 4. 写入文件 (Base64)
-
-将 base64 编码的内容写入指定文件路径。
+### 1.3 获取 VNC 客户端列表
 
 **请求:**
 ```
-POST /api/writefile?path=/var/mobile/test.txt&append=false
-Content-Type: text/plain
+GET /api/clients
+```
 
-<base64-encoded-content>
+**响应:**
+```json
+{
+  "clients": [],
+  "count": 0
+}
+```
+
+---
+
+### 1.4 获取电池状态
+
+**请求:**
+```
+GET /api/battery
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "level": 85,
+  "state": "charging"
+}
+```
+
+---
+
+### 1.5 获取内存状态
+
+**请求:**
+```
+GET /api/memory
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "total": 6144,
+  "used": 4096,
+  "free": 2048,
+  "percentage": 66.7
+}
+```
+
+---
+
+### 1.6 获取存储状态
+
+**请求:**
+```
+GET /api/storage
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "total": 256000,
+  "used": 180000,
+  "free": 76000,
+  "percentage": 70.3
+}
+```
+
+---
+
+## 2. 截图
+
+### 2.1 获取截图
+
+获取当前屏幕截图，支持旋转、缩放和格式转换。
+
+**请求:**
+```
+GET /api/screenshot?format=png&quality=0.9&rotation=0&scale=1.0
 ```
 
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| path | string | 是 | 目标文件路径 |
-| append | boolean | 否 | 是否追加模式，默认 `false` |
+| format | string | 否 | 图片格式：`png` 或 `jpeg`，默认 `png` |
+| quality | float | 否 | JPEG 质量 0.0~1.0，默认 `0.9` |
+| rotation | int | 否 | 旋转角度（Home 键位置）：`0`(下), `90`(右), `180`(上), `270`(左) |
+| scale | float | 否 | 缩放比例 0.1~1.0，默认 `1.0` |
 
-**响应:**
-```json
-{
-  "success": true,
-  "path": "/var/mobile/test.txt",
-  "bytes": 1024
-}
+**体积参考（iPhone 13 Pro 1170x2532 @3x）:**
+| 参数 | 像素尺寸 | 约体积 |
+|------|----------|--------|
+| PNG (默认) | 1170x2532 | 2~4 MB |
+| JPEG quality=0.9 | 1170x2532 | 500 KB~1 MB |
+| JPEG quality=0.7, scale=0.5 | 585x1266 | 30~80 KB |
+| JPEG quality=0.5, scale=0.3 | 351x760 | 10~30 KB |
+
+**示例:**
+```bash
+# 获取 PNG 截图
+curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot"
+
+# 获取旋转 90 度的截图（Home 在右侧）
+curl -o screenshot.png "http://192.168.1.100:8182/api/screenshot?rotation=90"
+
+# 获取缩小到 50% 的 JPEG 截图
+curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&quality=0.7&scale=0.5"
 ```
 
 ---
 
-### 5. 写入文件 (纯文本 - 推荐)
+## 3. 触摸手势
 
-直接发送纯文本内容到指定文件路径，**无需 base64 编码**。
+> **注意:** 触摸/滑动控制需要通过 **VNC 协议（端口 5901）** 实现。使用标准 VNC 客户端连接后即可进行触摸控制。
+
+### 3.1 触摸操作
+
+在指定坐标发送触摸事件。
 
 **请求:**
 ```
-POST /api/writefile_text?path=/var/mobile/test.txt&append=false
-Content-Type: text/plain; charset=utf-8
-
-纯文本内容，支持中文！
+POST /api/touch?x=200&y=400
 ```
 
-**响应:**
-```json
-{
-  "success": true,
-  "path": "/var/mobile/test.txt",
-  "bytes": 27
-}
-```
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| x | int | 是 | X 坐标 |
+| y | int | 是 | Y 坐标 |
 
 ---
 
-### 6. 设置剪贴板 (Base64)
+### 3.2 滑动手势
 
-设置 iOS 系统剪贴板内容。
+从起点滑动到终点。
 
 **请求:**
 ```
-POST /api/clipboard
-Content-Type: text/plain
-
-<base64-encoded-text>
+POST /api/swipe?x1=200&y1=400&x2=200&y2=200&duration=300
 ```
 
-**响应:**
-```json
-{
-  "success": true
-}
-```
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| x1 | int | 是 | 起点 X 坐标 |
+| y1 | int | 是 | 起点 Y 坐标 |
+| x2 | int | 是 | 终点 X 坐标 |
+| y2 | int | 是 | 终点 Y 坐标 |
+| duration | int | 否 | 滑动时长（毫秒），默认 `300` |
 
 ---
 
-### 7. 设置剪贴板 (纯文本 - 推荐)
-
-直接设置剪贴板，**无需 base64 编码**。
+### 3.3 按 Home 键
 
 **请求:**
 ```
-POST /api/clipboard_text
-Content-Type: text/plain; charset=utf-8
-
-纯文本内容
-```
-
-**响应:**
-```json
-{
-  "success": true
-}
+POST /api/presshome
 ```
 
 ---
 
-### 8. 文本输入
+### 3.4 按锁屏键
+
+**请求:**
+```
+POST /api/presslock
+```
+
+---
+
+### 3.5 同时按 Home + 锁屏
+
+**请求:**
+```
+POST /api/pressboth
+```
+
+---
+
+### 3.6 双击 Home
+
+**请求:**
+```
+POST /api/doubleclick
+```
+
+---
+
+### 3.7 三击 Home
+
+**请求:**
+```
+POST /api/tripleclick
+```
+
+---
+
+## 4. 文本输入
+
+### 4.1 输入文本
 
 将文本输入到当前焦点输入框。
 
@@ -233,30 +296,28 @@ Content-Type: text/plain; charset=utf-8
 ```json
 {
   "success": true,
-  "text": "输入的文本",
-  "length": 5
+  "text": "要输入的文本",
+  "length": 6
 }
 ```
 
-**重要提示:**
-- 输入前请确保目标输入框已获得焦点（看到键盘弹出）
-- 某些 App 可能有限制，不支持外部输入
+> **提示:** 输入前请确保目标输入框已获得焦点（看到键盘弹出）
 
 ---
 
-### 9. 发送按键
+### 4.2 发送按键
 
-发送单个按键事件到设备。
+发送单个按键事件。
 
 **请求:**
 ```
-POST /api/key?code=<key-code>
+POST /api/key?code=13
 ```
 
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| code | integer | 是 | 按键代码 |
+| code | int | 是 | 按键代码 |
 
 **常用按键代码:**
 | 代码 | 按键 |
@@ -267,19 +328,104 @@ POST /api/key?code=<key-code>
 | 27 | Escape 键 |
 | 32 | 空格键 |
 
+---
+
+### 4.3 设置剪贴板
+
+直接设置剪贴板内容（纯文本）。
+
+**请求:**
+```
+POST /api/clipboard_text
+Content-Type: text/plain; charset=utf-8
+
+剪贴板内容
+```
+
 **响应:**
 ```json
 {
-  "success": true,
-  "keyCode": 13
+  "success": true
 }
 ```
 
 ---
 
-### 10. 上传文件
+### 4.4 获取剪贴板
 
-上传任意文件到指定路径。如果目标文件夹不存在，会自动创建。
+**请求:**
+```
+GET /api/clipboard_text
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "text": "剪贴板内容"
+}
+```
+
+---
+
+## 5. 文件操作
+
+### 5.1 写入文本文件
+
+写入纯文本内容到指定文件路径。
+
+**请求:**
+```
+POST /api/writefile_text?path=/var/mobile/Documents/test.txt&append=false
+Content-Type: text/plain; charset=utf-8
+
+文件内容
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 目标文件路径 |
+| append | boolean | 否 | 是否追加模式，默认 `false` |
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/Documents/test.txt",
+  "bytes": 12
+}
+```
+
+---
+
+### 5.2 读取文本文件
+
+**请求:**
+```
+GET /api/readfile_text?path=/var/mobile/Documents/test.txt
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 文件路径 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/Documents/test.txt",
+  "content": "文件内容",
+  "bytes": 12
+}
+```
+
+---
+
+### 5.3 上传文件
+
+上传任意文件到指定路径，自动创建目录。
 
 **请求:**
 ```
@@ -307,48 +453,121 @@ Content-Type: application/octet-stream
 
 ---
 
-### 11. 清理后台应用
+### 5.4 检查文件
 
-模拟双击 Home 键打开应用切换器，上滑关闭后台应用。
+检查 `/var/mobile/Media/zhuangtai.txt` 是否存在。
 
 **请求:**
 ```
-POST /api/clearapps
+GET /api/checkfile
+```
+
+**响应:**
+```json
+{
+  "status": "ok",
+  "message": "File exists",
+  "path": "/var/mobile/Media/zhuangtai.txt"
+}
+```
+
+---
+
+### 5.5 写入 Base64 文件（不推荐）
+
+写入 Base64 编码的内容。
+
+**请求:**
+```
+POST /api/writefile?path=/var/mobile/test.txt&append=false
+Content-Type: text/plain
+
+<base64-encoded-content>
+```
+
+---
+
+## 6. 系统控制
+
+### 6.1 重启设备
+
+立即重启 iOS 设备。
+
+**请求:**
+```
+POST /api/reboot
 ```
 
 **响应:**
 ```json
 {
   "success": true,
-  "message": "Background apps cleared"
+  "message": "Reboot initiated",
+  "warning": "Device will restart immediately"
 }
 ```
 
 ---
 
-### 12. 智能清理后台应用
+### 6.2 注销设备 (Respring)
 
-识别当前应用，如果在桌面则跳过清理。
+重启 SpringBoard（注销），完成后等待 30 秒再解锁屏幕。
 
 **请求:**
 ```
-POST /api/clearapps/smart
+POST /api/respring
 ```
 
 **响应:**
 ```json
 {
   "success": true,
-  "action": "cleared",
-  "frontmostApp": "com.apple.springboard"
+  "message": "Respring initiated",
+  "warning": "Screen will unlock after 30 seconds"
 }
 ```
 
 ---
 
-### 13. 音量控制
+### 6.3 锁定屏幕
 
-获取或设置系统音量。
+使用 HID AC Lock 锁屏。
+
+**请求:**
+```
+POST /api/screen/lock
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Screen locked"
+}
+```
+
+---
+
+### 6.4 解锁屏幕
+
+唤醒设备并通过 Home 键解锁。
+
+**请求:**
+```
+POST /api/screen/unlock
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "Screen unlocked"
+}
+```
+
+---
+
+### 6.5 获取/设置音量
 
 **获取当前音量:**
 ```
@@ -375,9 +594,7 @@ POST /api/volume?value=0.5
 
 ---
 
-### 14. 屏幕亮度控制
-
-获取或设置屏幕亮度。
+### 6.6 获取/设置亮度
 
 **获取当前亮度:**
 ```
@@ -404,7 +621,9 @@ POST /api/brightness?value=0.5
 
 ---
 
-### 15. 安装应用 (TrollStore)
+## 7. 应用管理
+
+### 7.1 安装应用
 
 通过 TrollStore 安装 IPA 文件。
 
@@ -429,7 +648,7 @@ POST /api/install?path=/var/mobile/Documents/app.ipa
 
 ---
 
-### 16. 卸载应用 (TrollStore)
+### 7.2 卸载应用
 
 通过 TrollStore 卸载已安装的应用。
 
@@ -454,7 +673,31 @@ POST /api/uninstall?bundleId=com.example.app
 
 ---
 
-### 17. TrollStore 诊断
+### 7.3 启动应用
+
+通过 Bundle ID 启动应用。
+
+**请求:**
+```
+POST /api/launchapp?bundleId=com.apple.mobilesafari
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| bundleId | string | 是 | 应用的 Bundle ID |
+
+**响应:**
+```json
+{
+  "success": true,
+  "bundleId": "com.apple.mobilesafari"
+}
+```
+
+---
+
+### 7.4 TrollStore 诊断
 
 获取 TrollStore 诊断信息。
 
@@ -474,81 +717,89 @@ GET /api/trollstore/diagnostics
 
 ---
 
-### 18. 重启设备
+## 8. 后台管理
 
-重启 iOS 设备。
+### 8.1 清理后台应用
+
+模拟双击 Home 键打开应用切换器，上滑关闭后台应用。
 
 **请求:**
 ```
-POST /api/reboot
+POST /api/clearapps
 ```
 
 **响应:**
 ```json
 {
   "success": true,
-  "message": "Reboot initiated",
-  "warning": "Device will restart immediately"
+  "message": "Background apps cleared"
 }
 ```
 
 ---
 
-### 19. 注销设备 (Respring)
+### 8.2 智能清理后台应用
 
-重启 SpringBoard（注销）。
+识别当前应用，如果在桌面则跳过清理。
 
 **请求:**
 ```
-POST /api/respring
+POST /api/clearapps/smart
 ```
 
 **响应:**
 ```json
 {
   "success": true,
-  "message": "Respring initiated",
-  "warning": "SpringBoard will restart"
+  "action": "cleared",
+  "frontmostApp": "com.apple.springboard"
 }
 ```
 
 ---
 
-### 20. AssistiveTouch 控制
+## 9. 辅助功能
 
-控制 AssistiveTouch 功能。
+### 9.1 获取 AssistiveTouch 状态
 
 **请求:**
 ```
-GET /api/assistivetouch?action=status
-POST /api/assistivetouch?action=disable
-POST /api/assistivetouch?action=enable
-POST /api/assistivetouch/lock
-POST /api/assistivetouch/unlock
+GET /api/assistivetouch
 ```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| action | string | 否 | `status`/`disable`/`enable`，默认 `status` |
-
-**⚠️ 警告**: `disable` 和 `lock` 会修改系统 plist 文件！
-
-**lock 锁定说明:**
-- 禁用 AssistiveTouch 并将 plist 文件权限设为只读（444）
-- 即使系统或用户尝试打开 AssistiveTouch，也无法写入 plist
-- 需要调用 `unlock` 才能重新启用
 
 **响应:**
 ```json
 {
   "success": true,
-  "enabled": false,
+  "enabled": true,
   "action": "status"
 }
 ```
 
-**lock 响应:**
+---
+
+### 9.2 启用/禁用 AssistiveTouch
+
+**请求:**
+```
+POST /api/assistivetouch?action=enable
+POST /api/assistivetouch?action=disable
+```
+
+**⚠️ 警告:** `disable` 会修改系统 plist 文件！
+
+---
+
+### 9.3 锁定 AssistiveTouch
+
+禁用 AssistiveTouch 并将 plist 文件权限设为只读（444），防止系统重新启用。
+
+**请求:**
+```
+POST /api/assistivetouch/lock
+```
+
+**响应:**
 ```json
 {
   "success": true,
@@ -559,7 +810,28 @@ POST /api/assistivetouch/unlock
 
 ---
 
-### 21. 触发懒人精灵
+### 9.4 解锁 AssistiveTouch
+
+恢复 plist 可写权限并启用 AssistiveTouch。
+
+**请求:**
+```
+POST /api/assistivetouch/unlock
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "message": "AssistiveTouch unlocked"
+}
+```
+
+---
+
+## 10. 其他
+
+### 10.1 触发懒人精灵
 
 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行。
 
@@ -591,45 +863,6 @@ GET /api/trigger?port=3333&delay=5
 
 ---
 
-### 22. 检查文件
-
-检查 `/var/mobile/Media/zhuangtai.txt` 文件是否存在。
-
-**请求:**
-```
-GET /api/checkfile
-```
-
-**响应:**
-```json
-{
-  "status": "ok",
-  "message": "File exists",
-  "path": "/var/mobile/Media/zhuangtai.txt"
-}
-```
-
----
-
-### 23. 获取客户端列表
-
-获取当前连接的 VNC 客户端列表。
-
-**请求:**
-```
-GET /api/clients
-```
-
-**响应:**
-```json
-{
-  "clients": [],
-  "count": 0
-}
-```
-
----
-
 ## 错误响应
 
 所有 API 在出错时返回以下格式的 JSON:
@@ -641,23 +874,11 @@ GET /api/clients
 }
 ```
 
-HTTP 状态码:
+**HTTP 状态码:**
 - `200` - 成功
 - `400` - 请求参数错误
 - `404` - 接口不存在
 - `500` - 服务器内部错误
-
----
-
-## VNC 连接说明
-
-**触摸和滑动控制需要通过 VNC 协议实现：**
-
-- **VNC 端口**: 5901（默认）
-- **协议**: RFB (Remote Framebuffer)
-- **认证**: 可选密码认证
-
-使用任何标准 VNC 客户端连接后即可进行触摸控制。
 
 ---
 
