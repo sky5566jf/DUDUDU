@@ -1719,6 +1719,9 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 // 注销设备（Respring）
 - (BOOL)respringDevice {
     @try {
+        // 先解锁屏幕，确保注销后显示解锁界面
+        [self unlockDeviceScreen];
+
         TVLog(@"Attempting to respring device (iOS 15)...");
         
         // iOS 15 上 killall SpringBoard 是最可靠的方法
@@ -1763,6 +1766,68 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         return NO;
     } @catch (NSException *exception) {
         TVLog(@"Respring failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 锁定屏幕（锁屏）
+- (BOOL)lockDeviceScreen {
+    @try {
+        TVLog(@"Locking device screen...");
+
+        // 在主线程执行 HID 事件
+        if (![NSThread isMainThread]) {
+            __block BOOL result = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                result = [self lockDeviceScreen];
+            });
+            return result;
+        }
+
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        [generator hardwareLock];
+        TVLog(@"Device screen locked");
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Lock screen failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 解锁屏幕（唤醒 + 滑动解锁）
+- (BOOL)unlockDeviceScreen {
+    @try {
+        TVLog(@"Unlocking device screen...");
+
+        // 在主线程执行 HID 事件
+        if (![NSThread isMainThread]) {
+            __block BOOL result = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                result = [self unlockDeviceScreen];
+            });
+            return result;
+        }
+
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+
+        // Step 1: 唤醒屏幕（AC Unlock）
+        [generator hardwareUnlock];
+        TVLog(@"Screen wake event sent");
+
+        // Step 2: 等待锁屏界面出现
+        struct timespec waitDelay = {0, (long)(0.5 * 1e9)};
+        nanosleep(&waitDelay, 0);
+
+        // Step 3: 从屏幕底部向上滑动解锁
+        CGSize screenSize = [[UIScreen mainScreen] bounds].size;
+        CGPoint startPoint = CGPointMake(screenSize.width / 2, screenSize.height * 0.85);
+        CGPoint endPoint = CGPointMake(screenSize.width / 2, screenSize.height * 0.15);
+        [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
+        TVLog(@"Swipe up to unlock sent");
+
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Unlock screen failed: %@", exception.reason);
         return NO;
     }
 }

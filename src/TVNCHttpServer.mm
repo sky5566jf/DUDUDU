@@ -229,6 +229,10 @@
         return [self handleReboot];
     } else if ([path isEqualToString:@"/api/respring"]) {
         return [self handleRespring];
+    } else if ([path isEqualToString:@"/api/screen/lock"]) {
+        return [self handleScreenLock];
+    } else if ([path isEqualToString:@"/api/screen/unlock"]) {
+        return [self handleScreenUnlock];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
@@ -1169,6 +1173,58 @@
             @"error": @"Failed to initiate respring"
         };
     
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/screen/lock
+// 锁定屏幕
+- (TVNCHttpResponse *)handleScreenLock {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Screen lock request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] lockDeviceScreen];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"message": @"Screen locked"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to lock screen"
+        };
+
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/screen/unlock
+// 解锁屏幕（唤醒 + 滑动解锁）
+- (TVNCHttpResponse *)handleScreenUnlock {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Screen unlock request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] unlockDeviceScreen];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"message": @"Screen unlocked"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to unlock screen"
+        };
+
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }

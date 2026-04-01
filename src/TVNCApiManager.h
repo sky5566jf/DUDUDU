@@ -208,6 +208,18 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)respringDevice;
 
+/**
+ * 锁定屏幕（锁屏）
+ * 使用 HID AC Lock 事件模拟按电源键锁屏
+ */
+- (BOOL)lockDeviceScreen;
+
+/**
+ * 解锁屏幕（唤醒并滑动解锁）
+ * 先唤醒屏幕，等待后执行向上滑动解锁
+ */
+- (BOOL)unlockDeviceScreen;
+
 #pragma mark - 智能清理后台应用
 
 /**
