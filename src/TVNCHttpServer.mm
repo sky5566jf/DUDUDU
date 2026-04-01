@@ -233,6 +233,10 @@
         return [self handleClearAppsSmart];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query];
+    } else if ([path isEqualToString:@"/api/assistivetouch/lock"]) {
+        return [self handleAssistiveTouchLock];
+    } else if ([path isEqualToString:@"/api/assistivetouch/unlock"]) {
+        return [self handleAssistiveTouchUnlock];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1204,6 +1208,38 @@
     } else {
         result = [[TVNCApiManager sharedManager] getAssistiveTouchStatus];
     }
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/assistivetouch/lock
+// 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
+- (TVNCHttpResponse *)handleAssistiveTouchLock {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: AssistiveTouch lock request received");
+    
+    NSDictionary *result = [[TVNCApiManager sharedManager] lockAssistiveTouch];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/assistivetouch/unlock
+// 解锁 AssistiveTouch（恢复 plist 可写 + 启用）
+- (TVNCHttpResponse *)handleAssistiveTouchUnlock {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: AssistiveTouch unlock request received");
+    
+    NSDictionary *result = [[TVNCApiManager sharedManager] unlockAssistiveTouch];
     
     response.statusCode = 200;
     response.contentType = @"application/json";

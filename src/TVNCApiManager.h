@@ -239,6 +239,18 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)getAssistiveTouchStatus;
 
+/**
+ * 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)lockAssistiveTouch;
+
+/**
+ * 解锁 AssistiveTouch（恢复 plist 可写 + 启用）
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)unlockAssistiveTouch;
+
 @end
 
 NS_ASSUME_NONNULL_END

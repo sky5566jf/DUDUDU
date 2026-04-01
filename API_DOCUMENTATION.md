@@ -523,6 +523,8 @@ POST /api/respring
 GET /api/assistivetouch?action=status
 POST /api/assistivetouch?action=disable
 POST /api/assistivetouch?action=enable
+POST /api/assistivetouch/lock
+POST /api/assistivetouch/unlock
 ```
 
 **参数:**
@@ -530,7 +532,12 @@ POST /api/assistivetouch?action=enable
 |------|------|------|------|
 | action | string | 否 | `status`/`disable`/`enable`，默认 `status` |
 
-**⚠️ 警告**: `disable` 会修改系统 plist 文件！
+**⚠️ 警告**: `disable` 和 `lock` 会修改系统 plist 文件！
+
+**lock 锁定说明:**
+- 禁用 AssistiveTouch 并将 plist 文件权限设为只读（444）
+- 即使系统或用户尝试打开 AssistiveTouch，也无法写入 plist
+- 需要调用 `unlock` 才能重新启用
 
 **响应:**
 ```json
@@ -538,6 +545,15 @@ POST /api/assistivetouch?action=enable
   "success": true,
   "enabled": false,
   "action": "status"
+}
+```
+
+**lock 响应:**
+```json
+{
+  "success": true,
+  "message": "AssistiveTouch locked",
+  "warning": "plist file set to read-only (444)"
 }
 ```
 

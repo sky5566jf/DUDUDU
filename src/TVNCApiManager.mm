@@ -28,6 +28,7 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
+#import <stdlib.h>  // 用于 system()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 
@@ -2062,6 +2063,113 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         result[@"error"] = exception.reason;
         result[@"message"] = @"Failed to enable AssistiveTouch";
         TVLog(@"Enable AssistiveTouch failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+// 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
+- (NSDictionary *)lockAssistiveTouch {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        // 先禁用
+        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        if (!plist) {
+            plist = [NSMutableDictionary dictionary];
+        }
+        
+        // 禁用 AssistiveTouch
+        plist[@"AssistiveTouchEnabled"] = @NO;
+        plist[@"AssistiveTouchTouchEnabled"] = @NO;
+        plist[@"AssistiveTouchMouseEnabled"] = @NO;
+        
+        // 写入 plist
+        if (![plist writeToFile:plistPath atomically:YES]) {
+            result[@"success"] = @NO;
+            result[@"message"] = @"Failed to write plist file";
+            TVLog(@"Lock AssistiveTouch failed: cannot write plist");
+            return result;
+        }
+        
+        // 同步偏好设置
+        FILE *syncFp = popen("sync", "r");
+        if (syncFp) pclose(syncFp);
+        
+        // 锁死文件为只读（444）
+        FILE *fp = popen("chmod 444 /var/mobile/Library/Preferences/com.apple.Accessibility.plist 2>/dev/null", "r");
+        if (fp) pclose(fp);
+        
+        // 发送通知
+        notify_post("com.apple.accessibility.settings.changed");
+        
+        // 尝试杀掉 AssistiveTouch 服务
+        popen("killall -9 AssistiveTouch 2>/dev/null", "r");
+        popen("killall -9 accessibilityd 2>/dev/null", "r");
+        
+        result[@"success"] = @YES;
+        result[@"message"] = @"AssistiveTouch locked";
+        result[@"warning"] = @"plist file set to read-only (444)";
+        
+        TVLog(@"AssistiveTouch locked successfully");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to lock AssistiveTouch";
+        TVLog(@"Lock AssistiveTouch failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+// 解锁 AssistiveTouch（解锁 plist + 启用）
+- (NSDictionary *)unlockAssistiveTouch {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    @try {
+        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        
+        // 先解锁文件为可写（644）
+        FILE *fp = popen("chmod 644 /var/mobile/Library/Preferences/com.apple.Accessibility.plist 2>/dev/null", "r");
+        if (fp) pclose(fp);
+        
+        // 读取 plist
+        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
+        if (!plist) {
+            plist = [NSMutableDictionary dictionary];
+        }
+        
+        // 启用 AssistiveTouch
+        plist[@"AssistiveTouchEnabled"] = @YES;
+        plist[@"AssistiveTouchTouchEnabled"] = @YES;
+        
+        // 写入 plist
+        if (![plist writeToFile:plistPath atomically:YES]) {
+            result[@"success"] = @NO;
+            result[@"message"] = @"Failed to write plist file";
+            TVLog(@"Unlock AssistiveTouch failed: cannot write plist");
+            return result;
+        }
+        
+        // 同步
+        FILE *syncFp = popen("sync", "r");
+        if (syncFp) pclose(syncFp);
+        
+        // 发送通知
+        notify_post("com.apple.accessibility.settings.changed");
+        
+        result[@"success"] = @YES;
+        result[@"message"] = @"AssistiveTouch unlocked and enabled";
+        
+        TVLog(@"AssistiveTouch unlocked successfully");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to unlock AssistiveTouch";
+        TVLog(@"Unlock AssistiveTouch failed: %@", exception.reason);
     }
     
     return result;
