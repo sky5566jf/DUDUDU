@@ -114,7 +114,7 @@ const UI = {
         // Bootstrap fallback input handler
         UI.keyboardinputReset();
 
-        UI.openControlbar();
+        // UI.openControlbar(); // Disabled: hide control bar by default
 
         UI.updateVisualState('init');
 
