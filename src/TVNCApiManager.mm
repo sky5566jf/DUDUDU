@@ -1815,12 +1815,9 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         struct timespec waitDelay = {0, (long)(0.5 * 1e9)};
         nanosleep(&waitDelay, 0);
 
-        // Step 3: 从屏幕底部向上滑动解锁
-        CGSize screenSize = [[UIScreen mainScreen] bounds].size;
-        CGPoint startPoint = CGPointMake(screenSize.width / 2, screenSize.height * 0.85);
-        CGPoint endPoint = CGPointMake(screenSize.width / 2, screenSize.height * 0.15);
-        [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
-        TVLog(@"Swipe up to unlock sent");
+        // Step 3: Home 键双击解锁
+        [generator menuDoublePress];
+        TVLog(@"Home double-press to unlock sent");
 
         return YES;
     } @catch (NSException *exception) {
