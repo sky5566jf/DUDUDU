@@ -31,6 +31,7 @@
 #import <stdlib.h>  // 用于 system()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
+#import <sys/sysctl.h>  // 用于 sysctl 枚举进程
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -1716,75 +1717,99 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     }
 }
 
+// 使用 sysctl 枚举进程并发送信号
+- (BOOL)killall:(NSString *)processName {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    
+    // 获取进程列表大小
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) {
+        TVLog(@"sysctl failed to get size for process enumeration");
+        return NO;
+    }
+    
+    // 分配内存
+    struct kinfo_proc *procs = malloc(size);
+    if (!procs) {
+        TVLog(@"Failed to allocate memory for process list");
+        return NO;
+    }
+    
+    // 获取进程列表
+    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
+        TVLog(@"sysctl failed to get process list");
+        free(procs);
+        return NO;
+    }
+    
+    BOOL killed = NO;
+    size_t count = size / sizeof(struct kinfo_proc);
+    
+    for (size_t i = 0; i < count; i++) {
+        struct kinfo_proc *p = &procs[i];
+        pid_t pid = p->kp_proc.p_pid;
+        
+        // 获取进程名称
+        char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
+        int pathLength = proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
+        if (pathLength > 0) {
+            NSString *fullPath = [NSString stringWithUTF8String:pathBuffer];
+            NSString *procName = [fullPath lastPathComponent];
+            
+            if ([procName isEqualToString:processName]) {
+                TVLog(@"Killing process %@ (pid: %d)", procName, pid);
+                if (kill(pid, SIGTERM) == 0) {
+                    killed = YES;
+                } else {
+                    TVLog(@"Failed to kill %@ (pid: %d): %s", procName, pid, strerror(errno));
+                }
+            }
+        }
+    }
+    
+    free(procs);
+    return killed;
+}
+
 // 注销设备（Respring）
 - (BOOL)respringDevice {
     @try {
-        TVLog(@"Attempting to respring device (iOS 15)...");
+        TVLog(@"Attempting to respring device...");
         
-        // iOS 15 上 killall SpringBoard 是最可靠的方法
-        // 方法1: 使用 posix_spawn 执行 killall SpringBoard
-        TVLog(@"Trying posix_spawn killall SpringBoard...");
-        pid_t pid;
-        const char *killArgs[] = {"/usr/bin/killall", "-9", "SpringBoard", NULL};
-        int killStatus = posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char **)killArgs, NULL);
-        TVLog(@"posix_spawn(killall SpringBoard) returned: %d", killStatus);
-        if (killStatus == 0) {
-            TVLog(@"SpringBoard killed, respring initiated");
+        // 方法1: 使用 sysctl + kill 直接终止 SpringBoard
+        TVLog(@"Trying sysctl killall SpringBoard...");
+        if ([self killall:@"SpringBoard"]) {
+            TVLog(@"SpringBoard killed via sysctl, respring initiated");
             return YES;
         }
         
         // 方法2: 尝试 killall backboardd（也会触发 respring）
-        TVLog(@"Trying posix_spawn killall backboardd...");
-        const char *bbArgs[] = {"/usr/bin/killall", "-9", "backboardd", NULL};
-        killStatus = posix_spawn(&pid, "/usr/bin/killall", NULL, NULL, (char **)bbArgs, NULL);
-        TVLog(@"posix_spawn(killall backboardd) returned: %d", killStatus);
-        if (killStatus == 0) {
-            TVLog(@"BackBoard killed, respring initiated");
+        TVLog(@"Trying sysctl killall backboardd...");
+        if ([self killall:@"backboardd"]) {
+            TVLog(@"BackBoard killed via sysctl, respring initiated");
             return YES;
         }
         
         // 方法3: 使用 notify_post 触发 respring
+        TVLog(@"Trying notify_post...");
         int ret = notify_post("com.apple.springboard.respring");
-        TVLog(@"notify_post(com.apple.springboard.respring) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"Respring notification sent successfully");
+            TVLog(@"notify_post succeeded");
             return YES;
         }
         
         // 方法4: 尝试其他 respring 通知
         ret = notify_post("com.apple.springboard.Restart");
-        TVLog(@"notify_post(com.apple.springboard.Restart) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"SpringBoard restart notification sent successfully");
+            TVLog(@"notify_post(com.apple.springboard.Restart) succeeded");
             return YES;
         }
         
-        // 方法5: 使用 popen 执行 killall SpringBoard（iOS 不支持 NSTask）
-        TVLog(@"Trying popen killall SpringBoard...");
-        FILE *fp = popen("killall -9 SpringBoard 2>&1", "r");
-        if (fp) {
-            char buffer[256];
-            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-                TVLog(@"killall output: %s", buffer);
-            }
-            int ret = pclose(fp);
-            TVLog(@"popen killall returned: %d", ret);
-            if (ret == 0) {
-                TVLog(@"SpringBoard killed via popen, respring initiated");
-                return YES;
-            }
-        }
-
-        // 方法6: HID 按 Power 键（可能触发锁屏或电源菜单）
-        // HID 操作需要在主线程
+        // 方法5: HID Home+Power 长按（主线程执行）
+        TVLog(@"Trying HID Home+Power...");
         if ([NSThread isMainThread]) {
-            STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-            TVLog(@"Trying HID power press...");
-            [generator powerPress];
-            struct timespec halfSec = {0, (long)(0.5 * 1e9)};
-            nanosleep(&halfSec, 0);
-            TVLog(@"Trying HID menu press...");
-            [generator menuPress];
+            BOOL result = [self respringDeviceHID];
+            if (result) return YES;
         } else {
             __block BOOL hidResult = NO;
             dispatch_sync(dispatch_get_main_queue(), ^{
