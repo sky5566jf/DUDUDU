@@ -75,14 +75,6 @@
             padding: 10px; margin-top: 10px; max-height: 200px; overflow-y: auto;
             font-family: 'Consolas', monospace; font-size: 12px; white-space: pre-wrap;
         }
-        .touchpad {
-            width: 100%; height: 400px; background: #1a1a1a;
-            border: 2px solid #444; border-radius: 5px;
-            position: relative; cursor: crosshair;
-            display: flex; align-items: center; justify-content: center;
-            color: #666; user-select: none;
-        }
-        .touchpad.active { border-color: #007AFF; }
         .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
         @media (max-width: 768px) { .two-cols { grid-template-columns: 1fr; } }
     </style>
@@ -142,51 +134,12 @@
             <!-- 左列 -->
             <div>
                 <div class="panel">
-                    <h2>触摸控制</h2>
-                    <div class="api-section">
-                        <h3>👆 触摸板 (点击屏幕进行触摸)</h3>
-                        <div id="touchpad" class="touchpad">
-                            <span>连接后在此处点击/滑动进行触摸控制</span>
-                        </div>
-                        <p class="note">提示: 点击触摸板对应位置会发送触摸事件到设备</p>
-                    </div>
-                    
-                    <div class="api-section">
-                        <h3>📱 手势操作</h3>
-                        <div class="controls-grid">
-                            <button onclick="pressHome()">🏠 Home 键</button>
-                            <button onclick="pressLock()">🔒 锁屏键</button>
-                            <button onclick="pressBoth()">🔒+🏠 同时按</button>
-                            <button onclick="doubleClick()">2️⃣ 双击 Home</button>
-                            <button onclick="tripleClick()">3️⃣ 三击 Home</button>
-                        </div>
-                    </div>
-                    
-                    <div class="api-section">
-                        <h3>↔️ 滑动操作</h3>
-                        <div class="input-group">
-                            <label>X1:</label>
-                            <input type="number" id="swipeX1" value="200" style="width:70px;">
-                            <label>Y1:</label>
-                            <input type="number" id="swipeY1" value="400" style="width:70px;">
-                            <label>X2:</label>
-                            <input type="number" id="swipeX2" value="200" style="width:70px;">
-                            <label>Y2:</label>
-                            <input type="number" id="swipeY2" value="200" style="width:70px;">
-                            <label>时长:</label>
-                            <input type="number" id="swipeDuration" value="300" style="width:70px;">
-                        </div>
-                        <button onclick="swipe()">滑动</button>
-                    </div>
-                </div>
-
-                <div class="panel">
                     <h2>快捷操作</h2>
                     <div class="controls-grid">
-                        <button onclick="apiCall('POST', 'clearapps')">🧹 清理后台</button>
                         <button onclick="apiCall('POST', 'clearapps/smart')">🧹 智能清理</button>
                         <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
                         <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
+                        <button onclick="getClients()">👥 客户端</button>
                     </div>
                 </div>
 
@@ -194,10 +147,7 @@
                     <h2>系统信息</h2>
                     <div class="controls-grid">
                         <button onclick="getDeviceInfo()">📱 设备</button>
-                        <button onclick="getBattery()">🔋 电池</button>
-                        <button onclick="getMemory()">💾 内存</button>
-                        <button onclick="getStorage()">💿 存储</button>
-                        <button onclick="getClients()">👥 客户端</button>
+                        <button onclick="getServerStatus()">📊 状态</button>
                     </div>
                     <div id="systemInfoResponse" class="response-display" style="display:none;"></div>
                 </div>
@@ -234,21 +184,7 @@
                             <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
                             <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
                         </div>
-                    </div>
-
-                    <div class="api-section">
-                        <h3>♿ AssistiveTouch</h3>
-                        <div class="controls-grid">
-                            <button onclick="assistiveTouch('status')">状态</button>
-                            <button onclick="assistiveTouch('enable')">启用</button>
-                            <button onclick="assistiveTouch('disable')" class="warning">禁用 ⚠️</button>
-                        </div>
-                        <div class="controls-grid" style="margin-top:10px;">
-                            <button onclick="assistiveTouch('lock')" class="danger">🔒 锁定</button>
-                            <button onclick="assistiveTouch('unlock')" class="success">🔓 解锁</button>
-                        </div>
-                        <p class="warning">⚠️ 锁定会将 plist 设为只读！</p>
-                    </div>
+                </div>
                 </div>
 
                 <div class="panel">
@@ -259,14 +195,6 @@
                         <div class="input-group">
                             <input type="text" id="installPath" placeholder="IPA 文件路径" style="flex:2;">
                             <button onclick="installApp()">安装</button>
-                        </div>
-                    </div>
-
-                    <div class="api-section">
-                        <h3>🚀 启动应用</h3>
-                        <div class="input-group">
-                            <input type="text" id="launchBundleId" placeholder="Bundle ID" style="flex:2;">
-                            <button onclick="launchApp()">启动</button>
                         </div>
                     </div>
 
@@ -316,7 +244,7 @@
             <h2>文件操作</h2>
             
             <div class="api-section">
-                <h3>📝 写入/读取文本文件</h3>
+                <h3>📝 写入文本文件</h3>
                 <div class="input-group">
                     <input type="text" id="writeFilePath" placeholder="文件路径 (如: /var/mobile/Documents/test.txt)">
                 </div>
@@ -324,9 +252,7 @@
                 <div class="input-group" style="margin-top:10px;">
                     <button onclick="writeFile(false)">写入</button>
                     <button onclick="writeFile(true)">追加</button>
-                    <button onclick="readFile()">读取</button>
                 </div>
-                <div id="fileContent" class="response-display" style="display:none;"></div>
             </div>
 
             <div class="api-section">
@@ -407,7 +333,6 @@
                     document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
                     document.getElementById('deviceInfo').style.display = 'block';
                     
-                    initTouchpad();
                     refreshScreen();
                 } else throw new Error('HTTP ' + res.status);
             } catch (err) {
@@ -424,7 +349,6 @@
             document.getElementById('screen').textContent = '点击连接后显示屏幕';
             document.getElementById('screen').className = 'no-image';
             document.getElementById('deviceInfo').style.display = 'none';
-            document.getElementById('touchpad').innerHTML = '<span>连接后在此处点击/滑动进行触摸控制</span>';
             log('已断开', 'info');
         }
 
@@ -496,55 +420,6 @@
             document.getElementById(id).textContent = value + '%';
         }
 
-        function initTouchpad() {
-            const touchpad = document.getElementById('touchpad');
-            touchpad.innerHTML = '';
-            touchpad.classList.add('active');
-            
-            let isTouching = false;
-            
-            touchpad.addEventListener('mousedown', async (e) => {
-                if (!baseUrl) return;
-                isTouching = true;
-                const rect = touchpad.getBoundingClientRect();
-                const x = Math.round((e.clientX - rect.left) / rect.width * (screenWidth || 375));
-                const y = Math.round((e.clientY - rect.top) / rect.height * (screenHeight || 812));
-                await touch(x, y);
-            });
-            
-            touchpad.addEventListener('mousemove', async (e) => {
-                if (!isTouching || !baseUrl) return;
-                const rect = touchpad.getBoundingClientRect();
-                const x = Math.round((e.clientX - rect.left) / rect.width * (screenWidth || 375));
-                const y = Math.round((e.clientY - rect.top) / rect.height * (screenHeight || 812));
-                await touch(x, y);
-            });
-            
-            touchpad.addEventListener('mouseup', () => { isTouching = false; });
-            touchpad.addEventListener('mouseleave', () => { isTouching = false; });
-        }
-
-        async function touch(x, y) {
-            try {
-                await fetch(`${baseUrl}/api/touch?x=${x}&y=${y}`, { method: 'POST' });
-            } catch (err) { console.error(err); }
-        }
-
-        async function swipe() {
-            const x1 = document.getElementById('swipeX1').value;
-            const y1 = document.getElementById('swipeY1').value;
-            const x2 = document.getElementById('swipeX2').value;
-            const y2 = document.getElementById('swipeY2').value;
-            const duration = document.getElementById('swipeDuration').value;
-            await apiCall('POST', 'swipe', null, `?x1=${x1}&y1=${y1}&x2=${x2}&y2=${y2}&duration=${duration}`);
-        }
-
-        async function pressHome() { await apiCall('POST', 'presshome'); }
-        async function pressLock() { await apiCall('POST', 'presslock'); }
-        async function pressBoth() { await apiCall('POST', 'pressboth'); }
-        async function doubleClick() { await apiCall('POST', 'doubleclick'); }
-        async function tripleClick() { await apiCall('POST', 'tripleclick'); }
-
         async function setVolume() {
             const value = document.getElementById('volumeSlider').value / 100;
             await apiCall('POST', 'volume', null, `?value=${value}`);
@@ -569,29 +444,6 @@
             }
         }
 
-        async function assistiveTouch(action) {
-            let url, method;
-            if (action === 'lock') {
-                url = 'assistivetouch/lock';
-                method = 'POST';
-            } else if (action === 'unlock') {
-                url = 'assistivetouch/unlock';
-                method = 'POST';
-            } else {
-                url = 'assistivetouch';
-                method = action === 'status' ? 'GET' : 'POST';
-                url += `?action=${action}`;
-            }
-            const data = await apiCall(method, url);
-            if (data) {
-                if (action === 'status') {
-                    log(`AssistiveTouch: ${data.enabled ? '启用' : '禁用'}`, 'info');
-                } else {
-                    log(data.message || `操作完成`, data.success ? 'success' : 'error');
-                }
-            }
-        }
-
         async function getDeviceInfo() {
             const data = await apiCall('GET', 'device');
             if (data) {
@@ -607,9 +459,6 @@
             if (data) showResponse('systemInfoResponse', data);
         }
 
-        async function getBattery() { const data = await apiCall('GET', 'battery'); if (data) showResponse('systemInfoResponse', data); }
-        async function getMemory() { const data = await apiCall('GET', 'memory'); if (data) showResponse('systemInfoResponse', data); }
-        async function getStorage() { const data = await apiCall('GET', 'storage'); if (data) showResponse('systemInfoResponse', data); }
         async function getClients() { const data = await apiCall('GET', 'clients'); if (data) showResponse('systemInfoResponse', data); }
 
         function showResponse(id, data) {
@@ -647,17 +496,6 @@
             await apiCall('POST', 'writefile_text', content, `?path=${encodeURIComponent(path)}&append=${append}`);
         }
 
-        async function readFile() {
-            const path = document.getElementById('writeFilePath').value;
-            if (!path) { alert('请输入文件路径'); return; }
-            const data = await apiCall('GET', 'readfile_text', null, `?path=${encodeURIComponent(path)}`);
-            if (data && data.content !== undefined) {
-                document.getElementById('writeFileContent').value = data.content;
-                document.getElementById('fileContent').textContent = data.content;
-                document.getElementById('fileContent').style.display = 'block';
-            }
-        }
-
         async function uploadFile() {
             const fileInput = document.getElementById('uploadFile');
             const path = document.getElementById('uploadPath').value;
@@ -684,12 +522,6 @@
             const path = document.getElementById('installPath').value;
             if (!path) { alert('请输入 IPA 路径'); return; }
             await apiCall('POST', 'install', null, `?path=${encodeURIComponent(path)}`);
-        }
-
-        async function launchApp() {
-            const bundleId = document.getElementById('launchBundleId').value;
-            if (!bundleId) { alert('请输入 Bundle ID'); return; }
-            await apiCall('POST', 'launchapp', null, `?bundleId=${encodeURIComponent(bundleId)}`);
         }
 
         async function uninstallApp() {

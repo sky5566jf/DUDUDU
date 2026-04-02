@@ -1206,48 +1206,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 #pragma mark - 系统控制 API
 
-// 清理后台应用
-- (BOOL)clearBackgroundApps {
-    // 在主线程执行
-    if (![NSThread isMainThread]) {
-        __block BOOL result = NO;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            result = [self clearBackgroundApps];
-        });
-        return result;
-    }
-    
-    @try {
-        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-        
-        // 使用双击 Home 键打开应用切换器
-        [generator menuDoublePress];
-        
-        // 等待应用切换器打开
-        [NSThread sleepForTimeInterval:0.8];
-        
-        // 使用上滑手势关闭应用
-        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-        
-        CGPoint startPoint = CGPointMake(screenWidth / 2, screenHeight - 100);
-        CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 3);
-        
-        [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
-        
-        // 等待关闭动画完成
-        [NSThread sleepForTimeInterval:0.5];
-        
-        // 点击 Home 键返回桌面
-        [generator menuPress];
-        
-        return YES;
-    } @catch (NSException *exception) {
-        TVLog(@"Clear background apps failed: %@", exception.reason);
-        return NO;
-    }
-}
-
 // 设置音量
 - (BOOL)setVolume:(CGFloat)volume {
     if (volume < 0.0) volume = 0.0;
@@ -1787,8 +1745,9 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         }
 
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-        [generator hardwareLock];
-        TVLog(@"Device screen locked");
+        // 使用按电源键方式锁屏（比 hardwareLock 更可靠）
+        [generator powerPress];
+        TVLog(@"Device screen locked via power press");
         return YES;
     } @catch (NSException *exception) {
         TVLog(@"Lock screen failed: %@", exception.reason);
@@ -1922,12 +1881,18 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     @try {
         TVLog(@"Smart clear: Starting...");
         
-        // 检查是否在桌面
-        BOOL onSpringBoard = [self isOnSpringBoard];
-        result[@"onSpringBoard"] = @(onSpringBoard);
-        TVLog(@"Smart clear: onSpringBoard = %d", onSpringBoard);
+        // 获取当前前台应用
+        NSString *frontmostApp = [self getFrontmostAppBundleID];
+        result[@"frontmostApp"] = frontmostApp ?: @"unknown";
+        TVLog(@"Smart clear: frontmostApp = %@", frontmostApp);
         
-        if (onSpringBoard) {
+        // 如果是桌面（SpringBoard），跳过
+        BOOL isSpringBoard = !frontmostApp ||
+            [frontmostApp isEqualToString:@"com.apple.springboard"] ||
+            [frontmostApp isEqualToString:@"SpringBoard"];
+        result[@"onSpringBoard"] = @(isSpringBoard);
+        
+        if (isSpringBoard) {
             result[@"success"] = @YES;
             result[@"message"] = @"Already on SpringBoard, no apps to clear";
             result[@"action"] = @"skipped";
@@ -1935,12 +1900,15 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             return result;
         }
         
-        // 获取当前前台应用
-        NSString *frontmostApp = [self getFrontmostAppBundleID];
-        result[@"frontmostApp"] = frontmostApp ?: @"unknown";
-        TVLog(@"Smart clear: frontmostApp = %@", frontmostApp);
+        // 在主线程执行 HID 事件
+        if (![NSThread isMainThread]) {
+            __block NSDictionary *syncResult = nil;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                syncResult = [self clearBackgroundAppsSmart];
+            });
+            return syncResult ?: result;
+        }
         
-        // 执行清理操作
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
         if (!generator) {
             TVLog(@"Smart clear: Failed - STHIDEventGenerator is nil");
@@ -1949,31 +1917,14 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
             return result;
         }
         
-        // 双击 Home 键打开应用切换器
-        TVLog(@"Smart clear: Sending menuDoublePress...");
-        [generator menuDoublePress];
-        [NSThread sleepForTimeInterval:0.8];
-        
-        // 获取屏幕尺寸
-        CGFloat screenWidth = [UIScreen mainScreen].bounds.size.width;
-        CGFloat screenHeight = [UIScreen mainScreen].bounds.size.height;
-        TVLog(@"Smart clear: Screen size = %.0f x %.0f", screenWidth, screenHeight);
-        
-        // 上滑关闭当前应用
-        CGPoint startPoint = CGPointMake(screenWidth / 2, screenHeight - 100);
-        CGPoint endPoint = CGPointMake(screenWidth / 2, screenHeight / 3);
-        
-        TVLog(@"Smart clear: Sending swipe gesture...");
-        [generator dragLinearWithStartPoint:startPoint endPoint:endPoint duration:0.3];
-        [NSThread sleepForTimeInterval:0.5];
-        
-        // 返回桌面
-        TVLog(@"Smart clear: Sending menuPress to return home...");
+        // 按 Home 键回到桌面（先确保退出当前应用）
+        TVLog(@"Smart clear: Sending menuPress to go home...");
         [generator menuPress];
+        [NSThread sleepForTimeInterval:0.6];
         
         result[@"success"] = @YES;
-        result[@"message"] = @"Background apps cleared";
-        result[@"action"] = @"cleared";
+        result[@"message"] = @"App dismissed to background";
+        result[@"action"] = @"dismissed";
         result[@"closedApp"] = frontmostApp ?: @"unknown";
         
         TVLog(@"Smart clear: Completed successfully");
@@ -1983,284 +1934,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         result[@"error"] = exception.reason;
         result[@"message"] = @"Failed to clear background apps";
         TVLog(@"Smart clear background apps failed: %@", exception.reason);
-    }
-    
-    return result;
-}
-
-#pragma mark - AssistiveTouch 控制
-
-// 获取 AssistiveTouch 当前状态
-- (NSDictionary *)getAssistiveTouchStatus {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    @try {
-        // 读取系统 Accessibility 设置
-        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-        
-        BOOL isEnabled = NO;
-        id value = plist[@"AssistiveTouchEnabled"];
-        if (value) {
-            isEnabled = [value boolValue];
-        }
-        
-        result[@"success"] = @YES;
-        result[@"enabled"] = @(isEnabled);
-        result[@"message"] = isEnabled ? @"AssistiveTouch is enabled" : @"AssistiveTouch is disabled";
-        
-        TVLog(@"AssistiveTouch status: %@", isEnabled ? @"enabled" : @"disabled");
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to get AssistiveTouch status";
-        TVLog(@"Get AssistiveTouch status failed: %@", exception.reason);
-    }
-    
-    return result;
-}
-
-// 禁用 AssistiveTouch（修改系统 plist）
-- (NSDictionary *)disableAssistiveTouchPermanent {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    @try {
-        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        
-        // 读取现有 plist
-        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-        if (!plist) {
-            plist = [NSMutableDictionary dictionary];
-        }
-        
-        // 记录原始值
-        id originalValue = plist[@"AssistiveTouchEnabled"];
-        BOOL wasEnabled = originalValue ? [originalValue boolValue] : NO;
-        
-        // 设置禁用
-        plist[@"AssistiveTouchEnabled"] = @NO;
-        
-        // 同时禁用相关功能
-        plist[@"AssistiveTouchTouchEnabled"] = @NO;
-        plist[@"AssistiveTouchMouseEnabled"] = @NO;
-        
-        // 写入 plist
-        BOOL writeSuccess = [plist writeToFile:plistPath atomically:YES];
-        
-        if (!writeSuccess) {
-            result[@"success"] = @NO;
-            result[@"error"] = @"Failed to write plist file";
-            result[@"message"] = @"Could not modify Accessibility settings";
-            TVLog(@"Failed to write Accessibility plist");
-            return result;
-        }
-        
-        // 修改文件权限（确保系统能读取）
-        chmod([plistPath UTF8String], 0644);
-        
-        // 杀掉 accessibilityd 进程让设置生效
-        // 使用 notify 通知系统设置变更
-        notify_post("com.apple.accessibility.settings.changed");
-        
-        // 尝试杀掉 AssistiveTouch 服务进程（使用 popen 代替 system）
-        FILE *fp1 = popen("killall -9 AssistiveTouch 2>/dev/null", "r");
-        if (fp1) pclose(fp1);
-        FILE *fp2 = popen("killall -9 accessibilityd 2>/dev/null", "r");
-        if (fp2) pclose(fp2);
-        
-        result[@"success"] = @YES;
-        result[@"wasEnabled"] = @(wasEnabled);
-        result[@"message"] = @"AssistiveTouch has been disabled permanently";
-        result[@"warning"] = @"Settings modified at /var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        
-        TVLog(@"AssistiveTouch disabled permanently (was enabled: %d)", wasEnabled);
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to disable AssistiveTouch";
-        TVLog(@"Disable AssistiveTouch failed: %@", exception.reason);
-    }
-    
-    return result;
-}
-
-// 启用 AssistiveTouch（恢复系统 plist）
-- (NSDictionary *)enableAssistiveTouchPermanent {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    @try {
-        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        
-        // 读取现有 plist
-        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-        if (!plist) {
-            plist = [NSMutableDictionary dictionary];
-        }
-        
-        // 记录原始值
-        id originalValue = plist[@"AssistiveTouchEnabled"];
-        BOOL wasEnabled = originalValue ? [originalValue boolValue] : NO;
-        
-        // 设置启用
-        plist[@"AssistiveTouchEnabled"] = @YES;
-        plist[@"AssistiveTouchTouchEnabled"] = @YES;
-        
-        // 写入 plist
-        BOOL writeSuccess = [plist writeToFile:plistPath atomically:YES];
-        
-        if (!writeSuccess) {
-            result[@"success"] = @NO;
-            result[@"error"] = @"Failed to write plist file";
-            result[@"message"] = @"Could not modify Accessibility settings";
-            TVLog(@"Failed to write Accessibility plist");
-            return result;
-        }
-        
-        // 修改文件权限
-        chmod([plistPath UTF8String], 0644);
-        
-        // 通知系统设置变更
-        notify_post("com.apple.accessibility.settings.changed");
-        
-        result[@"success"] = @YES;
-        result[@"wasEnabled"] = @(wasEnabled);
-        result[@"message"] = @"AssistiveTouch has been enabled permanently";
-        
-        TVLog(@"AssistiveTouch enabled permanently (was enabled: %d)", wasEnabled);
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to enable AssistiveTouch";
-        TVLog(@"Enable AssistiveTouch failed: %@", exception.reason);
-    }
-    
-    return result;
-}
-
-// 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
-- (NSDictionary *)lockAssistiveTouch {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    @try {
-        // 先禁用
-        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-        if (!plist) {
-            plist = [NSMutableDictionary dictionary];
-        }
-        
-        // 禁用 AssistiveTouch
-        plist[@"AssistiveTouchEnabled"] = @NO;
-        plist[@"AssistiveTouchTouchEnabled"] = @NO;
-        plist[@"AssistiveTouchMouseEnabled"] = @NO;
-        
-        // 写入 plist
-        if (![plist writeToFile:plistPath atomically:YES]) {
-            result[@"success"] = @NO;
-            result[@"message"] = @"Failed to write plist file";
-            TVLog(@"Lock AssistiveTouch failed: cannot write plist");
-            return result;
-        }
-        
-        // 同步偏好设置
-        FILE *syncFp = popen("sync", "r");
-        if (syncFp) pclose(syncFp);
-        
-        // 锁死文件为只读（444）
-        FILE *fp = popen("chmod 444 /var/mobile/Library/Preferences/com.apple.Accessibility.plist 2>/dev/null", "r");
-        if (fp) pclose(fp);
-        
-        // 发送通知
-        notify_post("com.apple.accessibility.settings.changed");
-
-        // 注销设备让 SpringBoard 重启，悬浮球立即消失
-        BOOL respringSuccess = [self respringDevice];
-
-        // Respring 后等待 30 秒再解锁屏幕
-        if (respringSuccess) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-                TVLog(@"AssistiveTouch lock: respring done, unlocking screen after 30s");
-                [self unlockDeviceScreen];
-            });
-        }
-
-        result[@"success"] = @YES;
-        result[@"message"] = @"AssistiveTouch locked";
-        result[@"warning"] = @"Screen will unlock after 30 seconds";
-        
-        TVLog(@"AssistiveTouch locked successfully");
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to lock AssistiveTouch";
-        TVLog(@"Lock AssistiveTouch failed: %@", exception.reason);
-    }
-    
-    return result;
-}
-
-// 解锁 AssistiveTouch（解锁 plist + 启用）
-- (NSDictionary *)unlockAssistiveTouch {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    @try {
-        NSString *plistPath = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        
-        // 先解锁文件为可写（644）
-        FILE *fp = popen("chmod 644 /var/mobile/Library/Preferences/com.apple.Accessibility.plist 2>/dev/null", "r");
-        if (fp) pclose(fp);
-        
-        // 读取 plist
-        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
-        if (!plist) {
-            plist = [NSMutableDictionary dictionary];
-        }
-        
-        // 启用 AssistiveTouch
-        plist[@"AssistiveTouchEnabled"] = @YES;
-        plist[@"AssistiveTouchTouchEnabled"] = @YES;
-        
-        // 写入 plist
-        if (![plist writeToFile:plistPath atomically:YES]) {
-            result[@"success"] = @NO;
-            result[@"message"] = @"Failed to write plist file";
-            TVLog(@"Unlock AssistiveTouch failed: cannot write plist");
-            return result;
-        }
-        
-        // 同步
-        FILE *syncFp = popen("sync", "r");
-        if (syncFp) pclose(syncFp);
-        
-        // 发送通知
-        notify_post("com.apple.accessibility.settings.changed");
-
-        // 注销设备让 SpringBoard 重启，AssistiveTouch 悬浮球立即显示
-        BOOL respringSuccess = [self respringDevice];
-
-        // Respring 后等待 30 秒再解锁屏幕
-        if (respringSuccess) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-                TVLog(@"AssistiveTouch unlock: respring done, unlocking screen after 30s");
-                [self unlockDeviceScreen];
-            });
-        }
-
-        result[@"success"] = @YES;
-        result[@"message"] = @"AssistiveTouch unlocked and enabled";
-        result[@"warning"] = @"Screen will unlock after 30 seconds";
-
-        TVLog(@"AssistiveTouch unlocked successfully");
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to unlock AssistiveTouch";
-        TVLog(@"Unlock AssistiveTouch failed: %@", exception.reason);
     }
     
     return result;

@@ -16,16 +16,14 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 | 分类 | 端点数量 | 说明 |
 |------|----------|------|
-| [设备信息](#1-设备信息) | 6 | 设备、电池、内存、存储、状态 |
+| [设备信息](#1-设备信息) | 3 | 设备、状态、客户端 |
 | [截图](#2-截图) | 1 | 获取屏幕截图 |
-| [触摸手势](#3-触摸手势) | 7 | 通过 VNC 协议控制 |
-| [文本输入](#4-文本输入) | 4 | 文本输入、按键、剪贴板 |
-| [文件操作](#5-文件操作) | 5 | 读写文件、上传、检查 |
-| [系统控制](#6-系统控制) | 7 | 重启、注销、屏幕、音量、亮度 |
-| [应用管理](#7-应用管理) | 4 | 安装、卸载、启动、TrollStore |
-| [后台管理](#8-后台管理) | 2 | 清理后台应用 |
-| [辅助功能](#9-辅助功能) | 4 | AssistiveTouch 控制 |
-| [其他](#10-其他) | 1 | 触发懒人精灵 |
+| [文本输入](#3-文本输入) | 4 | 文本输入、按键、剪贴板 |
+| [文件操作](#4-文件操作) | 4 | 读写文件、上传、检查 |
+| [系统控制](#5-系统控制) | 7 | 重启、注销、屏幕、音量、亮度 |
+| [应用管理](#6-应用管理) | 3 | 安装、卸载、TrollStore |
+| [后台管理](#7-后台管理) | 1 | 智能清理后台应用 |
+| [其他](#8-其他) | 1 | 触发懒人精灵 |
 
 ---
 
@@ -93,64 +91,6 @@ GET /api/clients
 
 ---
 
-### 1.4 获取电池状态
-
-**请求:**
-```
-GET /api/battery
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "level": 85,
-  "state": "charging"
-}
-```
-
----
-
-### 1.5 获取内存状态
-
-**请求:**
-```
-GET /api/memory
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "total": 6144,
-  "used": 4096,
-  "free": 2048,
-  "percentage": 66.7
-}
-```
-
----
-
-### 1.6 获取存储状态
-
-**请求:**
-```
-GET /api/storage
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "total": 256000,
-  "used": 180000,
-  "free": 76000,
-  "percentage": 70.3
-}
-```
-
----
-
 ## 2. 截图
 
 ### 2.1 获取截图
@@ -192,95 +132,9 @@ curl -o screenshot.jpg "http://192.168.1.100:8182/api/screenshot?format=jpeg&qua
 
 ---
 
-## 3. 触摸手势
+## 3. 文本输入
 
-> **注意:** 触摸/滑动控制需要通过 **VNC 协议（端口 5901）** 实现。使用标准 VNC 客户端连接后即可进行触摸控制。
-
-### 3.1 触摸操作
-
-在指定坐标发送触摸事件。
-
-**请求:**
-```
-POST /api/touch?x=200&y=400
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| x | int | 是 | X 坐标 |
-| y | int | 是 | Y 坐标 |
-
----
-
-### 3.2 滑动手势
-
-从起点滑动到终点。
-
-**请求:**
-```
-POST /api/swipe?x1=200&y1=400&x2=200&y2=200&duration=300
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| x1 | int | 是 | 起点 X 坐标 |
-| y1 | int | 是 | 起点 Y 坐标 |
-| x2 | int | 是 | 终点 X 坐标 |
-| y2 | int | 是 | 终点 Y 坐标 |
-| duration | int | 否 | 滑动时长（毫秒），默认 `300` |
-
----
-
-### 3.3 按 Home 键
-
-**请求:**
-```
-POST /api/presshome
-```
-
----
-
-### 3.4 按锁屏键
-
-**请求:**
-```
-POST /api/presslock
-```
-
----
-
-### 3.5 同时按 Home + 锁屏
-
-**请求:**
-```
-POST /api/pressboth
-```
-
----
-
-### 3.6 双击 Home
-
-**请求:**
-```
-POST /api/doubleclick
-```
-
----
-
-### 3.7 三击 Home
-
-**请求:**
-```
-POST /api/tripleclick
-```
-
----
-
-## 4. 文本输入
-
-### 4.1 输入文本
+### 3.1 输入文本
 
 将文本输入到当前焦点输入框。
 
@@ -305,7 +159,7 @@ Content-Type: text/plain; charset=utf-8
 
 ---
 
-### 4.2 发送按键
+### 3.2 发送按键
 
 发送单个按键事件。
 
@@ -330,7 +184,7 @@ POST /api/key?code=13
 
 ---
 
-### 4.3 设置剪贴板
+### 3.3 设置剪贴板
 
 直接设置剪贴板内容（纯文本）。
 
@@ -351,7 +205,7 @@ Content-Type: text/plain; charset=utf-8
 
 ---
 
-### 4.4 获取剪贴板
+### 3.4 获取剪贴板
 
 **请求:**
 ```
@@ -368,9 +222,9 @@ GET /api/clipboard_text
 
 ---
 
-## 5. 文件操作
+## 4. 文件操作
 
-### 5.1 写入文本文件
+### 4.1 写入文本文件
 
 写入纯文本内容到指定文件路径。
 
@@ -399,31 +253,7 @@ Content-Type: text/plain; charset=utf-8
 
 ---
 
-### 5.2 读取文本文件
-
-**请求:**
-```
-GET /api/readfile_text?path=/var/mobile/Documents/test.txt
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 是 | 文件路径 |
-
-**响应:**
-```json
-{
-  "success": true,
-  "path": "/var/mobile/Documents/test.txt",
-  "content": "文件内容",
-  "bytes": 12
-}
-```
-
----
-
-### 5.3 上传文件
+### 4.2 上传文件
 
 上传任意文件到指定路径，自动创建目录。
 
@@ -453,7 +283,7 @@ Content-Type: application/octet-stream
 
 ---
 
-### 5.4 检查文件
+### 4.3 检查文件
 
 检查 `/var/mobile/Media/zhuangtai.txt` 是否存在。
 
@@ -473,7 +303,7 @@ GET /api/checkfile
 
 ---
 
-### 5.5 写入 Base64 文件（不推荐）
+### 4.4 写入 Base64 文件（不推荐）
 
 写入 Base64 编码的内容。
 
@@ -487,9 +317,9 @@ Content-Type: text/plain
 
 ---
 
-## 6. 系统控制
+## 5. 系统控制
 
-### 6.1 重启设备
+### 5.1 重启设备
 
 立即重启 iOS 设备。
 
@@ -509,7 +339,7 @@ POST /api/reboot
 
 ---
 
-### 6.2 注销设备 (Respring)
+### 5.2 注销设备 (Respring)
 
 重启 SpringBoard（注销），完成后等待 30 秒再解锁屏幕。
 
@@ -529,7 +359,7 @@ POST /api/respring
 
 ---
 
-### 6.3 锁定屏幕
+### 5.3 锁定屏幕
 
 使用 HID AC Lock 锁屏。
 
@@ -548,7 +378,7 @@ POST /api/screen/lock
 
 ---
 
-### 6.4 解锁屏幕
+### 5.4 解锁屏幕
 
 唤醒设备并通过 Home 键解锁。
 
@@ -567,7 +397,7 @@ POST /api/screen/unlock
 
 ---
 
-### 6.5 获取/设置音量
+### 5.5 获取/设置音量
 
 **获取当前音量:**
 ```
@@ -594,7 +424,7 @@ POST /api/volume?value=0.5
 
 ---
 
-### 6.6 获取/设置亮度
+### 5.6 获取/设置亮度
 
 **获取当前亮度:**
 ```
@@ -621,9 +451,9 @@ POST /api/brightness?value=0.5
 
 ---
 
-## 7. 应用管理
+## 6. 应用管理
 
-### 7.1 安装应用
+### 6.1 安装应用
 
 通过 TrollStore 安装 IPA 文件。
 
@@ -648,7 +478,7 @@ POST /api/install?path=/var/mobile/Documents/app.ipa
 
 ---
 
-### 7.2 卸载应用
+### 6.2 卸载应用
 
 通过 TrollStore 卸载已安装的应用。
 
@@ -673,31 +503,7 @@ POST /api/uninstall?bundleId=com.example.app
 
 ---
 
-### 7.3 启动应用
-
-通过 Bundle ID 启动应用。
-
-**请求:**
-```
-POST /api/launchapp?bundleId=com.apple.mobilesafari
-```
-
-**参数:**
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| bundleId | string | 是 | 应用的 Bundle ID |
-
-**响应:**
-```json
-{
-  "success": true,
-  "bundleId": "com.apple.mobilesafari"
-}
-```
-
----
-
-### 7.4 TrollStore 诊断
+### 6.3 TrollStore 诊断
 
 获取 TrollStore 诊断信息。
 
@@ -717,30 +523,11 @@ GET /api/trollstore/diagnostics
 
 ---
 
-## 8. 后台管理
+## 7. 后台管理
 
-### 8.1 清理后台应用
+### 7.1 智能清理后台应用
 
-模拟双击 Home 键打开应用切换器，上滑关闭后台应用。
-
-**请求:**
-```
-POST /api/clearapps
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "message": "Background apps cleared"
-}
-```
-
----
-
-### 8.2 智能清理后台应用
-
-识别当前应用，如果在桌面则跳过清理。
+识别当前前台应用，如果在桌面（SpringBoard）则跳过，否则按 Home 键将应用退到后台。
 
 **请求:**
 ```
@@ -751,87 +538,26 @@ POST /api/clearapps/smart
 ```json
 {
   "success": true,
-  "action": "cleared",
-  "frontmostApp": "com.apple.springboard"
+  "action": "dismissed",
+  "frontmostApp": "com.example.app"
 }
 ```
 
----
-
-## 9. 辅助功能
-
-### 9.1 获取 AssistiveTouch 状态
-
-**请求:**
-```
-GET /api/assistivetouch
-```
-
-**响应:**
+当已在桌面时:
 ```json
 {
   "success": true,
-  "enabled": true,
-  "action": "status"
+  "action": "skipped",
+  "message": "Already on SpringBoard, no apps to clear"
 }
 ```
 
 ---
 
-### 9.2 启用/禁用 AssistiveTouch
+## 8. 其他
 
-**请求:**
-```
-POST /api/assistivetouch?action=enable
-POST /api/assistivetouch?action=disable
-```
 
-**⚠️ 警告:** `disable` 会修改系统 plist 文件！
-
----
-
-### 9.3 锁定 AssistiveTouch
-
-禁用 AssistiveTouch 并将 plist 文件权限设为只读（444），防止系统重新启用。
-
-**请求:**
-```
-POST /api/assistivetouch/lock
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "message": "AssistiveTouch locked",
-  "warning": "plist file set to read-only (444)"
-}
-```
-
----
-
-### 9.4 解锁 AssistiveTouch
-
-恢复 plist 可写权限并启用 AssistiveTouch。
-
-**请求:**
-```
-POST /api/assistivetouch/unlock
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "message": "AssistiveTouch unlocked"
-}
-```
-
----
-
-## 10. 其他
-
-### 10.1 触发懒人精灵
+### 8.1 触发懒人精灵
 
 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行。
 

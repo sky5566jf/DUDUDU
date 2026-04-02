@@ -211,8 +211,6 @@
         return [self handleCheckFile];
     } else if ([path isEqualToString:@"/api/upload"]) {
         return [self handleUploadFile:query body:body];
-    } else if ([path isEqualToString:@"/api/clearapps"]) {
-        return [self handleClearApps];
     } else if ([path isEqualToString:@"/api/volume"]) {
         return [self handleVolume:query body:body];
     } else if ([path isEqualToString:@"/api/brightness"]) {
@@ -235,12 +233,6 @@
         return [self handleScreenUnlock];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
-    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
-        return [self handleAssistiveTouch:query];
-    } else if ([path isEqualToString:@"/api/assistivetouch/lock"]) {
-        return [self handleAssistiveTouchLock];
-    } else if ([path isEqualToString:@"/api/assistivetouch/unlock"]) {
-        return [self handleAssistiveTouchUnlock];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -960,23 +952,6 @@
     return response;
 }
 
-// POST /api/clearapps
-// 清理后台应用（模拟双击Home键上滑关闭）
-- (TVNCHttpResponse *)handleClearApps {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    BOOL success = [[TVNCApiManager sharedManager] clearBackgroundApps];
-    
-    response.statusCode = success ? 200 : 500;
-    response.contentType = @"application/json";
-    NSDictionary *result = success ? 
-        @{@"success": @YES, @"message": @"Background apps cleared"} :
-        @{@"success": @NO, @"error": @"Failed to clear background apps"};
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
 // GET /api/volume - 获取当前音量
 // POST /api/volume?value=0.5 - 设置音量
 - (TVNCHttpResponse *)handleVolume:(NSDictionary *)query body:(NSData *)body {
@@ -1151,7 +1126,7 @@
 }
 
 // POST /api/respring
-// 注销设备（Respring），完成后等待 30 秒再解锁屏幕
+// 注销设备（Respring），完成后等待 15 秒再解锁屏幕
 - (TVNCHttpResponse *)handleRespring {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
 
@@ -1159,10 +1134,10 @@
 
     BOOL success = [[TVNCApiManager sharedManager] respringDevice];
 
-    // 注销后等待 30 秒，然后解锁屏幕
+    // 注销后等待 15 秒，然后解锁屏幕
     if (success) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
-            TVLog(@"Respring completed, unlocking screen after 30s delay");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+            TVLog(@"Respring completed, unlocking screen after 15s delay");
             [[TVNCApiManager sharedManager] unlockDeviceScreen];
         });
     }
@@ -1174,7 +1149,7 @@
         @{
             @"success": @YES,
             @"message": @"Respring initiated",
-            @"warning": @"Screen will unlock after 30 seconds"
+            @"warning": @"Screen will unlock after 15 seconds"
         } :
         @{
             @"success": @NO,
@@ -1245,65 +1220,6 @@
     TVLog(@"HTTP Server: Smart clear apps request received");
     
     NSDictionary *result = [[TVNCApiManager sharedManager] clearBackgroundAppsSmart];
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// GET/POST /api/assistivetouch?action=disable|enable|status
-// action=disable - 永久禁用 AssistiveTouch（修改系统 plist）
-// action=enable  - 启用 AssistiveTouch
-// action=status  - 获取当前状态（默认）
-- (TVNCHttpResponse *)handleAssistiveTouch:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *action = query[@"action"] ?: @"status";
-    TVLog(@"HTTP Server: AssistiveTouch request - action: %@", action);
-    
-    NSDictionary *result;
-    
-    if ([action isEqualToString:@"disable"]) {
-        result = [[TVNCApiManager sharedManager] disableAssistiveTouchPermanent];
-    } else if ([action isEqualToString:@"enable"]) {
-        result = [[TVNCApiManager sharedManager] enableAssistiveTouchPermanent];
-    } else {
-        result = [[TVNCApiManager sharedManager] getAssistiveTouchStatus];
-    }
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/assistivetouch/lock
-// 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
-- (TVNCHttpResponse *)handleAssistiveTouchLock {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: AssistiveTouch lock request received");
-    
-    NSDictionary *result = [[TVNCApiManager sharedManager] lockAssistiveTouch];
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/assistivetouch/unlock
-// 解锁 AssistiveTouch（恢复 plist 可写 + 启用）
-- (TVNCHttpResponse *)handleAssistiveTouchUnlock {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: AssistiveTouch unlock request received");
-    
-    NSDictionary *result = [[TVNCApiManager sharedManager] unlockAssistiveTouch];
     
     response.statusCode = 200;
     response.contentType = @"application/json";
@@ -1488,7 +1404,6 @@
         "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本、电量）</li>"
         "<li><b>GET /api/checkfile</b> - 检查文件是否存在</li>"
         "<li><b>POST /api/upload?path=/xxx/xxx</b> - 上传任意文件（自动创建目录）</li>"
-        "<li><b>POST /api/clearapps</b> - 清理后台应用</li>"
         "<li><b>GET/POST /api/volume?value=0.5</b> - 获取/设置音量</li>"
         "<li><b>GET/POST /api/brightness?value=0.5</b> - 获取/设置亮度</li>"
         "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
@@ -1496,9 +1411,10 @@
         "<li><b>GET /api/trollstore/diagnostics</b> - 获取 TrollStore 诊断信息</li>"
         "<li><b>GET /api/trigger?port=3333&delay=5</b> - 触发懒人精灵运行脚本（IP 自动检测）</li>"
         "<li><b>POST /api/reboot</b> - 重启设备</li>"
-        "<li><b>POST /api/respring</b> - 注销设备（Respring）</li>"
+        "<li><b>POST /api/respring</b> - 注销设备（Respring），15秒后自动解锁屏幕</li>"
+        "<li><b>POST /api/screen/lock</b> - 锁定屏幕（电源键）</li>"
+        "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
-        "<li><b>GET/POST /api/assistivetouch?action=status|disable|enable</b> - AssistiveTouch 控制（⚠️ disable 修改系统 plist）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;

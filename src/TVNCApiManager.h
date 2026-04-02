@@ -133,12 +133,6 @@ NS_ASSUME_NONNULL_BEGIN
 #pragma mark - 系统控制 API
 
 /**
- 清理后台应用（模拟双击Home键上滑关闭所有应用）
- @return 是否成功
- */
-- (BOOL)clearBackgroundApps;
-
-/**
  设置系统音量
  @param volume 音量值 0.0 ~ 1.0
  @return 是否成功
@@ -228,40 +222,6 @@ NS_ASSUME_NONNULL_BEGIN
  * @return 包含操作结果的字典
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
-
-#pragma mark - AssistiveTouch 控制
-
-/**
- * 禁用 AssistiveTouch（修改系统 plist）
- * 直接修改 /var/mobile/Library/Preferences/com.apple.Accessibility.plist
- * ⚠️ 警告：此操作修改系统文件，可能导致辅助功能异常
- * @return 包含操作结果的字典
- */
-- (NSDictionary *)disableAssistiveTouchPermanent;
-
-/**
- * 启用 AssistiveTouch（恢复系统 plist）
- * @return 包含操作结果的字典
- */
-- (NSDictionary *)enableAssistiveTouchPermanent;
-
-/**
- * 获取 AssistiveTouch 当前状态
- * @return 包含状态信息的字典
- */
-- (NSDictionary *)getAssistiveTouchStatus;
-
-/**
- * 锁定 AssistiveTouch（禁用 + 锁死 plist 为只读）
- * @return 包含操作结果的字典
- */
-- (NSDictionary *)lockAssistiveTouch;
-
-/**
- * 解锁 AssistiveTouch（恢复 plist 可写 + 启用）
- * @return 包含操作结果的字典
- */
-- (NSDictionary *)unlockAssistiveTouch;
 
 @end
 
