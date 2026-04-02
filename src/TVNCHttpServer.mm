@@ -1287,28 +1287,48 @@
         TVLog(@"HTTP Server: AssistiveTouch action request: %@", action ?: @"status");
         
         if ([action isEqualToString:@"enable"]) {
-            // 使用 popen 设置启用
+            // 设置启用
             [self runCommand:@"defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null"];
-            [self runCommand:@"killall -9 AssistiveTouch 2>/dev/null"];
+            
+            // Respring 后等待 15 秒，然后解锁屏幕
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                BOOL success = [[TVNCApiManager sharedManager] respringDevice];
+                if (success) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                        TVLog(@"AssistiveTouch enable: Respring completed, unlocking screen");
+                        [[TVNCApiManager sharedManager] unlockDeviceScreen];
+                    });
+                }
+            });
             
             result = @{
                 @"success": @YES,
                 @"action": @"enable",
-                @"message": @"AssistiveTouch enabled"
+                @"message": @"AssistiveTouch enabled, respringing..."
             };
-            TVLog(@"HTTP Server: AssistiveTouch enabled");
+            TVLog(@"HTTP Server: AssistiveTouch enabled, respringing...");
             
         } else if ([action isEqualToString:@"disable"]) {
-            // 使用 popen 设置禁用
+            // 设置禁用
             [self runCommand:@"defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null"];
-            [self runCommand:@"killall -9 AssistiveTouch 2>/dev/null"];
+            
+            // Respring 后等待 15 秒，然后解锁屏幕
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                BOOL success = [[TVNCApiManager sharedManager] respringDevice];
+                if (success) {
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15.0 * NSEC_PER_SEC)), dispatch_get_global_queue(QOS_CLASS_BACKGROUND, 0), ^{
+                        TVLog(@"AssistiveTouch disable: Respring completed, unlocking screen");
+                        [[TVNCApiManager sharedManager] unlockDeviceScreen];
+                    });
+                }
+            });
             
             result = @{
                 @"success": @YES,
                 @"action": @"disable",
-                @"message": @"AssistiveTouch disabled"
+                @"message": @"AssistiveTouch disabled, respringing..."
             };
-            TVLog(@"HTTP Server: AssistiveTouch disabled");
+            TVLog(@"HTTP Server: AssistiveTouch disabled, respringing...");
             
         } else {
             result = @{
