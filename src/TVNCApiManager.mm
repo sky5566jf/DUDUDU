@@ -1958,12 +1958,8 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         
         BOOL enabled = NO;
         if (value) {
-            // CFPropertyListRef 可能是 CFBooleanRef 或 NSNumber
-            if (CFGetTypeID(value) == CFBooleanGetTypeID()) {
-                enabled = CFBooleanGetValue((CFBooleanRef)value);
-            } else if (CFGetTypeID(value) == CFNumberGetTypeID()) {
-                enabled = [(NSNumber *)value boolValue];
-            }
+            // CFBooleanRef 可以直接转为 NSNumber
+            enabled = [(NSNumber *)value boolValue];
             CFRelease(value);
         }
         
