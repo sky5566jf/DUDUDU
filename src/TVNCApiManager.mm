@@ -29,6 +29,7 @@
 #import <unistd.h>
 #import <errno.h>
 #import <stdlib.h>  // 用于 system()
+#include <stdio.h>   // 用于 popen(), fgets(), pclose()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
