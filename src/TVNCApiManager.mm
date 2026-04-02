@@ -1755,6 +1755,36 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     }
 }
 
+// 返回桌面（按一次 Home 键）
+- (BOOL)goToHome {
+    @try {
+        TVLog(@"Going to home screen...");
+
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        [generator menuPress];
+        TVLog(@"Home press sent - going to home screen");
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Go to home failed: %@", exception.reason);
+        return NO;
+    }
+}
+
+// 打开任务管理器（双击 Home 键）
+- (BOOL)openTaskManager {
+    @try {
+        TVLog(@"Opening task manager...");
+
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        [generator menuDoublePress];
+        TVLog(@"Home double press sent - opening task manager");
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Open task manager failed: %@", exception.reason);
+        return NO;
+    }
+}
+
 // 解锁屏幕（唤醒 + 滑动解锁）
 - (BOOL)unlockDeviceScreen {
     @try {

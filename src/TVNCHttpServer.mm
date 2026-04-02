@@ -259,6 +259,10 @@
         return [self handleScreenLock];
     } else if ([path isEqualToString:@"/api/screen/unlock"]) {
         return [self handleScreenUnlock];
+    } else if ([path isEqualToString:@"/api/home"]) {
+        return [self handleHome];
+    } else if ([path isEqualToString:@"/api/taskmanager"]) {
+        return [self handleTaskManager];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
@@ -1242,6 +1246,60 @@
     return response;
 }
 
+// POST /api/home
+// 返回桌面（按一次 Home 键）
+- (TVNCHttpResponse *)handleHome {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Home request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] goToHome];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"action": @"home",
+            @"message": @"Returned to home screen"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to go to home"
+        };
+
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/taskmanager
+// 打开任务管理器（双击 Home 键）
+- (TVNCHttpResponse *)handleTaskManager {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Task manager request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] openTaskManager];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"action": @"taskmanager",
+            @"message": @"Task manager opened"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to open task manager"
+        };
+
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 // POST /api/clearapps/smart
 // 智能清理后台应用（识别当前应用，桌面则跳过）
 - (TVNCHttpResponse *)handleClearAppsSmart {
@@ -1531,6 +1589,8 @@
         "<li><b>POST /api/respring</b> - 注销设备（Respring），15秒后自动解锁屏幕</li>"
         "<li><b>POST /api/screen/lock</b> - 锁定屏幕（电源键）</li>"
         "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
+        "<li><b>POST /api/home</b> - 返回桌面（按一次 Home 键）</li>"
+        "<li><b>POST /api/taskmanager</b> - 打开任务管理器（双击 Home 键）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
         "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
         "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"

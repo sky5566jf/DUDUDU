@@ -154,6 +154,16 @@
                 </div>
 
                 <div class="panel">
+                    <h2>🏠 Home 控制</h2>
+                    <div class="controls-grid">
+                        <button onclick="apiCall('POST', 'home')">🏠 返回桌面</button>
+                        <button onclick="apiCall('POST', 'taskmanager')">📋 任务管理器</button>
+                        <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
+                        <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
+                    </div>
+                </div>
+
+                <div class="panel">
                     <h2>系统信息</h2>
                     <div class="controls-grid">
                         <button onclick="getDeviceInfo()">📱 设备</button>
