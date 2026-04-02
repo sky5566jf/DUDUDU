@@ -29,7 +29,6 @@
 #import <unistd.h>
 #import <errno.h>
 #import <stdlib.h>  // 用于 system()
-#import <stdio.h>   // 用于 popen(), fgets(), pclose()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
@@ -1936,81 +1935,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         result[@"message"] = @"Failed to clear background apps";
         TVLog(@"Smart clear background apps failed: %@", exception.reason);
     }
-    
-    return result;
-}
-
-#pragma mark - AssistiveTouch 控制
-
-- (NSDictionary *)getAssistiveTouchStatus {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    result[@"success"] = @YES;
-    result[@"action"] = @"status";
-    
-    // 使用 defaults 命令获取当前状态
-    FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
-    BOOL enabled = NO;
-    if (fp) {
-        char buf[16] = {0};
-        if (fgets(buf, sizeof(buf), fp) != NULL) {
-            // 移除换行符
-            size_t len = strlen(buf);
-            if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
-            enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
-        }
-        pclose(fp);
-    }
-    
-    result[@"enabled"] = @(enabled);
-    TVLog(@"AssistiveTouch status: %@", enabled ? @"enabled" : @"disabled");
-    
-    return result;
-}
-
-- (NSDictionary *)enableAssistiveTouch {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    result[@"success"] = @YES;
-    result[@"action"] = @"enable";
-    
-    // 使用 defaults 命令设置启用
-    int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
-    
-    if (ret != 0) {
-        result[@"success"] = @NO;
-        result[@"message"] = @"Failed to write preference";
-        TVLog(@"AssistiveTouch enable: write failed");
-        return result;
-    }
-    
-    // 使用 killall 通知系统重载设置
-    system("killall -9 AssistiveTouch 2>/dev/null");
-    
-    result[@"message"] = @"AssistiveTouch enabled";
-    TVLog(@"AssistiveTouch enabled successfully");
-    
-    return result;
-}
-
-- (NSDictionary *)disableAssistiveTouch {
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    result[@"success"] = @YES;
-    result[@"action"] = @"disable";
-    
-    // 使用 defaults 命令设置禁用
-    int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
-    
-    if (ret != 0) {
-        result[@"success"] = @NO;
-        result[@"message"] = @"Failed to write preference";
-        TVLog(@"AssistiveTouch disable: write failed");
-        return result;
-    }
-    
-    // 使用 killall 通知系统重载设置
-    system("killall -9 AssistiveTouch 2>/dev/null");
-    
-    result[@"message"] = @"AssistiveTouch disabled";
-    TVLog(@"AssistiveTouch disabled successfully");
     
     return result;
 }
