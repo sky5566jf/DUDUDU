@@ -233,6 +233,8 @@
         return [self handleScreenUnlock];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
+    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
+        return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1228,6 +1230,82 @@
     return response;
 }
 
+// GET /api/assistivetouch
+// POST /api/assistivetouch?action=enable
+// POST /api/assistivetouch?action=disable
+- (TVNCHttpResponse *)handleAssistiveTouch:(NSDictionary *)query method:(NSString *)method {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSDictionary *result = nil;
+    
+    if ([method isEqualToString:@"GET"]) {
+        // GET 请求：获取状态
+        TVLog(@"HTTP Server: AssistiveTouch status request received");
+        
+        // 使用 defaults 命令获取当前状态
+        FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
+        BOOL enabled = NO;
+        if (fp) {
+            char buf[16] = {0};
+            if (fgets(buf, sizeof(buf), fp) != NULL) {
+                size_t len = strlen(buf);
+                if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
+                enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
+            }
+            pclose(fp);
+        }
+        
+        result = @{
+            @"success": @YES,
+            @"action": @"status",
+            @"enabled": @(enabled)
+        };
+        TVLog(@"HTTP Server: AssistiveTouch status: %@", enabled ? @"enabled" : @"disabled");
+        
+    } else {
+        // POST 请求：启用或禁用
+        NSString *action = query[@"action"];
+        TVLog(@"HTTP Server: AssistiveTouch action request: %@", action ?: @"status");
+        
+        if ([action isEqualToString:@"enable"]) {
+            // 使用 defaults 命令设置启用
+            int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
+            system("killall -9 AssistiveTouch 2>/dev/null");
+            
+            result = @{
+                @"success": @(ret == 0),
+                @"action": @"enable",
+                @"message": ret == 0 ? @"AssistiveTouch enabled" : @"Failed to enable AssistiveTouch"
+            };
+            TVLog(@"HTTP Server: AssistiveTouch enable result: %d", ret);
+            
+        } else if ([action isEqualToString:@"disable"]) {
+            // 使用 defaults 命令设置禁用
+            int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
+            system("killall -9 AssistiveTouch 2>/dev/null");
+            
+            result = @{
+                @"success": @(ret == 0),
+                @"action": @"disable",
+                @"message": ret == 0 ? @"AssistiveTouch disabled" : @"Failed to disable AssistiveTouch"
+            };
+            TVLog(@"HTTP Server: AssistiveTouch disable result: %d", ret);
+            
+        } else {
+            result = @{
+                @"success": @NO,
+                @"message": @"Invalid action. Use 'enable' or 'disable'"
+            };
+        }
+    }
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
 // GET /api/trigger?ip=192.168.x.x&port=3333&delay=5
 // 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行
 - (TVNCHttpResponse *)handleTrigger:(NSDictionary *)query clientAddr:(nullable NSString *)clientAddr {
@@ -1415,6 +1493,9 @@
         "<li><b>POST /api/screen/lock</b> - 锁定屏幕（电源键）</li>"
         "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
+        "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
+        "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"
+        "<li><b>POST /api/assistivetouch?action=disable</b> - 禁用 AssistiveTouch（小白点）</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
