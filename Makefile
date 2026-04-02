@@ -76,6 +76,7 @@ endif
 
 trollvncserver_FRAMEWORKS += Accelerate
 trollvncserver_FRAMEWORKS += AVFoundation
+trollvncserver_FRAMEWORKS += CoreFoundation
 trollvncserver_FRAMEWORKS += CoreGraphics
 trollvncserver_FRAMEWORKS += CoreMedia
 trollvncserver_FRAMEWORKS += CoreVideo
