@@ -23,8 +23,7 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 | [系统控制](#5-系统控制) | 7 | 重启、注销、屏幕、音量、亮度 |
 | [应用管理](#6-应用管理) | 3 | 安装、卸载、TrollStore |
 | [后台管理](#7-后台管理) | 1 | 智能清理后台应用 |
-| [辅助功能](#8-辅助功能) | 3 | AssistiveTouch 启用/禁用 |
-| [其他](#9-其他) | 1 | 触发懒人精灵 |
+| [其他](#8-其他) | 1 | 触发懒人精灵 |
 
 ---
 
@@ -555,72 +554,10 @@ POST /api/clearapps/smart
 
 ---
 
-## 8. 辅助功能
-
-### 8.1 获取 AssistiveTouch 状态
-
-使用 CFPreferences 获取小白点当前状态。
-
-**请求:**
-```
-GET /api/assistivetouch
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "action": "status",
-  "enabled": true
-}
-```
-
----
-
-### 8.2 启用 AssistiveTouch
-
-使用 CFPreferences 启用小白点，通过 killall 通知系统重载设置。
-
-**请求:**
-```
-POST /api/assistivetouch?action=enable
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "action": "enable",
-  "message": "AssistiveTouch enabled"
-}
-```
-
----
-
-### 8.3 禁用 AssistiveTouch
-
-使用 CFPreferences 禁用小白点，通过 killall 通知系统重载设置。
-
-**请求:**
-```
-POST /api/assistivetouch?action=disable
-```
-
-**响应:**
-```json
-{
-  "success": true,
-  "action": "disable",
-  "message": "AssistiveTouch disabled"
-}
-```
-
----
-
-## 9. 其他
+## 8. 其他
 
 
-### 9.1 触发懒人精灵
+### 8.1 触发懒人精灵
 
 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行。
 

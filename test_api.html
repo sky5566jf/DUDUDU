@@ -144,16 +144,6 @@
                 </div>
 
                 <div class="panel">
-                    <h2>♿ AssistiveTouch</h2>
-                    <div class="controls-grid">
-                        <button onclick="getAssistiveTouchStatus()">📊 状态</button>
-                        <button onclick="toggleAssistiveTouch('enable')" class="success">✅ 启用</button>
-                        <button onclick="toggleAssistiveTouch('disable')" class="warning">❌ 禁用</button>
-                    </div>
-                    <div id="assistivetouchStatus" class="response-display" style="display:none;"></div>
-                </div>
-
-                <div class="panel">
                     <h2>系统信息</h2>
                     <div class="controls-grid">
                         <button onclick="getDeviceInfo()">📱 设备</button>
@@ -470,31 +460,6 @@
         }
 
         async function getClients() { const data = await apiCall('GET', 'clients'); if (data) showResponse('systemInfoResponse', data); }
-
-        async function getAssistiveTouchStatus() {
-            const data = await apiCall('GET', 'assistivetouch');
-            if (data) {
-                if (data.success) {
-                    showResponse('assistivetouchStatus', data);
-                    log(`AssistiveTouch: ${data.enabled ? '已启用' : '已禁用'}`, data.enabled ? 'success' : 'warning');
-                } else {
-                    showResponse('assistivetouchStatus', data);
-                    log(`获取状态失败: ${data.error || data.message}`, 'error');
-                }
-            }
-        }
-
-        async function toggleAssistiveTouch(action) {
-            const data = await apiCall('POST', `assistivetouch?action=${action}`);
-            if (data) {
-                if (data.success) {
-                    log(`AssistiveTouch ${action === 'enable' ? '启用' : '禁用'}成功`, 'success');
-                    getAssistiveTouchStatus();
-                } else {
-                    log(`操作失败: ${data.error || data.message}`, 'error');
-                }
-            }
-        }
 
         function showResponse(id, data) {
             document.getElementById(id).textContent = JSON.stringify(data, null, 2);
