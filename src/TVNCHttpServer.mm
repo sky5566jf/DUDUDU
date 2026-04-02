@@ -60,6 +60,33 @@
 
 @implementation TVNCHttpServer
 
+// 辅助函数：使用 popen 执行命令并获取输出
+- (NSString *)executeCommand:(NSString *)command {
+    FILE *fp = popen([command UTF8String], "r");
+    if (fp == NULL) {
+        return nil;
+    }
+    
+    char buffer[256];
+    NSMutableString *output = [NSMutableString string];
+    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+        [output appendString:[NSString stringWithUTF8String:buffer]];
+    }
+    pclose(fp);
+    
+    return [output stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+}
+
+// 辅助函数：使用 popen 执行命令（无输出）
+- (BOOL)runCommand:(NSString *)command {
+    FILE *fp = popen([command UTF8String], "r");
+    if (fp == NULL) {
+        return NO;
+    }
+    pclose(fp);
+    return YES;
+}
+
 + (instancetype)sharedServer {
     static TVNCHttpServer *_inst = nil;
     static dispatch_once_t onceToken;
@@ -1243,10 +1270,8 @@
         // GET 请求：获取状态
         TVLog(@"HTTP Server: AssistiveTouch status request received");
         
-        // 使用 system 命令获取当前状态（无返回值检查）
-        system("enabled=$(defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null); echo $enabled > /tmp/at_status.txt");
-        
-        NSString *status = [NSString stringWithContentsOfFile:@"/tmp/at_status.txt" encoding:NSUTF8StringEncoding error:nil];
+        // 使用 popen 获取当前状态
+        NSString *status = [self executeCommand:@"defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null"];
         BOOL enabled = [status containsString:@"1"] || [status containsString:@"true"];
         
         result = @{
@@ -1262,9 +1287,9 @@
         TVLog(@"HTTP Server: AssistiveTouch action request: %@", action ?: @"status");
         
         if ([action isEqualToString:@"enable"]) {
-            // 使用 defaults 命令设置启用
-            system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
-            system("killall -9 AssistiveTouch 2>/dev/null");
+            // 使用 popen 设置启用
+            [self runCommand:@"defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null"];
+            [self runCommand:@"killall -9 AssistiveTouch 2>/dev/null"];
             
             result = @{
                 @"success": @YES,
@@ -1274,9 +1299,9 @@
             TVLog(@"HTTP Server: AssistiveTouch enabled");
             
         } else if ([action isEqualToString:@"disable"]) {
-            // 使用 defaults 命令设置禁用
-            system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
-            system("killall -9 AssistiveTouch 2>/dev/null");
+            // 使用 popen 设置禁用
+            [self runCommand:@"defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null"];
+            [self runCommand:@"killall -9 AssistiveTouch 2>/dev/null"];
             
             result = @{
                 @"success": @YES,
