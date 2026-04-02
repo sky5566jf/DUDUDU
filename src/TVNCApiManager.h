@@ -223,6 +223,26 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 
+#pragma mark - AssistiveTouch 控制
+
+/**
+ * 获取 AssistiveTouch 当前状态
+ * @return 包含状态信息的字典
+ */
+- (NSDictionary *)getAssistiveTouchStatus;
+
+/**
+ * 启用 AssistiveTouch（CFPreferences 方式）
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)enableAssistiveTouch;
+
+/**
+ * 禁用 AssistiveTouch（CFPreferences 方式）
+ * @return 包含操作结果的字典
+ */
+- (NSDictionary *)disableAssistiveTouch;
+
 @end
 
 NS_ASSUME_NONNULL_END
