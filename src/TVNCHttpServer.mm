@@ -28,6 +28,7 @@
 #import <sys/stat.h>
 #import <unistd.h>
 #import <errno.h>
+#import <stdio.h>  // 用于 popen(), fgets(), pclose()
 
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
