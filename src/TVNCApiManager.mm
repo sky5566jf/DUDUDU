@@ -1947,29 +1947,22 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"success"] = @YES;
     result[@"action"] = @"status";
     
-    @try {
-        // 使用 defaults 命令获取当前状态
-        FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
-        BOOL enabled = NO;
-        if (fp) {
-            char buf[16] = {0};
-            if (fgets(buf, sizeof(buf), fp) != NULL) {
-                // 移除换行符
-                size_t len = strlen(buf);
-                if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
-                enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
-            }
-            pclose(fp);
+    // 使用 defaults 命令获取当前状态
+    FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
+    BOOL enabled = NO;
+    if (fp) {
+        char buf[16] = {0};
+        if (fgets(buf, sizeof(buf), fp) != NULL) {
+            // 移除换行符
+            size_t len = strlen(buf);
+            if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
+            enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
         }
-        
-        result[@"enabled"] = @(enabled);
-        TVLog(@"AssistiveTouch status: %@", enabled ? @"enabled" : @"disabled");
-        
-    } @catch (NSException *exception) {
-        result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        TVLog(@"Failed to get AssistiveTouch status: %@", exception.reason);
+        pclose(fp);
     }
+    
+    result[@"enabled"] = @(enabled);
+    TVLog(@"AssistiveTouch status: %@", enabled ? @"enabled" : @"disabled");
     
     return result;
 }
@@ -1979,29 +1972,21 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"success"] = @YES;
     result[@"action"] = @"enable";
     
-    @try {
-        // 使用 defaults 命令设置启用
-        int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
-        
-        if (ret != 0) {
-            result[@"success"] = @NO;
-            result[@"message"] = @"Failed to write preference";
-            TVLog(@"AssistiveTouch enable: write failed");
-            return result;
-        }
-        
-        // 使用 killall 通知系统重载设置
-        system("killall -9 AssistiveTouch 2>/dev/null");
-        
-        result[@"message"] = @"AssistiveTouch enabled";
-        TVLog(@"AssistiveTouch enabled successfully");
-        
-    } @catch (NSException *exception) {
+    // 使用 defaults 命令设置启用
+    int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
+    
+    if (ret != 0) {
         result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to enable AssistiveTouch";
-        TVLog(@"Failed to enable AssistiveTouch: %@", exception.reason);
+        result[@"message"] = @"Failed to write preference";
+        TVLog(@"AssistiveTouch enable: write failed");
+        return result;
     }
+    
+    // 使用 killall 通知系统重载设置
+    system("killall -9 AssistiveTouch 2>/dev/null");
+    
+    result[@"message"] = @"AssistiveTouch enabled";
+    TVLog(@"AssistiveTouch enabled successfully");
     
     return result;
 }
@@ -2011,29 +1996,21 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"success"] = @YES;
     result[@"action"] = @"disable";
     
-    @try {
-        // 使用 defaults 命令设置禁用
-        int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
-        
-        if (ret != 0) {
-            result[@"success"] = @NO;
-            result[@"message"] = @"Failed to write preference";
-            TVLog(@"AssistiveTouch disable: write failed");
-            return result;
-        }
-        
-        // 使用 killall 通知系统重载设置
-        system("killall -9 AssistiveTouch 2>/dev/null");
-        
-        result[@"message"] = @"AssistiveTouch disabled";
-        TVLog(@"AssistiveTouch disabled successfully");
-        
-    } @catch (NSException *exception) {
+    // 使用 defaults 命令设置禁用
+    int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
+    
+    if (ret != 0) {
         result[@"success"] = @NO;
-        result[@"error"] = exception.reason;
-        result[@"message"] = @"Failed to disable AssistiveTouch";
-        TVLog(@"Failed to disable AssistiveTouch: %@", exception.reason);
+        result[@"message"] = @"Failed to write preference";
+        TVLog(@"AssistiveTouch disable: write failed");
+        return result;
     }
+    
+    // 使用 killall 通知系统重载设置
+    system("killall -9 AssistiveTouch 2>/dev/null");
+    
+    result[@"message"] = @"AssistiveTouch disabled";
+    TVLog(@"AssistiveTouch disabled successfully");
     
     return result;
 }
