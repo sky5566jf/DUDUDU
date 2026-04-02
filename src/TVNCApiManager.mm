@@ -33,7 +33,6 @@
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
 #import <libproc.h>     // 用于 proc_pidpath
-#import <CoreFoundation/CoreFoundation.h>  // 用于 CFPreferences
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -1948,19 +1947,18 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"action"] = @"status";
     
     @try {
-        // 使用 CFPreferences 获取当前状态
-        CFPropertyListRef value = CFPreferencesCopyValue(
-            CFSTR("AXAssistiveTouchEnabled"),
-            CFSTR("com.apple.Accessibility"),
-            kCFPreferencesCurrentUser,
-            kCFPreferencesCurrentHost
-        );
-        
+        // 使用 defaults 命令获取当前状态
+        FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
         BOOL enabled = NO;
-        if (value) {
-            // CFBooleanRef 可以直接转为 NSNumber
-            enabled = [(NSNumber *)value boolValue];
-            CFRelease(value);
+        if (fp) {
+            char buf[16] = {0};
+            if (fgets(buf, sizeof(buf), fp) != NULL) {
+                // 移除换行符
+                size_t len = strlen(buf);
+                if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
+                enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
+            }
+            pclose(fp);
         }
         
         result[@"enabled"] = @(enabled);
@@ -1981,26 +1979,13 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"action"] = @"enable";
     
     @try {
-        // 使用 CFPreferences 设置启用
-        CFPreferencesSetValue(
-            CFSTR("AXAssistiveTouchEnabled"),
-            kCFBooleanTrue,
-            CFSTR("com.apple.Accessibility"),
-            kCFPreferencesCurrentUser,
-            kCFPreferencesCurrentHost
-        );
+        // 使用 defaults 命令设置启用
+        int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
         
-        // 同步保存
-        BOOL syncSuccess = CFPreferencesSynchronize(
-            CFSTR("com.apple.Accessibility"),
-            kCFPreferencesCurrentUser,
-            kCFPreferencesCurrentHost
-        );
-        
-        if (!syncSuccess) {
+        if (ret != 0) {
             result[@"success"] = @NO;
-            result[@"message"] = @"CFPreferences synchronize failed";
-            TVLog(@"AssistiveTouch enable: sync failed");
+            result[@"message"] = @"Failed to write preference";
+            TVLog(@"AssistiveTouch enable: write failed");
             return result;
         }
         
@@ -2026,26 +2011,13 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     result[@"action"] = @"disable";
     
     @try {
-        // 使用 CFPreferences 设置禁用
-        CFPreferencesSetValue(
-            CFSTR("AXAssistiveTouchEnabled"),
-            kCFBooleanFalse,
-            CFSTR("com.apple.Accessibility"),
-            kCFPreferencesCurrentUser,
-            kCFPreferencesCurrentHost
-        );
+        // 使用 defaults 命令设置禁用
+        int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
         
-        // 同步保存
-        BOOL syncSuccess = CFPreferencesSynchronize(
-            CFSTR("com.apple.Accessibility"),
-            kCFPreferencesCurrentUser,
-            kCFPreferencesCurrentHost
-        );
-        
-        if (!syncSuccess) {
+        if (ret != 0) {
             result[@"success"] = @NO;
-            result[@"message"] = @"CFPreferences synchronize failed";
-            TVLog(@"AssistiveTouch disable: sync failed");
+            result[@"message"] = @"Failed to write preference";
+            TVLog(@"AssistiveTouch disable: write failed");
             return result;
         }
         
