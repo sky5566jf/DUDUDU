@@ -33,6 +33,7 @@
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
 #import <libproc.h>     // 用于 proc_pidpath
+#import <CoreFoundation/CoreFoundation.h>  // 用于 CFPreferences
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -1934,6 +1935,130 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         result[@"error"] = exception.reason;
         result[@"message"] = @"Failed to clear background apps";
         TVLog(@"Smart clear background apps failed: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+#pragma mark - AssistiveTouch 控制
+
+- (NSDictionary *)getAssistiveTouchStatus {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"success"] = @YES;
+    result[@"action"] = @"status";
+    
+    @try {
+        // 使用 CFPreferences 获取当前状态
+        CFStringRef key = CFSTR("AXAssistiveTouchEnabled");
+        CFPropertyListRef value = CFPreferencesCopyValue(
+            key,
+            CFSTR("com.apple.Accessibility"),
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        );
+        
+        BOOL enabled = NO;
+        if (value) {
+            enabled = [(NSNumber *)CFBridgingRelease(value) boolValue];
+        }
+        
+        result[@"enabled"] = @(enabled);
+        TVLog(@"AssistiveTouch status: %@", enabled ? @"enabled" : @"disabled");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        TVLog(@"Failed to get AssistiveTouch status: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+- (NSDictionary *)enableAssistiveTouch {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"success"] = @YES;
+    result[@"action"] = @"enable";
+    
+    @try {
+        // 使用 CFPreferences 设置启用
+        CFPreferencesSetValue(
+            CFSTR("AXAssistiveTouchEnabled"),
+            kCFBooleanTrue,
+            CFSTR("com.apple.Accessibility"),
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        );
+        
+        // 同步保存
+        BOOL syncSuccess = CFPreferencesSynchronize(
+            CFSTR("com.apple.Accessibility"),
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        );
+        
+        if (!syncSuccess) {
+            result[@"success"] = @NO;
+            result[@"message"] = @"CFPreferences synchronize failed";
+            TVLog(@"AssistiveTouch enable: sync failed");
+            return result;
+        }
+        
+        // 使用 killall 通知系统重载设置
+        system("killall -9 AssistiveTouch 2>/dev/null");
+        
+        result[@"message"] = @"AssistiveTouch enabled";
+        TVLog(@"AssistiveTouch enabled successfully");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to enable AssistiveTouch";
+        TVLog(@"Failed to enable AssistiveTouch: %@", exception.reason);
+    }
+    
+    return result;
+}
+
+- (NSDictionary *)disableAssistiveTouch {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"success"] = @YES;
+    result[@"action"] = @"disable";
+    
+    @try {
+        // 使用 CFPreferences 设置禁用
+        CFPreferencesSetValue(
+            CFSTR("AXAssistiveTouchEnabled"),
+            kCFBooleanFalse,
+            CFSTR("com.apple.Accessibility"),
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        );
+        
+        // 同步保存
+        BOOL syncSuccess = CFPreferencesSynchronize(
+            CFSTR("com.apple.Accessibility"),
+            kCFPreferencesCurrentUser,
+            kCFPreferencesCurrentHost
+        );
+        
+        if (!syncSuccess) {
+            result[@"success"] = @NO;
+            result[@"message"] = @"CFPreferences synchronize failed";
+            TVLog(@"AssistiveTouch disable: sync failed");
+            return result;
+        }
+        
+        // 使用 killall 通知系统重载设置
+        system("killall -9 AssistiveTouch 2>/dev/null");
+        
+        result[@"message"] = @"AssistiveTouch disabled";
+        TVLog(@"AssistiveTouch disabled successfully");
+        
+    } @catch (NSException *exception) {
+        result[@"success"] = @NO;
+        result[@"error"] = exception.reason;
+        result[@"message"] = @"Failed to disable AssistiveTouch";
+        TVLog(@"Failed to disable AssistiveTouch: %@", exception.reason);
     }
     
     return result;
