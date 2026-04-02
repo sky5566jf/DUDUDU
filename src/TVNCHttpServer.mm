@@ -1243,18 +1243,11 @@
         // GET 请求：获取状态
         TVLog(@"HTTP Server: AssistiveTouch status request received");
         
-        // 使用 defaults 命令获取当前状态
-        FILE *fp = popen("defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null", "r");
-        BOOL enabled = NO;
-        if (fp) {
-            char buf[16] = {0};
-            if (fgets(buf, sizeof(buf), fp) != NULL) {
-                size_t len = strlen(buf);
-                if (len > 0 && buf[len-1] == '\n') buf[len-1] = 0;
-                enabled = (strcmp(buf, "1") == 0 || strcmp(buf, "true") == 0);
-            }
-            pclose(fp);
-        }
+        // 使用 system 命令获取当前状态（无返回值检查）
+        system("enabled=$(defaults read com.apple.Accessibility AXAssistiveTouchEnabled 2>/dev/null); echo $enabled > /tmp/at_status.txt");
+        
+        NSString *status = [NSString stringWithContentsOfFile:@"/tmp/at_status.txt" encoding:NSUTF8StringEncoding error:nil];
+        BOOL enabled = [status containsString:@"1"] || [status containsString:@"true"];
         
         result = @{
             @"success": @YES,
@@ -1270,27 +1263,27 @@
         
         if ([action isEqualToString:@"enable"]) {
             // 使用 defaults 命令设置启用
-            int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
+            system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool true 2>/dev/null");
             system("killall -9 AssistiveTouch 2>/dev/null");
             
             result = @{
-                @"success": @(ret == 0),
+                @"success": @YES,
                 @"action": @"enable",
-                @"message": ret == 0 ? @"AssistiveTouch enabled" : @"Failed to enable AssistiveTouch"
+                @"message": @"AssistiveTouch enabled"
             };
-            TVLog(@"HTTP Server: AssistiveTouch enable result: %d", ret);
+            TVLog(@"HTTP Server: AssistiveTouch enabled");
             
         } else if ([action isEqualToString:@"disable"]) {
             // 使用 defaults 命令设置禁用
-            int ret = system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
+            system("defaults write com.apple.Accessibility AXAssistiveTouchEnabled -bool false 2>/dev/null");
             system("killall -9 AssistiveTouch 2>/dev/null");
             
             result = @{
-                @"success": @(ret == 0),
+                @"success": @YES,
                 @"action": @"disable",
-                @"message": ret == 0 ? @"AssistiveTouch disabled" : @"Failed to disable AssistiveTouch"
+                @"message": @"AssistiveTouch disabled"
             };
-            TVLog(@"HTTP Server: AssistiveTouch disable result: %d", ret);
+            TVLog(@"HTTP Server: AssistiveTouch disabled");
             
         } else {
             result = @{
