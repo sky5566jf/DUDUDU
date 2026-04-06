@@ -34,6 +34,11 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 获取设备名称、ID、系统版本、电量和屏幕信息。支持保存设备信息到手机。
 
+**设备ID固化机制:**
+- 优先读取 `/var/mobile/Media/.matisu_device_id` 文件中的设备ID
+- 如果文件不存在，则读取手机设备ID并保存到该文件
+- 后续请求都会使用固化后的设备ID
+
 **请求:**
 ```
 GET /api/device

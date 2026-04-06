@@ -487,7 +487,7 @@
             const data = await apiCall('GET', url);
             if (data) {
                 const result = data._saved ? '保存成功' : '保存失败';
-                const msg = data._saved ? `${result} → /var/mobile/Media/fuwuduan.txt` : `${result}: ${data._saveError}`;
+                const msg = data._saved ? `${result} → /var/mobile/Media/fuwuduan.txt\n设备ID固化文件: /var/mobile/Media/.matisu_device_id\n固化设备ID: ${data.deviceId}` : `${result}: ${data._saveError}`;
                 log(msg, data._saved ? 'success' : 'error');
             }
         }

@@ -540,6 +540,7 @@
 // GET /api/device
 // 返回设备信息：设备名、设备ID、系统版本、电量、充电状态
 // 支持参数：ip=客户端IP，save=true（保存到 /var/mobile/Media/fuwuduan.txt）
+// 设备ID优先读取 /var/mobile/Media/.matisu_device_id，不存在则生成并保存
 - (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -556,7 +557,28 @@
     deviceModel = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
     
     // 获取设备UUID (作为设备ID)
-    NSString *deviceUUID = [[UIDevice currentDevice] identifierForVendor].UUIDString;
+    // 优先读取 .matisu_device_id 文件，如果没有则生成并保存
+    NSString *deviceIDFile = @"/var/mobile/Media/.matisu_device_id";
+    NSString *deviceUUID = nil;
+    
+    NSError *readError = nil;
+    NSString *savedDeviceId = [NSString stringWithContentsOfFile:deviceIDFile encoding:NSUTF8StringEncoding error:&readError];
+    
+    if (savedDeviceId && savedDeviceId.length > 0) {
+        // 文件存在，读取已有的设备ID
+        deviceUUID = [savedDeviceId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        TVLog(@"HTTP Server: Read existing deviceId from %@: %@", deviceIDFile, deviceUUID);
+    } else {
+        // 文件不存在，读取手机设备ID并保存
+        deviceUUID = [[UIDevice currentDevice] identifierForVendor].UUIDString;
+        
+        NSError *writeError = nil;
+        if ([deviceUUID writeToFile:deviceIDFile atomically:YES encoding:NSUTF8StringEncoding error:&writeError]) {
+            TVLog(@"HTTP Server: Saved new deviceId to %@: %@", deviceIDFile, deviceUUID);
+        } else {
+            TVLog(@"HTTP Server: Failed to save deviceId to %@: %@", deviceIDFile, writeError);
+        }
+    }
     
     // 获取更友好的设备型号名称
     NSString *deviceModelName = [self deviceModelNameFromIdentifier:deviceModel];
