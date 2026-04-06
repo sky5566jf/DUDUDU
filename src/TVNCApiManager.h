@@ -214,6 +214,22 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)unlockDeviceScreen;
 
+#pragma mark - Home 控制 API
+
+/**
+ * 返回桌面（按一次 Home 键）
+ * 模拟按下 Home 键，返回到桌面
+ * @return 是否成功
+ */
+- (BOOL)goToHome;
+
+/**
+ * 打开任务管理器（双击 Home 键）
+ * 模拟双击 Home 键，打开应用切换器/任务管理器
+ * @return 是否成功
+ */
+- (BOOL)openTaskManager;
+
 #pragma mark - 智能清理后台应用
 
 /**

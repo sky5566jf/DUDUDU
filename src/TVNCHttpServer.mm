@@ -234,7 +234,7 @@
     } else if ([path isEqualToString:@"/api/status"]) {
         return [self handleStatus];
     } else if ([path isEqualToString:@"/api/device"]) {
-        return [self handleDeviceInfo];
+        return [self handleDeviceInfo:query clientAddr:clientAddr];
     } else if ([path isEqualToString:@"/api/checkfile"]) {
         return [self handleCheckFile];
     } else if ([path isEqualToString:@"/api/upload"]) {
@@ -539,7 +539,8 @@
 
 // GET /api/device
 // 返回设备信息：设备名、设备ID、系统版本、电量、充电状态
-- (TVNCHttpResponse *)handleDeviceInfo {
+// 支持参数：ip=客户端IP，save=true（保存到 /var/mobile/Media/fuwuduan.txt）
+- (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
     // 获取设备名称
@@ -586,18 +587,53 @@
     // 电量为 -1 表示无法获取
     NSNumber *batteryLevelNumber = (batteryLevel >= 0) ? @(batteryLevel * 100) : @(-1);
     
+    // 构建设备信息字典
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"deviceName"] = deviceName ?: @"Unknown";
+    result[@"deviceId"] = deviceUUID ?: @"Unknown";
+    result[@"deviceModel"] = deviceModel ?: @"Unknown";
+    result[@"deviceModelName"] = deviceModelName ?: @"Unknown";
+    result[@"systemVersion"] = systemVersion ?: @"Unknown";
+    result[@"systemName"] = [[UIDevice currentDevice] systemName] ?: @"iOS";
+    result[@"batteryLevel"] = batteryLevelNumber;
+    result[@"batteryState"] = batteryStateString;
+    
+    // 处理 save 参数
+    NSString *saveParam = query[@"save"];
+    BOOL shouldSave = [saveParam isEqualToString:@"true"] || [saveParam isEqualToString:@"1"];
+    
+    if (shouldSave) {
+        // 获取 IP 参数（API 传入的 ip 作为 serverIP）
+        NSString *serverIP = query[@"ip"];
+        
+        // 获取当前时间
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        [formatter setTimeZone:[NSTimeZone timeZoneWithName:@"UTC"]];
+        [formatter setDateFormat:@"yyyy-MM-dd HH:mm:ss Z"];
+        NSString *recordTime = [formatter stringFromDate:[NSDate date]];
+        
+        // 添加 serverIP 和 recordTime
+        result[@"serverIP"] = serverIP ?: @"Unknown";
+        result[@"recordTime"] = recordTime;
+        
+        // 保存到 /var/mobile/Media/fuwuduan.txt
+        NSString *savePath = @"/var/mobile/Media/fuwuduan.txt";
+        NSError *error = nil;
+        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:&error];
+        
+        if (jsonData && [jsonData writeToFile:savePath atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+            TVLog(@"HTTP Server: Device info saved to %@", savePath);
+            result[@"_saved"] = @YES;
+            result[@"_savePath"] = savePath;
+        } else {
+            TVLog(@"HTTP Server: Failed to save device info: %@", error);
+            result[@"_saved"] = @NO;
+            result[@"_saveError"] = error.localizedDescription ?: @"Unknown error";
+        }
+    }
+    
     response.statusCode = 200;
     response.contentType = @"application/json";
-    NSDictionary *result = @{
-        @"deviceName": deviceName ?: @"Unknown",
-        @"deviceId": deviceUUID ?: @"Unknown",
-        @"deviceModel": deviceModel ?: @"Unknown",
-        @"deviceModelName": deviceModelName ?: @"Unknown",
-        @"systemVersion": systemVersion ?: @"Unknown",
-        @"systemName": [[UIDevice currentDevice] systemName] ?: @"iOS",
-        @"batteryLevel": batteryLevelNumber,       // 电量百分比 0-100，-1表示未知
-        @"batteryState": batteryStateString        // unknown/unplugged/charging/full
-    };
     response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
     
     return response;

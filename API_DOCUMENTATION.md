@@ -32,14 +32,35 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 ### 1.1 获取设备信息
 
-获取设备名称、ID、系统版本、电量和屏幕信息。
+获取设备名称、ID、系统版本、电量和屏幕信息。支持保存设备信息到手机。
 
 **请求:**
 ```
 GET /api/device
+GET /api/device?ip=192.168.1.100&save=true
 ```
 
-**响应:**
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| ip | string | 否 | 客户端 IP 地址（保存时使用） |
+| save | string | 否 | `true` 或 `1`：保存设备信息到 `/var/mobile/Media/fuwuduan.txt` |
+
+**响应 (不保存):**
+```json
+{
+  "deviceName": "iPhone",
+  "deviceId": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+  "deviceModel": "iPhone14,2",
+  "deviceModelName": "iPhone 13 Pro",
+  "systemVersion": "17.4.1",
+  "systemName": "iOS",
+  "batteryLevel": 85,
+  "batteryState": "charging"
+}
+```
+
+**响应 (save=true):**
 ```json
 {
   "deviceName": "iPhone",
@@ -50,8 +71,26 @@ GET /api/device
   "systemName": "iOS",
   "batteryLevel": 85,
   "batteryState": "charging",
-  "screenWidth": 1170,
-  "screenHeight": 2532
+  "serverIP": "192.168.1.100",
+  "recordTime": "2026-04-07 06:31:00 +0000",
+  "_saved": true,
+  "_savePath": "/var/mobile/Media/fuwuduan.txt"
+}
+```
+
+**保存的文件内容格式:**
+```json
+{
+  "deviceId" : "294A8A0B-BF77-48D7-B6E9-5EA29D21073B",
+  "deviceModelName" : "iPhone 6s",
+  "systemName" : "iOS",
+  "deviceName" : "巨魔3",
+  "serverIP" : "192.69.0.24",
+  "deviceModel" : "iPhone8,1",
+  "recordTime" : "2026-04-06 22:19:44 +0000",
+  "systemVersion" : "15.8.5",
+  "batteryLevel" : 98,
+  "batteryState" : "charging"
 }
 ```
 

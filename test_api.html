@@ -94,6 +94,10 @@
                 <button onclick="getServerStatus()" class="info">服务器状态</button>
                 <span id="status" class="status disconnected">未连接</span>
             </div>
+            <div class="input-group" style="margin-top: 10px;">
+                <input type="text" id="clientIp" placeholder="客户端 IP (保存设备时使用，选填)" style="flex: 1;">
+                <button onclick="saveDevice()" class="success">💾 保存设备</button>
+            </div>
             <div id="deviceInfo" class="info-box" style="display:none;">
                 <pre id="deviceInfoContent"></pre>
             </div>
@@ -471,6 +475,20 @@
                 document.getElementById('deviceInfo').style.display = 'block';
                 screenWidth = data.screenWidth || 0;
                 screenHeight = data.screenHeight || 0;
+            }
+        }
+
+        async function saveDevice() {
+            const clientIp = document.getElementById('clientIp').value.trim();
+            let url = 'device?save=true';
+            if (clientIp) {
+                url += `&ip=${encodeURIComponent(clientIp)}`;
+            }
+            const data = await apiCall('GET', url);
+            if (data) {
+                const result = data._saved ? '保存成功' : '保存失败';
+                const msg = data._saved ? `${result} → /var/mobile/Media/fuwuduan.txt` : `${result}: ${data._saveError}`;
+                log(msg, data._saved ? 'success' : 'error');
             }
         }
 
