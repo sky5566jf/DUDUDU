@@ -239,6 +239,39 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 
+#pragma mark - Plist 操作 API
+
+/**
+ * 读取 plist 文件
+ * @param filePath plist 文件路径
+ * @return plist 内容（NSDictionary 或 NSArray），失败返回 nil
+ */
+- (nullable NSDictionary *)readPlistFile:(NSString *)filePath;
+
+/**
+ * 写入 plist 文件
+ * @param data 要写入的数据（NSDictionary 或 NSArray）
+ * @param filePath 目标文件路径
+ * @param error 错误信息输出
+ * @return 是否成功
+ */
+- (BOOL)writePlistData:(id)data toFilePath:(NSString *)filePath error:(NSError **)error;
+
+/**
+ * 读取并修改 plist 文件
+ * @param filePath plist 文件路径
+ * @param setDict 要设置的键值对
+ * @param matchKey 要匹配的键名（可选，nil 表示精确设置）
+ * @param matchValue 当键名匹配时设置的值
+ * @param error 错误信息输出
+ * @return 修改后的完整数据，失败返回 nil
+ */
+- (nullable NSDictionary *)modifyPlistFile:(NSString *)filePath
+                                   setDict:(NSDictionary *)setDict
+                                  matchKey:(nullable NSString *)matchKey
+                                matchValue:(nullable NSString *)matchValue
+                                     error:(NSError **)error;
+
 @end
 
 NS_ASSUME_NONNULL_END

@@ -362,6 +362,64 @@ Content-Type: text/plain
 
 ---
 
+### 4.5 Plist 文件操作
+
+读取、修改 plist 文件中的键值对。
+
+**请求:**
+```
+POST /api/plist
+Content-Type: application/json
+
+{
+  "path": "/var/mobile/Library/Preferences/com.jao.yhdl.plist",
+  "set": {
+    "jieao_GameSid": "192.168.1.100",
+    "customKey": "value"
+  },
+  "match": "userOftenServer",
+  "matchValue": "192.168.1.100"
+}
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | plist 文件路径 |
+| set | object | 否 | 要设置的键值对 |
+| match | string | 否 | 匹配键名（部分匹配），匹配到则设置 matchValue |
+| matchValue | string | 否 | 匹配键名时设置的值 |
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/Library/Preferences/com.jao.yhdl.plist",
+  "modified": ["jieao_GameSid", "customKey", "userOftenServer1", "userOftenServer2"],
+  "data": {
+    "jieao_GameSid": "192.168.1.100",
+    "customKey": "value",
+    "userOftenServer1": "192.168.1.100",
+    "userOftenServer2": "192.168.1.100"
+  }
+}
+```
+
+**示例:**
+```bash
+# 修改指定键值
+curl -X POST "http://192.168.1.100:8182/api/plist" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/var/mobile/Library/Preferences/com.jao.yhdl.plist","set":{"jieao_GameSid":"192.168.1.100"}}'
+
+# 匹配键名修改（所有包含 "userOftenServer" 的键都设为同一个值）
+curl -X POST "http://192.168.1.100:8182/api/plist" \
+  -H "Content-Type: application/json" \
+  -d '{"path":"/var/mobile/Library/Preferences/com.jao.yhdl.plist","match":"userOftenServer","matchValue":"192.168.1.100"}'
+```
+
+---
+
 ## 5. 系统控制
 
 ### 5.1 重启设备

@@ -294,6 +294,24 @@
                 <h3>📄 检查文件</h3>
                 <button onclick="checkFile()">检查 zhuangtai.txt</button>
             </div>
+
+            <div class="api-section">
+                <h3>📋 Plist 文件操作</h3>
+                <div class="input-group">
+                    <input type="text" id="plistPath" placeholder="plist 路径 (如: /var/mobile/Library/Preferences/com.jao.yhdl.plist)" style="flex:1;">
+                </div>
+                <div class="input-group" style="margin-top:5px;">
+                    <input type="text" id="plistSetKey" placeholder="设置键名 (如: jieao_GameSid)" style="width:45%;">
+                    <input type="text" id="plistSetValue" placeholder="设置值" style="width:45%;">
+                </div>
+                <div class="input-group" style="margin-top:5px;">
+                    <input type="text" id="plistMatchKey" placeholder="匹配键名 (部分匹配)" style="width:45%;">
+                    <input type="text" id="plistMatchValue" placeholder="匹配后设置的值" style="width:45%;">
+                </div>
+                <div class="input-group" style="margin-top:10px;">
+                    <button onclick="modifyPlist()" class="success">🔧 修改 Plist</button>
+                </div>
+            </div>
         </div>
 
         <div class="panel">
@@ -580,6 +598,51 @@
         }
 
         async function checkFile() { await apiCall('GET', 'checkfile'); }
+
+        async function modifyPlist() {
+            const path = document.getElementById('plistPath').value.trim();
+            const setKey = document.getElementById('plistSetKey').value.trim();
+            const setValue = document.getElementById('plistSetValue').value.trim();
+            const matchKey = document.getElementById('plistMatchKey').value.trim();
+            const matchValue = document.getElementById('plistMatchValue').value.trim();
+
+            if (!path) {
+                alert('请输入 plist 路径');
+                return;
+            }
+
+            const requestData = { path };
+
+            // 添加 set 参数
+            if (setKey && setValue) {
+                requestData.set = {};
+                requestData.set[setKey] = setValue;
+            }
+
+            // 添加 match 参数
+            if (matchKey) {
+                requestData.match = matchKey;
+                if (matchValue) {
+                    requestData.matchValue = matchValue;
+                }
+            }
+
+            try {
+                const res = await fetch(`${baseUrl}/plist`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(requestData)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    log(`Plist 修改成功！修改了 ${data.modified.length} 个键: ${data.modified.join(', ')}`, 'success');
+                } else {
+                    log(`Plist 修改失败: ${data.error}`, 'error');
+                }
+            } catch (err) {
+                log(`Plist 操作失败: ${err.message}`, 'error');
+            }
+        }
 
         async function installApp() {
             const path = document.getElementById('installPath').value;

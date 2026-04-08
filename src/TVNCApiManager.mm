@@ -1969,4 +1969,172 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     return result;
 }
 
+#pragma mark - Plist 操作
+
+// 读取 plist 文件
+- (nullable NSDictionary *)readPlistFile:(NSString *)filePath {
+    if (!filePath || filePath.length == 0) {
+        TVLog(@"Plist read: Invalid file path");
+        return nil;
+    }
+    
+    NSError *error = nil;
+    NSData *data = [NSData dataWithContentsOfFile:filePath options:0 error:&error];
+    
+    if (!data) {
+        TVLog(@"Plist read: Failed to read file %@: %@", filePath, error);
+        return nil;
+    }
+    
+    id plist = [NSPropertyListSerialization propertyListWithData:data
+                                                         options:NSPropertyListImmutable
+                                                          format:nil
+                                                           error:&error];
+    
+    if (!plist) {
+        TVLog(@"Plist read: Failed to parse %@: %@", filePath, error);
+        return nil;
+    }
+    
+    if ([plist isKindOfClass:[NSDictionary class]]) {
+        TVLog(@"Plist read: Successfully read dictionary from %@", filePath);
+        return (NSDictionary *)plist;
+    } else if ([plist isKindOfClass:[NSArray class]]) {
+        TVLog(@"Plist read: File is an array, wrapping in dictionary");
+        return @{@"_array": plist};
+    }
+    
+    TVLog(@"Plist read: Unknown plist format");
+    return nil;
+}
+
+// 写入 plist 文件
+- (BOOL)writePlistData:(id)data toFilePath:(NSString *)filePath error:(NSError **)error {
+    if (!filePath || filePath.length == 0) {
+        TVLog(@"Plist write: Invalid file path");
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                         code:-1
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Invalid file path"}];
+        }
+        return NO;
+    }
+    
+    if (!data) {
+        TVLog(@"Plist write: No data to write");
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                         code:-2
+                                     userInfo:@{NSLocalizedDescriptionKey: @"No data to write"}];
+        }
+        return NO;
+    }
+    
+    NSError *serializeError = nil;
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:data
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:&serializeError];
+    
+    if (!plistData) {
+        TVLog(@"Plist write: Failed to serialize data: %@", serializeError);
+        if (error) {
+            *error = serializeError;
+        }
+        return NO;
+    }
+    
+    // 确保目录存在
+    NSString *directory = [filePath stringByDeletingLastPathComponent];
+    [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
+    
+    BOOL success = [plistData writeToFile:filePath atomically:YES];
+    
+    if (success) {
+        TVLog(@"Plist write: Successfully wrote to %@", filePath);
+    } else {
+        TVLog(@"Plist write: Failed to write to %@", filePath);
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                         code:-3
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to write file"}];
+        }
+    }
+    
+    return success;
+}
+
+// 读取并修改 plist 文件
+- (nullable NSDictionary *)modifyPlistFile:(NSString *)filePath
+                                   setDict:(NSDictionary *)setDict
+                                  matchKey:(nullable NSString *)matchKey
+                                matchValue:(nullable NSString *)matchValue
+                                     error:(NSError **)error {
+    if (!filePath || filePath.length == 0) {
+        TVLog(@"Plist modify: Invalid file path");
+        if (error) {
+            *error = [NSError errorWithDomain:@"TVNCApiManager"
+                                         code:-1
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Invalid file path"}];
+        }
+        return nil;
+    }
+    
+    // 读取现有 plist
+    NSDictionary *existingData = [self readPlistFile:filePath];
+    NSMutableDictionary *mutableData = [NSMutableDictionary dictionary];
+    
+    if (existingData) {
+        // 检查是否是包装的数组
+        if (existingData[@"_array"]) {
+            [mutableData addEntriesFromDictionary:existingData];
+        } else {
+            [mutableData addEntriesFromDictionary:existingData];
+        }
+    }
+    
+    NSMutableArray *modifiedKeys = [NSMutableArray array];
+    
+    // 设置指定的键值对
+    if (setDict && setDict.count > 0) {
+        for (NSString *key in setDict) {
+            mutableData[key] = setDict[key];
+            [modifiedKeys addObject:key];
+            TVLog(@"Plist modify: Set %@ = %@", key, setDict[key]);
+        }
+    }
+    
+    // 匹配键名并设置值
+    if (matchKey && matchKey.length > 0) {
+        NSString *valueToSet = matchValue ?: @"";
+        for (NSString *key in mutableData) {
+            if ([key rangeOfString:matchKey].location != NSNotFound) {
+                mutableData[key] = valueToSet;
+                [modifiedKeys addObject:key];
+                TVLog(@"Plist modify: Matched key %@ = %@", key, valueToSet);
+            }
+        }
+    }
+    
+    // 写入文件
+    NSError *writeError = nil;
+    BOOL success = [self writePlistData:mutableData toFilePath:filePath error:&writeError];
+    
+    if (!success) {
+        TVLog(@"Plist modify: Failed to write modified data: %@", writeError);
+        if (error) {
+            *error = writeError;
+        }
+        return nil;
+    }
+    
+    TVLog(@"Plist modify: Successfully modified %lu keys in %@", (unsigned long)modifiedKeys.count, filePath);
+    
+    // 返回修改后的完整数据
+    return mutableData;
+}
+
 @end
