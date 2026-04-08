@@ -745,14 +745,17 @@
         NSError *error = nil;
         NSData *jsonData = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:&error];
         
-        if (jsonData && [jsonData writeToFile:savePath atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
-            TVLog(@"HTTP Server: Device info saved to %@", savePath);
-            result[@"_saved"] = @YES;
-            result[@"_savePath"] = savePath;
-        } else {
-            TVLog(@"HTTP Server: Failed to save device info: %@", error);
-            result[@"_saved"] = @NO;
-            result[@"_saveError"] = error.localizedDescription ?: @"Unknown error";
+        if (jsonData) {
+            BOOL success = [jsonData writeToFile:savePath options:NSDataWritingAtomic error:&error];
+            if (success) {
+                TVLog(@"HTTP Server: Device info saved to %@", savePath);
+                result[@"_saved"] = @YES;
+                result[@"_savePath"] = savePath;
+            } else {
+                TVLog(@"HTTP Server: Failed to save device info: %@", error);
+                result[@"_saved"] = @NO;
+                result[@"_saveError"] = error.localizedDescription ?: @"Unknown error";
+            }
         }
     }
     
