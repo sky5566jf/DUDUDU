@@ -628,7 +628,7 @@
             }
 
             try {
-                const res = await fetch(`${baseUrl}/plist`, {
+                const res = await fetch(`${baseUrl}/api/plist`, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(requestData)
