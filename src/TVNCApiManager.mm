@@ -1973,24 +1973,29 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 // 检测 plist 文件格式（XML 或二进制）
 - (BOOL)isBinaryPlist:(NSString *)filePath {
-    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:filePath];
-    if (!fh) {
+    @try {
+        NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:filePath];
+        if (!fh) {
+            return NO;
+        }
+        
+        NSData *headerData = [fh readDataOfLength:8];
+        [fh closeFile];
+        
+        if (headerData.length < 6) {
+            return NO;
+        }
+        
+        // 二进制 plist 以 "bplist" 开头
+        uint8_t bytes[8];
+        [headerData getBytes:bytes length:MIN(8, headerData.length)];
+        
+        return (bytes[0] == 'b' && bytes[1] == 'p' && bytes[2] == 'l' && 
+                bytes[3] == 'i' && bytes[4] == 's' && bytes[5] == 't');
+    } @catch (NSException *exception) {
+        TVLog(@"isBinaryPlist: Exception reading file %@: %@", filePath, exception.reason);
         return NO;
     }
-    
-    NSData *headerData = [fh readDataOfLength:8];
-    [fh closeFile];
-    
-    if (headerData.length < 6) {
-        return NO;
-    }
-    
-    // 二进制 plist 以 "bplist" 开头
-    uint8_t bytes[8];
-    [headerData getBytes:bytes length:8];
-    
-    return (bytes[0] == 'b' && bytes[1] == 'p' && bytes[2] == 'l' && 
-            bytes[3] == 'i' && bytes[4] == 's' && bytes[5] == 't');
 }
 
 // 读取 plist 文件
