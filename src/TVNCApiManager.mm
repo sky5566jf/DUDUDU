@@ -1971,6 +1971,28 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 #pragma mark - Plist 操作
 
+// 检测 plist 文件格式（XML 或二进制）
+- (BOOL)isBinaryPlist:(NSString *)filePath {
+    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:filePath];
+    if (!fh) {
+        return NO;
+    }
+    
+    NSData *headerData = [fh readDataOfLength:8];
+    [fh closeFile];
+    
+    if (headerData.length < 6) {
+        return NO;
+    }
+    
+    // 二进制 plist 以 "bplist" 开头
+    uint8_t bytes[8];
+    [headerData getBytes:bytes length:8];
+    
+    return (bytes[0] == 'b' && bytes[1] == 'p' && bytes[2] == 'l' && 
+            bytes[3] == 'i' && bytes[4] == 's' && bytes[5] == 't');
+}
+
 // 读取 plist 文件
 - (nullable NSDictionary *)readPlistFile:(NSString *)filePath {
     if (!filePath || filePath.length == 0) {
@@ -2008,7 +2030,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     return nil;
 }
 
-// 写入 plist 文件
+// 写入 plist 文件（保持原格式）
 - (BOOL)writePlistData:(id)data toFilePath:(NSString *)filePath error:(NSError **)error {
     if (!filePath || filePath.length == 0) {
         TVLog(@"Plist write: Invalid file path");
@@ -2030,9 +2052,15 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         return NO;
     }
     
+    // 检测原文件格式，保持一致
+    BOOL isBinary = [self isBinaryPlist:filePath];
+    NSPropertyListFormat format = isBinary ? NSPropertyListBinaryFormat_v1_0 : NSPropertyListXMLFormat_v1_0;
+    
+    TVLog(@"Plist write: Detected %@ format, writing in same format", isBinary ? @"binary" : @"XML");
+    
     NSError *serializeError = nil;
     NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:data
-                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                   format:format
                                                                   options:0
                                                                     error:&serializeError];
     
@@ -2054,7 +2082,7 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     BOOL success = [plistData writeToFile:filePath atomically:YES];
     
     if (success) {
-        TVLog(@"Plist write: Successfully wrote to %@", filePath);
+        TVLog(@"Plist write: Successfully wrote to %@ (format: %@)", filePath, isBinary ? @"binary" : @"XML");
     } else {
         TVLog(@"Plist write: Failed to write to %@", filePath);
         if (error) {
