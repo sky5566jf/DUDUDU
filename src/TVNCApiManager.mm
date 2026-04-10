@@ -1785,46 +1785,18 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     }
 }
 
-// 解锁屏幕（唤醒 + 滑动解锁）
+// 解锁屏幕（跟注销后解锁一样的方式 - 杀死 SpringBoard 等进程）
 - (BOOL)unlockDeviceScreen {
     @try {
-        TVLog(@"Unlocking device screen...");
+        TVLog(@"Unlocking device screen (respring method)...");
 
-        // 在主线程执行 HID 事件
-        if (![NSThread isMainThread]) {
-            __block BOOL result = NO;
-            dispatch_sync(dispatch_get_main_queue(), ^{
-                result = [self unlockDeviceScreen];
-            });
-            return result;
-        }
+        // 跟 respringDevice 一样的方式：杀死核心系统进程
+        // 这样会强制重新加载 SpringBoard，从而解锁屏幕
+        [self killall:@"SpringBoard"];   // 主屏幕进程
+        [self killall:@"FrontBoard"];    // 前台应用管理进程
+        [self killall:@"BackBoard"];     // 后台管理进程
 
-        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-        CGSize screenSize = [UIScreen mainScreen].bounds.size;
-
-        // Step 1: 唤醒屏幕（AC Unlock）
-        [generator hardwareUnlock];
-        TVLog(@"Screen wake event sent");
-
-        // Step 2: 等待锁屏界面出现
-        struct timespec waitDelay = {0, (long)(0.8 * 1e9)};
-        nanosleep(&waitDelay, 0);
-
-        // Step 3: 滑动解锁 - 从底部向上滑动
-        // iOS 锁屏界面通常有 "滑动解锁" 或 "输入密码" 提示
-        CGPoint swipeStart = CGPointMake(screenSize.width / 2, screenSize.height * 0.85);
-        CGPoint swipeEnd = CGPointMake(screenSize.width / 2, screenSize.height * 0.25);
-        [generator dragLinearWithStartPoint:swipeStart endPoint:swipeEnd duration:0.5];
-        TVLog(@"Swipe up unlock sent");
-
-        // Step 4: 等待滑动完成
-        struct timespec slideDelay = {1, 0};
-        nanosleep(&slideDelay, 0);
-
-        // Step 5: 如果还在锁屏（可能是密码解锁界面），尝试按 Home
-        [generator menuPress];
-        TVLog(@"Home press sent");
-
+        TVLog(@"Respring unlock sent");
         return YES;
     } @catch (NSException *exception) {
         TVLog(@"Unlock screen failed: %@", exception.reason);
