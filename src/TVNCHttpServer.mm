@@ -225,8 +225,6 @@
         return [self handleClipboard:query body:body];
     } else if ([path isEqualToString:@"/api/clipboard_text"]) {
         return [self handleClipboardText:query body:body];
-    } else if ([path isEqualToString:@"/api/plist"]) {
-        return [self handlePlist:query body:body];
     } else if ([path isEqualToString:@"/api/input"]) {
         return [self handleInput:query body:body];
     } else if ([path isEqualToString:@"/api/key"]) {
@@ -508,100 +506,6 @@
     response.statusCode = success ? 200 : 500;
     response.contentType = @"application/json";
     NSDictionary *result = @{@"success": @(success), @"text": text};
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/plist
-// Body: {"path": "/path/to/file.plist", "set": {"key": "value"}, "match": "keyPattern", "matchValue": "value"}
-- (TVNCHttpResponse *)handlePlist:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    // 解析 JSON body
-    NSError *jsonError = nil;
-    NSDictionary *requestData = [NSJSONSerialization JSONObjectWithData:body options:0 error:&jsonError];
-    
-    if (!requestData || ![requestData isKindOfClass:[NSDictionary class]]) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Invalid JSON body"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    // 获取参数
-    NSString *filePath = requestData[@"path"];
-    NSDictionary *setDict = requestData[@"set"];
-    NSString *matchKey = requestData[@"match"];
-    NSString *matchValue = requestData[@"matchValue"];
-    
-    if (!filePath || filePath.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing 'path' parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    // 读取现有 plist（用于返回完整数据）
-    NSDictionary *existingData = [[TVNCApiManager sharedManager] readPlistFile:filePath];
-    
-    // 执行修改
-    NSError *modifyError = nil;
-    NSDictionary *modifiedData = [[TVNCApiManager sharedManager] modifyPlistFile:filePath
-                                                                      setDict:setDict
-                                                                     matchKey:matchKey
-                                                                   matchValue:matchValue
-                                                                        error:&modifyError];
-    
-    // 构建响应
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
-    if (modifiedData) {
-        result[@"success"] = @YES;
-        result[@"path"] = filePath;
-        
-        // 收集修改的键
-        NSMutableArray *modifiedKeys = [NSMutableArray array];
-        
-        // 精确设置的键
-        if (setDict) {
-            [modifiedKeys addObjectsFromArray:setDict.allKeys];
-        }
-        
-        // 匹配设置的键
-        if (matchKey && matchKey.length > 0) {
-            NSString *valueToSet = matchValue ?: @"";
-            for (NSString *key in modifiedData) {
-                if ([key rangeOfString:matchKey].location != NSNotFound) {
-                    // 检查是否是这次修改的（排除原有的）
-                    if (existingData && !existingData[key]) {
-                        [modifiedKeys addObject:key];
-                    } else if (existingData && existingData[key] && ![existingData[key] isEqual:valueToSet]) {
-                        [modifiedKeys addObject:key];
-                    }
-                }
-            }
-        }
-        
-        result[@"modified"] = modifiedKeys;
-        result[@"data"] = modifiedData;
-        
-        // 提取纯数组（如果有）
-        if (modifiedData[@"_array"]) {
-            result[@"array"] = modifiedData[@"_array"];
-        }
-    } else {
-        result[@"success"] = @NO;
-        result[@"error"] = modifyError.localizedDescription ?: @"Failed to modify plist";
-        if (existingData) {
-            result[@"data"] = existingData;  // 返回原始数据
-        }
-    }
-    
-    response.statusCode = [result[@"success"] boolValue] ? 200 : 500;
-    response.contentType = @"application/json";
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     
     return response;
