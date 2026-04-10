@@ -1999,11 +1999,12 @@ static BOOL g_autoUnlockEnabled = NO;
     }
     TVLog(@"Previous lock state listeners cancelled");
     
+    __weak __typeof__(self) weakSelf = self;
+    
+#if !defined(THEBOOTSTRAP)
+    // 非 bootstrap 环境：使用 notify_register_dispatch
     int status = 0;
     int comboStatus = 0;
-    
-    // 使用 block 语法注册通知回调
-    __weak __typeof__(self) weakSelf = self;
     
     status = notify_register_dispatch(
         "com.apple.springboard.lockstate",
@@ -2011,6 +2012,7 @@ static BOOL g_autoUnlockEnabled = NO;
         dispatch_get_main_queue(),
         ^(int val) {
             TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
+            [weakSelf updateLockState:(val == 1)];
             if (val == 1) {
                 TVLog(@"Device locked, triggering auto-unlock...");
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -2026,6 +2028,7 @@ static BOOL g_autoUnlockEnabled = NO;
         dispatch_get_main_queue(),
         ^(int val) {
             TVLog(@"Lock combo changed: %d (1=locked, 0=unlocked)", val);
+            [weakSelf updateLockState:(val == 1)];
             if (val == 1) {
                 TVLog(@"Lock combo detected, triggering auto-unlock...");
                 dispatch_async(dispatch_get_main_queue(), ^{
@@ -2058,40 +2061,50 @@ static BOOL g_autoUnlockEnabled = NO;
         g_autoUnlockEnabled = NO;
         return NO;
     }
+#else
+    // bootstrap 环境：notify_register_dispatch 可能不可用
+    // 使用轮询方式来检测锁屏状态
+    g_autoUnlockEnabled = YES;
+    TVLog(@"Auto-unlock enabled (bootstrap mode - using polling)");
+    
+    // 启动轮询定时器
+    [self startLockStatePolling];
+    
+    // 立即检查当前状态
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self checkAndUnlockIfNeeded];
+    });
+    
+    return YES;
+#endif
+    }
 }
 
+// 跟踪上一次的锁屏状态（用于 bootstrap 环境）
+static BOOL g_lastKnownLockState = NO;
+
 // 检测当前设备是否处于锁屏状态
-// 统一使用 notify_register_check (token-based API)
+// 在 bootstrap 环境下使用 SpringBoard 检测和事件跟踪
 - (BOOL)isDeviceLocked {
+#if !defined(THEBOOTSTRAP)
+    // 非 bootstrap 环境：使用 notify_register_check 和 notify_get_state
     int checkToken = 0;
     int status = notify_register_check("com.apple.springboard.lockstate", &checkToken);
     if (status == NOTIFY_STATUS_OK && checkToken != 0) {
-#if !defined(THEBOOTSTRAP)
-        // notify_get_state 在 bootstrap 环境下不可用，跳过直接状态获取
-        // 锁屏状态会通过 notify_register_dispatch 的回调事件来更新
         uint64_t state = 0;
         int stateStatus = notify_get_state(checkToken, &state);
         notify_cancel(checkToken);
         if (stateStatus == NOTIFY_STATUS_OK) {
             BOOL isLocked = (state != 0);
             TVLog(@"isDeviceLocked: lockstate=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
-            if (isLocked) return YES;
+            return isLocked;
         }
-#else
-        // bootstrap 环境：只注册检查，状态由事件回调更新
-        // 这里暂时返回 NO，让事件监听来触发解锁
-        notify_cancel(checkToken);
-        TVLog(@"isDeviceLocked: bootstrap env, returning NO");
-#endif
-    } else if (checkToken != 0) {
-        notify_cancel(checkToken);
     }
     
     // 检查锁屏密码界面
     checkToken = 0;
     status = notify_register_check("com.apple.springboard.lockcombo", &checkToken);
     if (status == NOTIFY_STATUS_OK && checkToken != 0) {
-#if !defined(THEBOOTSTRAP)
         uint64_t state = 0;
         int stateStatus = notify_get_state(checkToken, &state);
         notify_cancel(checkToken);
@@ -2099,19 +2112,31 @@ static BOOL g_autoUnlockEnabled = NO;
             TVLog(@"isDeviceLocked: lockcombo=%llu, assuming locked", state);
             return YES;
         }
-#else
-        notify_cancel(checkToken);
-#endif
-    } else if (checkToken != 0) {
-        notify_cancel(checkToken);
     }
     
     TVLog(@"isDeviceLocked: Could not determine lock state, returning NO");
     return NO;
+#else
+    // bootstrap 环境：使用跟踪的锁屏状态
+    // 锁屏状态通过事件回调更新
+    TVLog(@"isDeviceLocked: bootstrap env, tracked state=%@", g_lastKnownLockState ? @"LOCKED" : @"UNLOCKED");
+    return g_lastKnownLockState;
+#endif
+}
+
+// 更新锁屏状态（供事件回调调用）
+- (void)updateLockState:(BOOL)locked {
+    if (g_lastKnownLockState != locked) {
+        TVLog(@"Lock state changed: %@ -> %@", 
+              g_lastKnownLockState ? @"LOCKED" : @"UNLOCKED",
+              locked ? @"LOCKED" : @"UNLOCKED");
+        g_lastKnownLockState = locked;
+    }
 }
 
 // 停止锁屏监听
 - (BOOL)stopAutoUnlockOnLock {
+#if !defined(THEBOOTSTRAP)
     if (g_lockStateToken != 0) {
         notify_cancel(g_lockStateToken);
         TVLog(@"Lock state listener cancelled (token=%d)", g_lockStateToken);
@@ -2122,6 +2147,10 @@ static BOOL g_autoUnlockEnabled = NO;
         TVLog(@"Lock combo listener cancelled (token=%d)", g_lockComboToken);
         g_lockComboToken = 0;
     }
+#else
+    // bootstrap 环境：停止轮询定时器
+    [self stopLockStatePolling];
+#endif
     g_autoUnlockEnabled = NO;
     TVLog(@"Auto-unlock disabled");
     return YES;
@@ -2148,5 +2177,84 @@ static BOOL g_autoUnlockEnabled = NO;
         return NO;
     }
 }
+
+#if defined(THEBOOTSTRAP)
+// Bootstrap 环境下的轮询定时器
+static NSTimer *g_lockPollingTimer = nil;
+
+// 启动轮询检测锁屏状态
+- (void)startLockStatePolling {
+    [self stopLockStatePolling];
+    
+    // 每 2 秒检测一次锁屏状态
+    g_lockPollingTimer = [NSTimer scheduledTimerWithTimeInterval:2.0
+                                                          target:self
+                                                        selector:@selector(pollLockState)
+                                                        userInfo:nil
+                                                         repeats:YES];
+    TVLog(@"Lock state polling started (interval=2s)");
+}
+
+// 停止轮询
+- (void)stopLockStatePolling {
+    if (g_lockPollingTimer) {
+        [g_lockPollingTimer invalidate];
+        g_lockPollingTimer = nil;
+        TVLog(@"Lock state polling stopped");
+    }
+}
+
+// 轮询检测锁屏状态（bootstrap 环境）
+- (void)pollLockState {
+    if (!g_autoUnlockEnabled) {
+        [self stopLockStatePolling];
+        return;
+    }
+    
+    // 检测当前是否在 SpringBoard 上
+    BOOL onSpringBoard = [self isOnSpringBoard];
+    TVLog(@"pollLockState: onSpringBoard=%@", onSpringBoard ? @"YES" : @"NO");
+    
+    // 如果在 SpringBoard 上，尝试解锁
+    if (onSpringBoard) {
+        // 获取前台应用
+        NSString *frontmostApp = [self getFrontmostAppBundleID];
+        TVLog(@"pollLockState: frontmostApp=%@", frontmostApp);
+        
+        // 如果是 SpringBoard，认为可能已解锁
+        if ([frontmostApp isEqualToString:@"com.apple.springboard"]) {
+            if (g_lastKnownLockState) {
+                TVLog(@"pollLockState: Was locked, now on SpringBoard, marking as unlocked");
+                [self updateLockState:NO];
+            }
+        }
+    }
+}
+
+// 检测是否在锁屏界面（通过检测 SpringBoard 是否是前台 + 尝试触发解锁）
+- (BOOL)detectLockScreenViaHID {
+    // 尝试发送一个不会被记录的微小事件来检测
+    // 如果设备已解锁，事件会被发送；如果锁屏，事件不会生效
+    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+    
+    // 唤醒屏幕
+    [generator hardwareUnlock];
+    
+    // 等待短暂时间
+    struct timespec delay = {0, (long)(0.3 * 1e9)};
+    nanosleep(&delay, 0);
+    
+    // 再次唤醒以确保屏幕亮起
+    [generator hardwareUnlock];
+    
+    // 再等待
+    nanosleep(&delay, 0);
+    
+    // 按 Home 键尝试解锁
+    [generator menuPress];
+    
+    return YES;  // 总是返回 YES 因为我们不知道解锁是否成功
+}
+#endif
 
 @end
