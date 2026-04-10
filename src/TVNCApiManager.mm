@@ -1999,10 +1999,9 @@ static BOOL g_autoUnlockEnabled = NO;
     }
     TVLog(@"Previous lock state listeners cancelled");
     
-    __weak __typeof__(self) weakSelf = self;
-    
 #if !defined(THEBOOTSTRAP)
     // 非 bootstrap 环境：使用 notify_register_dispatch
+    __weak __typeof__(self) weakSelf = self;
     int status = 0;
     int comboStatus = 0;
     
