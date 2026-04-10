@@ -1998,7 +1998,12 @@ static void lockComboCallback(int val) {
 }
 
 // 判断是否为 roothide 环境（使用 token-based notify API）
-// IS_ROOTHIDE is defined in Makefile based on THEOS_PACKAGE_SCHEME
+// USE_ROOTHIDE_NOTIFY is defined in Makefile
+#if USE_ROOTHIDE_NOTIFY
+#define USE_BLOCK_NOTIFY 1
+#else
+#define USE_BLOCK_NOTIFY 0
+#endif
 
 // 启动锁屏监听 - 检测到锁屏后自动解锁
 - (BOOL)startAutoUnlockOnLock {
@@ -2021,8 +2026,8 @@ static void lockComboCallback(int val) {
     int status = 0;
     int comboStatus = 0;
     
-    if (IS_ROOTHIDE) {
-        // roothide 环境：使用 block 语法
+    if (USE_ROOTHIDE_NOTIFY) {
+        // roothide/rootless 环境（使用 roothide SDK）：使用 block 语法
         __weak typeof(self) weakSelf = self;
         
         status = notify_register_dispatch(
@@ -2098,8 +2103,8 @@ static void lockComboCallback(int val) {
 
 // 检测当前设备是否处于锁屏状态
 - (BOOL)isDeviceLocked {
-    if (IS_ROOTHIDE) {
-        // roothide 环境：使用 notify_register_check
+    if (USE_ROOTHIDE_NOTIFY) {
+        // roothide/rootless 环境（使用 roothide SDK）：使用 notify_register_check
         int checkToken = 0;
         int status = notify_register_check("com.apple.springboard.lockstate", &checkToken);
         if (status == NOTIFY_STATUS_OK && checkToken != 0) {

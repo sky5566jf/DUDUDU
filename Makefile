@@ -46,11 +46,20 @@ else
 trollvncserver_CFLAGS += -DTHEOS_PACKAGE_SCHEME=\"$(THEOS_PACKAGE_SCHEME)\"
 endif
 
-# 设置 IS_ROOTHIDE 宏用于检测 roothide 环境
-ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
-trollvncserver_CFLAGS += -DIS_ROOTHIDE=1
+# 设置 USE_ROOTHIDE_NOTIFY 宏 - rootless 和 roothide 都使用 roothide SDK 的 token-based API
+# 只有 legacy (default) scheme 如果有独立 theos 才使用字符串 API
+# 由于 GitHub Actions 只有 theos-roothide，所以统一使用 token-based API
+ifeq ($(THEOS_PACKAGE_SCHEME),)
+# legacy scheme - 检查是否使用 roothide SDK
+ifneq ($(THEOS),)
+# 使用 roothide SDK
+trollvncserver_CFLAGS += -DUSE_ROOTHIDE_NOTIFY=1
 else
-trollvncserver_CFLAGS += -DIS_ROOTHIDE=0
+trollvncserver_CFLAGS += -DUSE_ROOTHIDE_NOTIFY=1
+endif
+else
+# rootless 或 roothide - 都使用 roothide SDK
+trollvncserver_CFLAGS += -DUSE_ROOTHIDE_NOTIFY=1
 endif
 
 ifeq ($(THEBOOTSTRAP),1)
