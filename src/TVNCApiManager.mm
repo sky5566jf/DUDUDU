@@ -2076,7 +2076,6 @@ static BOOL g_autoUnlockEnabled = NO;
     
     return YES;
 #endif
-    }
 }
 
 // 跟踪上一次的锁屏状态（用于 bootstrap 环境）
