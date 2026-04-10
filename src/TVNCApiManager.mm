@@ -1976,15 +1976,8 @@ static int g_lockStateToken = 0;
 static int g_lockComboToken = 0;  // 用于检测锁屏密码界面
 static BOOL g_autoUnlockEnabled = NO;
 
-// 锁屏状态监听相关变量
-static int g_lockStateToken = 0;
-static int g_lockComboToken = 0;
-static BOOL g_autoUnlockEnabled = NO;
-
 // 启动锁屏监听 - 检测到锁屏后自动解锁
 // USE_ROOTHIDE_NOTIFY is defined in Makefile (0 or 1)
-
-// 启动锁屏监听 - 检测到锁屏后自动解锁
 - (BOOL)startAutoUnlockOnLock {
     if (g_autoUnlockEnabled && g_lockStateToken != 0) {
         TVLog(@"Auto-unlock already enabled (token=%d)", g_lockStateToken);
@@ -2069,6 +2062,9 @@ static BOOL g_autoUnlockEnabled = NO;
     int checkToken = 0;
     int status = notify_register_check("com.apple.springboard.lockstate", &checkToken);
     if (status == NOTIFY_STATUS_OK && checkToken != 0) {
+#if !defined(THEBOOTSTRAP)
+        // notify_get_state 在 bootstrap 环境下不可用，跳过直接状态获取
+        // 锁屏状态会通过 notify_register_dispatch 的回调事件来更新
         uint64_t state = 0;
         int stateStatus = notify_get_state(checkToken, &state);
         notify_cancel(checkToken);
@@ -2077,12 +2073,21 @@ static BOOL g_autoUnlockEnabled = NO;
             TVLog(@"isDeviceLocked: lockstate=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
             if (isLocked) return YES;
         }
+#else
+        // bootstrap 环境：只注册检查，状态由事件回调更新
+        // 这里暂时返回 NO，让事件监听来触发解锁
+        notify_cancel(checkToken);
+        TVLog(@"isDeviceLocked: bootstrap env, returning NO");
+#endif
+    } else if (checkToken != 0) {
+        notify_cancel(checkToken);
     }
     
     // 检查锁屏密码界面
     checkToken = 0;
     status = notify_register_check("com.apple.springboard.lockcombo", &checkToken);
     if (status == NOTIFY_STATUS_OK && checkToken != 0) {
+#if !defined(THEBOOTSTRAP)
         uint64_t state = 0;
         int stateStatus = notify_get_state(checkToken, &state);
         notify_cancel(checkToken);
@@ -2090,6 +2095,11 @@ static BOOL g_autoUnlockEnabled = NO;
             TVLog(@"isDeviceLocked: lockcombo=%llu, assuming locked", state);
             return YES;
         }
+#else
+        notify_cancel(checkToken);
+#endif
+    } else if (checkToken != 0) {
+        notify_cancel(checkToken);
     }
     
     TVLog(@"isDeviceLocked: Could not determine lock state, returning NO");
