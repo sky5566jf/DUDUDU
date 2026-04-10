@@ -1797,9 +1797,19 @@ extern Class SBLockScreenManager;
         // 尝试使用 SBLockScreenManager 私有 API 解锁
         Class lockScreenManagerClass = NSClassFromString(@"SBLockScreenManager");
         if (lockScreenManagerClass) {
+            SEL unlockSelector = NSSelectorFromString(@"unlockUIFromSource:withOptions:");
             id manager = [lockScreenManagerClass sharedInstance];
-            if (manager && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
-                [manager unlockUIFromSource:0 withOptions:nil];
+            if (manager && [manager respondsToSelector:unlockSelector]) {
+                // 使用 performSelector 调用私有方法
+                NSMethodSignature *signature = [manager methodSignatureForSelector:unlockSelector];
+                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+                [invocation setSelector:unlockSelector];
+                [invocation setTarget:manager];
+                // 设置参数: source=0, options=nil
+                int source = 0;
+                [invocation setArgument:&source atIndex:2];
+                [invocation setArgument:&source atIndex:3];  // nil = 0
+                [invocation invoke];
                 TVLog(@"SBLockScreenManager unlockUIFromSource called");
                 return YES;
             }
