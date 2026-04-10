@@ -1785,18 +1785,17 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     }
 }
 
-// 解锁屏幕（跟注销后解锁一样的方式 - 杀死 SpringBoard 等进程）
+// 解锁屏幕（唤醒屏幕）
 - (BOOL)unlockDeviceScreen {
     @try {
-        TVLog(@"Unlocking device screen (respring method)...");
+        TVLog(@"Unlocking device screen...");
 
-        // 跟 respringDevice 一样的方式：杀死核心系统进程
-        // 这样会强制重新加载 SpringBoard，从而解锁屏幕
-        [self killall:@"SpringBoard"];   // 主屏幕进程
-        [self killall:@"FrontBoard"];    // 前台应用管理进程
-        [self killall:@"BackBoard"];     // 后台管理进程
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
 
-        TVLog(@"Respring unlock sent");
+        // 唤醒屏幕（AC Unlock）
+        [generator hardwareUnlock];
+        TVLog(@"Screen wake event sent");
+
         return YES;
     } @catch (NSException *exception) {
         TVLog(@"Unlock screen failed: %@", exception.reason);
