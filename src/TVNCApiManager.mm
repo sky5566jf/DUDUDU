@@ -1976,34 +1976,13 @@ static int g_lockStateToken = 0;
 static int g_lockComboToken = 0;  // 用于检测锁屏密码界面
 static BOOL g_autoUnlockEnabled = NO;
 
-// 锁屏状态监听回调函数（非 roothide 环境使用）
-static void lockStateCallback(int val) {
-    TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
-    if (val == 1) {  // 设备被锁定
-        TVLog(@"Device locked, triggering auto-unlock...");
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[TVNCApiManager sharedManager] unlockDeviceScreen];
-        });
-    }
-}
+// 锁屏状态监听相关变量
+static int g_lockStateToken = 0;
+static int g_lockComboToken = 0;
+static BOOL g_autoUnlockEnabled = NO;
 
-static void lockComboCallback(int val) {
-    TVLog(@"Lock combo changed: %d (1=locked, 0=unlocked)", val);
-    if (val == 1) {  // 锁屏密码界面显示
-        TVLog(@"Lock combo detected, triggering auto-unlock...");
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[TVNCApiManager sharedManager] unlockDeviceScreen];
-        });
-    }
-}
-
-// 判断是否为 roothide 环境（使用 token-based notify API）
-// USE_ROOTHIDE_NOTIFY is defined in Makefile
-#if USE_ROOTHIDE_NOTIFY
-#define USE_BLOCK_NOTIFY 1
-#else
-#define USE_BLOCK_NOTIFY 0
-#endif
+// 启动锁屏监听 - 检测到锁屏后自动解锁
+// USE_ROOTHIDE_NOTIFY is defined in Makefile (0 or 1)
 
 // 启动锁屏监听 - 检测到锁屏后自动解锁
 - (BOOL)startAutoUnlockOnLock {
@@ -2026,55 +2005,38 @@ static void lockComboCallback(int val) {
     int status = 0;
     int comboStatus = 0;
     
-    if (USE_ROOTHIDE_NOTIFY) {
-        // roothide/rootless 环境（使用 roothide SDK）：使用 block 语法
-        __weak typeof(self) weakSelf = self;
-        
-        status = notify_register_dispatch(
-            "com.apple.springboard.lockstate",
-            &g_lockStateToken,
-            dispatch_get_main_queue(),
-            ^(int val) {
-                TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
-                if (val == 1) {
-                    TVLog(@"Device locked, triggering auto-unlock...");
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [weakSelf unlockDeviceScreen];
-                    });
-                }
+    // 使用 block 语法注册通知回调
+    __weak typeof(self) weakSelf = self;
+    
+    status = notify_register_dispatch(
+        "com.apple.springboard.lockstate",
+        &g_lockStateToken,
+        dispatch_get_main_queue(),
+        ^(int val) {
+            TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
+            if (val == 1) {
+                TVLog(@"Device locked, triggering auto-unlock...");
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf unlockDeviceScreen];
+                });
             }
-        );
-        
-        comboStatus = notify_register_dispatch(
-            "com.apple.springboard.lockcombo",
-            &g_lockComboToken,
-            dispatch_get_main_queue(),
-            ^(int val) {
-                TVLog(@"Lock combo changed: %d (1=locked, 0=unlocked)", val);
-                if (val == 1) {
-                    TVLog(@"Lock combo detected, triggering auto-unlock...");
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        [weakSelf unlockDeviceScreen];
-                    });
-                }
+        }
+    );
+    
+    comboStatus = notify_register_dispatch(
+        "com.apple.springboard.lockcombo",
+        &g_lockComboToken,
+        dispatch_get_main_queue(),
+        ^(int val) {
+            TVLog(@"Lock combo changed: %d (1=locked, 0=unlocked)", val);
+            if (val == 1) {
+                TVLog(@"Lock combo detected, triggering auto-unlock...");
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf unlockDeviceScreen];
+                });
             }
-        );
-    } else {
-        // 非 roothide 环境：使用 C 函数指针
-        status = notify_register_dispatch(
-            "com.apple.springboard.lockstate",
-            &g_lockStateToken,
-            dispatch_get_main_queue(),
-            lockStateCallback
-        );
-        
-        comboStatus = notify_register_dispatch(
-            "com.apple.springboard.lockcombo",
-            &g_lockComboToken,
-            dispatch_get_main_queue(),
-            lockComboCallback
-        );
-    }
+        }
+    );
     
     if (status == NOTIFY_STATUS_OK || comboStatus == NOTIFY_STATUS_OK) {
         g_autoUnlockEnabled = YES;
@@ -2102,49 +2064,30 @@ static void lockComboCallback(int val) {
 }
 
 // 检测当前设备是否处于锁屏状态
+// 统一使用 notify_register_check (token-based API)
 - (BOOL)isDeviceLocked {
-    if (USE_ROOTHIDE_NOTIFY) {
-        // roothide/rootless 环境（使用 roothide SDK）：使用 notify_register_check
-        int checkToken = 0;
-        int status = notify_register_check("com.apple.springboard.lockstate", &checkToken);
-        if (status == NOTIFY_STATUS_OK && checkToken != 0) {
-            uint64_t state = 0;
-            int stateStatus = notify_get_state(checkToken, &state);
-            notify_cancel(checkToken);
-            if (stateStatus == NOTIFY_STATUS_OK) {
-                BOOL isLocked = (state != 0);
-                TVLog(@"isDeviceLocked: lockstate=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
-                if (isLocked) return YES;
-            }
-        }
-        
-        // 检查锁屏密码界面
-        checkToken = 0;
-        status = notify_register_check("com.apple.springboard.lockcombo", &checkToken);
-        if (status == NOTIFY_STATUS_OK && checkToken != 0) {
-            uint64_t state = 0;
-            int stateStatus = notify_get_state(checkToken, &state);
-            notify_cancel(checkToken);
-            if (stateStatus == NOTIFY_STATUS_OK && state != 0) {
-                TVLog(@"isDeviceLocked: lockcombo=%llu, assuming locked", state);
-                return YES;
-            }
-        }
-    } else {
-        // 非 roothide 环境：使用 notify_get_state 直接查询
+    int checkToken = 0;
+    int status = notify_register_check("com.apple.springboard.lockstate", &checkToken);
+    if (status == NOTIFY_STATUS_OK && checkToken != 0) {
         uint64_t state = 0;
-        int result = notify_get_state("com.apple.springboard.lockstate", &state);
-        if (result == NOTIFY_STATUS_OK) {
+        int stateStatus = notify_get_state(checkToken, &state);
+        notify_cancel(checkToken);
+        if (stateStatus == NOTIFY_STATUS_OK) {
             BOOL isLocked = (state != 0);
-            TVLog(@"isDeviceLocked: state=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
+            TVLog(@"isDeviceLocked: lockstate=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
             if (isLocked) return YES;
         }
-        
-        // 备用方法：检查锁屏密码界面
-        uint64_t comboState = 0;
-        result = notify_get_state("com.apple.springboard.lockcombo", &comboState);
-        if (result == NOTIFY_STATUS_OK && comboState != 0) {
-            TVLog(@"isDeviceLocked: lockcombo state=%llu, assuming locked", comboState);
+    }
+    
+    // 检查锁屏密码界面
+    checkToken = 0;
+    status = notify_register_check("com.apple.springboard.lockcombo", &checkToken);
+    if (status == NOTIFY_STATUS_OK && checkToken != 0) {
+        uint64_t state = 0;
+        int stateStatus = notify_get_state(checkToken, &state);
+        notify_cancel(checkToken);
+        if (stateStatus == NOTIFY_STATUS_OK && state != 0) {
+            TVLog(@"isDeviceLocked: lockcombo=%llu, assuming locked", state);
             return YES;
         }
     }
