@@ -267,6 +267,14 @@
         return [self handleTaskManager];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
+    } else if ([path isEqualToString:@"/api/autounlock/enable"]) {
+        return [self handleAutoUnlockEnable];
+    } else if ([path isEqualToString:@"/api/autounlock/disable"]) {
+        return [self handleAutoUnlockDisable];
+    } else if ([path isEqualToString:@"/api/autounlock/status"]) {
+        return [self handleAutoUnlockStatus];
+    } else if ([path isEqualToString:@"/api/autounlock/check"]) {
+        return [self handleAutoUnlockCheck];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/"]) {
@@ -1478,6 +1486,95 @@
     
     return response;
 }
+
+#pragma mark - Auto Unlock Handlers
+
+// POST /api/autounlock/enable - 启用自动解锁
+- (TVNCHttpResponse *)handleAutoUnlockEnable {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Auto-unlock enable request received");
+    
+    BOOL success = [[TVNCApiManager sharedManager] startAutoUnlockOnLock];
+    
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @(success),
+        @"action": @"enable",
+        @"message": success ? @"Auto-unlock enabled" : @"Failed to enable auto-unlock"
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/autounlock/disable - 禁用自动解锁
+- (TVNCHttpResponse *)handleAutoUnlockDisable {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Auto-unlock disable request received");
+    
+    BOOL success = [[TVNCApiManager sharedManager] stopAutoUnlockOnLock];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @(success),
+        @"action": @"disable",
+        @"message": @"Auto-unlock disabled"
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/autounlock/status - 获取自动解锁状态
+- (TVNCHttpResponse *)handleAutoUnlockStatus {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Auto-unlock status request received");
+    
+    BOOL enabled = [[TVNCApiManager sharedManager] isAutoUnlockEnabled];
+    BOOL isLocked = [[TVNCApiManager sharedManager] isDeviceLocked];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @YES,
+        @"action": @"status",
+        @"autoUnlockEnabled": @(enabled),
+        @"deviceLocked": @(isLocked)
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/autounlock/check - 立即检测并解锁
+- (TVNCHttpResponse *)handleAutoUnlockCheck {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    TVLog(@"HTTP Server: Auto-unlock check request received");
+    
+    BOOL wasLocked = [[TVNCApiManager sharedManager] isDeviceLocked];
+    BOOL unlocked = [[TVNCApiManager sharedManager] checkAndUnlockIfNeeded];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @YES,
+        @"action": @"check",
+        @"wasLocked": @(wasLocked),
+        @"unlocked": @(unlocked),
+        @"message": wasLocked ? (unlocked ? @"Device was locked, unlocked" : @"Device is locked but unlock failed") : @"Device was not locked"
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+#pragma mark - AssistiveTouch Handlers
 
 // GET /api/assistivetouch
 // POST /api/assistivetouch?action=enable
