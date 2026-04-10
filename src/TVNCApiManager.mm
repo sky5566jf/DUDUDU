@@ -69,6 +69,10 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 // SpringBoardServices 函数声明
 extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
+// SBLockScreenManager 私有 API 声明 (用于自动解锁)
+extern Class _SBLockScreenManager(void);
+extern Class SBLockScreenManager;
+
 #ifdef __cplusplus
 }
 #endif
@@ -1785,16 +1789,26 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     }
 }
 
-// 解锁屏幕（唤醒屏幕）
+// 解锁屏幕（使用 SBLockScreenManager 私有 API）
 - (BOOL)unlockDeviceScreen {
     @try {
         TVLog(@"Unlocking device screen...");
 
-        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        // 尝试使用 SBLockScreenManager 私有 API 解锁
+        Class lockScreenManagerClass = NSClassFromString(@"SBLockScreenManager");
+        if (lockScreenManagerClass) {
+            id manager = [lockScreenManagerClass sharedInstance];
+            if (manager && [manager respondsToSelector:@selector(unlockUIFromSource:withOptions:)]) {
+                [manager unlockUIFromSource:0 withOptions:nil];
+                TVLog(@"SBLockScreenManager unlockUIFromSource called");
+                return YES;
+            }
+        }
 
-        // 唤醒屏幕（AC Unlock）
+        // 如果 SBLockScreenManager 不可用，尝试使用 HID 事件唤醒
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
         [generator hardwareUnlock];
-        TVLog(@"Screen wake event sent");
+        TVLog(@"Fallback: hardwareUnlock called");
 
         return YES;
     } @catch (NSException *exception) {
