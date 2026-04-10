@@ -46,6 +46,13 @@ else
 trollvncserver_CFLAGS += -DTHEOS_PACKAGE_SCHEME=\"$(THEOS_PACKAGE_SCHEME)\"
 endif
 
+# 设置 IS_ROOTHIDE 宏用于检测 roothide 环境
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+trollvncserver_CFLAGS += -DIS_ROOTHIDE=1
+else
+trollvncserver_CFLAGS += -DIS_ROOTHIDE=0
+endif
+
 ifeq ($(THEBOOTSTRAP),1)
 trollvncserver_CFLAGS += -DTHEBOOTSTRAP=1
 endif
