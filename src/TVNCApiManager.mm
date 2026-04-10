@@ -1800,26 +1800,30 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
         }
 
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        CGSize screenSize = [UIScreen mainScreen].bounds.size;
 
         // Step 1: 唤醒屏幕（AC Unlock）
         [generator hardwareUnlock];
         TVLog(@"Screen wake event sent");
 
         // Step 2: 等待锁屏界面出现
-        struct timespec waitDelay = {0, (long)(0.5 * 1e9)};
+        struct timespec waitDelay = {0, (long)(0.8 * 1e9)};
         nanosleep(&waitDelay, 0);
 
-        // Step 3: 按一次 Home
-        [generator menuPress];
-        TVLog(@"Home press 1 sent");
+        // Step 3: 滑动解锁 - 从底部向上滑动
+        // iOS 锁屏界面通常有 "滑动解锁" 或 "输入密码" 提示
+        CGPoint swipeStart = CGPointMake(screenSize.width / 2, screenSize.height * 0.85);
+        CGPoint swipeEnd = CGPointMake(screenSize.width / 2, screenSize.height * 0.25);
+        [generator dragLinearWithStartPoint:swipeStart endPoint:swipeEnd duration:0.5];
+        TVLog(@"Swipe up unlock sent");
 
-        // Step 4: 等待 1.5 秒
-        struct timespec delay15 = {1, (long)(0.5 * 1e9)};
-        nanosleep(&delay15, 0);
+        // Step 4: 等待滑动完成
+        struct timespec slideDelay = {1, 0};
+        nanosleep(&slideDelay, 0);
 
-        // Step 5: 再按一次 Home
+        // Step 5: 如果还在锁屏（可能是密码解锁界面），尝试按 Home
         [generator menuPress];
-        TVLog(@"Home press 2 sent");
+        TVLog(@"Home press sent");
 
         return YES;
     } @catch (NSException *exception) {
