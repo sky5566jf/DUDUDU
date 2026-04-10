@@ -2006,7 +2006,7 @@ static BOOL g_autoUnlockEnabled = NO;
     int comboStatus = 0;
     
     // 使用 block 语法注册通知回调
-    __weak typeof(self) weakSelf = self;
+    __weak __typeof__(self) weakSelf = self;
     
     status = notify_register_dispatch(
         "com.apple.springboard.lockstate",
