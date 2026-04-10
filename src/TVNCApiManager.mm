@@ -1998,11 +1998,8 @@ static void lockComboCallback(int val) {
 }
 
 // 判断是否为 roothide 环境（使用 token-based notify API）
-#if defined(THEOS_PACKAGE_SCHEME) && THEOS_PACKAGE_SCHEME == roothide
-#define IS_ROOTHIDE 1
-#else
-#define IS_ROOTHIDE 0
-#endif
+// THEOS_PACKAGE_SCHEME is defined as a string, compare using strcmp
+#define IS_ROOTHIDE (strcmp(THEOS_PACKAGE_SCHEME, "roothide") == 0)
 
 // 启动锁屏监听 - 检测到锁屏后自动解锁
 - (BOOL)startAutoUnlockOnLock {
