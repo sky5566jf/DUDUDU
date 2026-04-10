@@ -1975,14 +1975,54 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 static int g_lockStateToken = 0;
 static BOOL g_autoUnlockEnabled = NO;
 
-// 锁屏状态监听回调
-static void lockStateCallback(int val) {
-    TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
-    if (val == 1) {  // 设备被锁定
-        TVLog(@"Device locked, triggering auto-unlock...");
+// 启动锁屏监听 - 检测到锁屏后自动解锁
+- (BOOL)startAutoUnlockOnLock {
+    if (g_autoUnlockEnabled && g_lockStateToken != 0) {
+        TVLog(@"Auto-unlock already enabled (token=%d)", g_lockStateToken);
+        return YES;
+    }
+    
+    // 如果之前有注册过，先取消
+    if (g_lockStateToken != 0) {
+        notify_cancel(g_lockStateToken);
+        g_lockStateToken = 0;
+        TVLog(@"Previous lock state listener cancelled");
+    }
+    
+    // 使用 weak self 避免循环引用
+    __weak typeof(self) weakSelf = self;
+    
+    // 注册锁屏状态通知 (使用 block 而不是 C 函数指针)
+    int status = notify_register_dispatch(
+        "com.apple.springboard.lockstate",
+        &g_lockStateToken,
+        dispatch_get_main_queue(),
+        ^(int val) {
+            TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
+            if (val == 1) {  // 设备被锁定
+                TVLog(@"Device locked, triggering auto-unlock...");
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [weakSelf unlockDeviceScreen];
+                });
+            }
+        }
+    );
+    
+    if (status == NOTIFY_STATUS_OK) {
+        g_autoUnlockEnabled = YES;
+        TVLog(@"Auto-unlock enabled (token=%d)", g_lockStateToken);
+        
+        // 立即检查当前状态，如果已经锁定则立即解锁
         dispatch_async(dispatch_get_main_queue(), ^{
-            [[TVNCApiManager sharedManager] unlockDeviceScreen];
+            [weakSelf checkAndUnlockIfNeeded];
         });
+        
+        return YES;
+    } else {
+        TVLog(@"Failed to register lock state notification (status=%d)", status);
+        g_lockStateToken = 0;
+        g_autoUnlockEnabled = NO;
+        return NO;
     }
 }
 
@@ -2007,46 +2047,6 @@ static void lockStateCallback(int val) {
     
     TVLog(@"isDeviceLocked: Could not determine lock state, returning NO");
     return NO;
-}
-
-// 启动锁屏监听 - 检测到锁屏后自动解锁
-- (BOOL)startAutoUnlockOnLock {
-    if (g_autoUnlockEnabled && g_lockStateToken != 0) {
-        TVLog(@"Auto-unlock already enabled (token=%d)", g_lockStateToken);
-        return YES;
-    }
-    
-    // 如果之前有注册过，先取消
-    if (g_lockStateToken != 0) {
-        notify_cancel(g_lockStateToken);
-        g_lockStateToken = 0;
-        TVLog(@"Previous lock state listener cancelled");
-    }
-    
-    // 注册锁屏状态通知
-    int status = notify_register_dispatch(
-        "com.apple.springboard.lockstate",
-        &g_lockStateToken,
-        dispatch_get_main_queue(),
-        lockStateCallback
-    );
-    
-    if (status == NOTIFY_STATUS_OK) {
-        g_autoUnlockEnabled = YES;
-        TVLog(@"Auto-unlock enabled (token=%d)", g_lockStateToken);
-        
-        // 立即检查当前状态，如果已经锁定则立即解锁
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [self checkAndUnlockIfNeeded];
-        });
-        
-        return YES;
-    } else {
-        TVLog(@"Failed to register lock state notification (status=%d)", status);
-        g_lockStateToken = 0;
-        g_autoUnlockEnabled = NO;
-        return NO;
-    }
 }
 
 // 停止锁屏监听
