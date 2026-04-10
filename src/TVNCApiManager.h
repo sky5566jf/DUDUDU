@@ -239,38 +239,38 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 
-#pragma mark - Plist 操作 API
+#pragma mark - 自动解锁锁屏监听
 
 /**
- * 读取 plist 文件
- * @param filePath plist 文件路径
- * @return plist 内容（NSDictionary 或 NSArray），失败返回 nil
+ * 检测当前设备是否处于锁屏状态
+ * @return YES=已锁定，NO=未锁定
  */
-- (nullable NSDictionary *)readPlistFile:(NSString *)filePath;
+- (BOOL)isDeviceLocked;
 
 /**
- * 写入 plist 文件
- * @param data 要写入的数据（NSDictionary 或 NSArray）
- * @param filePath 目标文件路径
- * @param error 错误信息输出
- * @return 是否成功
+ * 启动锁屏监听 - 检测到锁屏后自动解锁
+ * 使用事件驱动方式，几乎不占用性能
+ * @return 是否成功启动
  */
-- (BOOL)writePlistData:(id)data toFilePath:(NSString *)filePath error:(NSError **)error;
+- (BOOL)startAutoUnlockOnLock;
 
 /**
- * 读取并修改 plist 文件
- * @param filePath plist 文件路径
- * @param setDict 要设置的键值对
- * @param matchKey 要匹配的键名（可选，nil 表示精确设置）
- * @param matchValue 当键名匹配时设置的值
- * @param error 错误信息输出
- * @return 修改后的完整数据，失败返回 nil
+ * 停止锁屏监听
+ * @return 是否成功停止
  */
-- (nullable NSDictionary *)modifyPlistFile:(NSString *)filePath
-                                   setDict:(NSDictionary *)setDict
-                                  matchKey:(nullable NSString *)matchKey
-                                matchValue:(nullable NSString *)matchValue
-                                     error:(NSError **)error;
+- (BOOL)stopAutoUnlockOnLock;
+
+/**
+ * 获取自动解锁功能是否已启用
+ * @return YES=已启用，NO=未启用
+ */
+- (BOOL)isAutoUnlockEnabled;
+
+/**
+ * 立即执行一次锁屏检测和自动解锁（如果启用）
+ * @return YES=执行了解锁操作，NO=未解锁（可能未锁定或功能未启用）
+ */
+- (BOOL)checkAndUnlockIfNeeded;
 
 @end
 

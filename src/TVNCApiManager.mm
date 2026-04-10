@@ -1969,205 +1969,118 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
     return result;
 }
 
-#pragma mark - Plist 操作
+#pragma mark - 自动解锁锁屏监听
 
-// 检测 plist 文件格式（XML 或二进制）
-- (BOOL)isBinaryPlist:(NSString *)filePath {
-    @try {
-        NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:filePath];
-        if (!fh) {
-            return NO;
-        }
-        
-        NSData *headerData = [fh readDataOfLength:8];
-        [fh closeFile];
-        
-        if (headerData.length < 6) {
-            return NO;
-        }
-        
-        // 二进制 plist 以 "bplist" 开头
-        uint8_t bytes[8];
-        [headerData getBytes:bytes length:MIN(8, headerData.length)];
-        
-        return (bytes[0] == 'b' && bytes[1] == 'p' && bytes[2] == 'l' && 
-                bytes[3] == 'i' && bytes[4] == 's' && bytes[5] == 't');
-    } @catch (NSException *exception) {
-        TVLog(@"isBinaryPlist: Exception reading file %@: %@", filePath, exception.reason);
-        return NO;
+// 锁屏状态监听相关变量
+static int g_lockStateToken = 0;
+static BOOL g_autoUnlockEnabled = NO;
+
+// 锁屏状态监听回调
+static void lockStateCallback(int val) {
+    TVLog(@"Lock state changed: %d (1=locked, 0=unlocked)", val);
+    if (val == 1) {  // 设备被锁定
+        TVLog(@"Device locked, triggering auto-unlock...");
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[TVNCApiManager sharedManager] unlockDeviceScreen];
+        });
     }
 }
 
-// 读取 plist 文件
-- (nullable NSDictionary *)readPlistFile:(NSString *)filePath {
-    if (!filePath || filePath.length == 0) {
-        TVLog(@"Plist read: Invalid file path");
-        return nil;
+// 检测当前设备是否处于锁屏状态
+- (BOOL)isDeviceLocked {
+    // 通过 notify_get_state 检查锁屏状态
+    uint64_t state = 0;
+    int result = notify_get_state("com.apple.springboard.lockstate", &state);
+    if (result == NOTIFY_STATUS_OK) {
+        BOOL isLocked = (state != 0);
+        TVLog(@"isDeviceLocked: state=%llu, isLocked=%@", state, isLocked ? @"YES" : @"NO");
+        return isLocked;
     }
     
-    NSError *error = nil;
-    NSData *data = [NSData dataWithContentsOfFile:filePath options:0 error:&error];
-    
-    if (!data) {
-        TVLog(@"Plist read: Failed to read file %@: %@", filePath, error);
-        return nil;
+    // 备用方法：检查锁屏密码界面
+    uint64_t comboState = 0;
+    result = notify_get_state("com.apple.springboard.lockcombo", &comboState);
+    if (result == NOTIFY_STATUS_OK && comboState != 0) {
+        TVLog(@"isDeviceLocked: lockcombo state=%llu, assuming locked", comboState);
+        return YES;
     }
     
-    id plist = [NSPropertyListSerialization propertyListWithData:data
-                                                         options:NSPropertyListImmutable
-                                                          format:nil
-                                                           error:&error];
-    
-    if (!plist) {
-        TVLog(@"Plist read: Failed to parse %@: %@", filePath, error);
-        return nil;
-    }
-    
-    if ([plist isKindOfClass:[NSDictionary class]]) {
-        TVLog(@"Plist read: Successfully read dictionary from %@", filePath);
-        return (NSDictionary *)plist;
-    } else if ([plist isKindOfClass:[NSArray class]]) {
-        TVLog(@"Plist read: File is an array, wrapping in dictionary");
-        return @{@"_array": plist};
-    }
-    
-    TVLog(@"Plist read: Unknown plist format");
-    return nil;
+    TVLog(@"isDeviceLocked: Could not determine lock state, returning NO");
+    return NO;
 }
 
-// 写入 plist 文件（保持原格式）
-- (BOOL)writePlistData:(id)data toFilePath:(NSString *)filePath error:(NSError **)error {
-    if (!filePath || filePath.length == 0) {
-        TVLog(@"Plist write: Invalid file path");
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                         code:-1
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Invalid file path"}];
-        }
-        return NO;
+// 启动锁屏监听 - 检测到锁屏后自动解锁
+- (BOOL)startAutoUnlockOnLock {
+    if (g_autoUnlockEnabled && g_lockStateToken != 0) {
+        TVLog(@"Auto-unlock already enabled (token=%d)", g_lockStateToken);
+        return YES;
     }
     
-    if (!data) {
-        TVLog(@"Plist write: No data to write");
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                         code:-2
-                                     userInfo:@{NSLocalizedDescriptionKey: @"No data to write"}];
-        }
-        return NO;
+    // 如果之前有注册过，先取消
+    if (g_lockStateToken != 0) {
+        notify_cancel(g_lockStateToken);
+        g_lockStateToken = 0;
+        TVLog(@"Previous lock state listener cancelled");
     }
     
-    // 检测原文件格式，保持一致
-    BOOL isBinary = [self isBinaryPlist:filePath];
-    NSPropertyListFormat format = isBinary ? NSPropertyListBinaryFormat_v1_0 : NSPropertyListXMLFormat_v1_0;
+    // 注册锁屏状态通知
+    int status = notify_register_dispatch(
+        "com.apple.springboard.lockstate",
+        &g_lockStateToken,
+        dispatch_get_main_queue(),
+        lockStateCallback
+    );
     
-    TVLog(@"Plist write: Detected %@ format, writing in same format", isBinary ? @"binary" : @"XML");
-    
-    NSError *serializeError = nil;
-    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:data
-                                                                   format:format
-                                                                  options:0
-                                                                    error:&serializeError];
-    
-    if (!plistData) {
-        TVLog(@"Plist write: Failed to serialize data: %@", serializeError);
-        if (error) {
-            *error = serializeError;
-        }
-        return NO;
-    }
-    
-    // 确保目录存在
-    NSString *directory = [filePath stringByDeletingLastPathComponent];
-    [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:nil];
-    
-    BOOL success = [plistData writeToFile:filePath atomically:YES];
-    
-    if (success) {
-        TVLog(@"Plist write: Successfully wrote to %@ (format: %@)", filePath, isBinary ? @"binary" : @"XML");
+    if (status == NOTIFY_STATUS_OK) {
+        g_autoUnlockEnabled = YES;
+        TVLog(@"Auto-unlock enabled (token=%d)", g_lockStateToken);
+        
+        // 立即检查当前状态，如果已经锁定则立即解锁
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self checkAndUnlockIfNeeded];
+        });
+        
+        return YES;
     } else {
-        TVLog(@"Plist write: Failed to write to %@", filePath);
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                         code:-3
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to write file"}];
-        }
+        TVLog(@"Failed to register lock state notification (status=%d)", status);
+        g_lockStateToken = 0;
+        g_autoUnlockEnabled = NO;
+        return NO;
     }
-    
-    return success;
 }
 
-// 读取并修改 plist 文件
-- (nullable NSDictionary *)modifyPlistFile:(NSString *)filePath
-                                   setDict:(NSDictionary *)setDict
-                                  matchKey:(nullable NSString *)matchKey
-                                matchValue:(nullable NSString *)matchValue
-                                     error:(NSError **)error {
-    if (!filePath || filePath.length == 0) {
-        TVLog(@"Plist modify: Invalid file path");
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                         code:-1
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Invalid file path"}];
-        }
-        return nil;
+// 停止锁屏监听
+- (BOOL)stopAutoUnlockOnLock {
+    if (g_lockStateToken != 0) {
+        notify_cancel(g_lockStateToken);
+        TVLog(@"Lock state listener cancelled (token=%d)", g_lockStateToken);
+        g_lockStateToken = 0;
+    }
+    g_autoUnlockEnabled = NO;
+    TVLog(@"Auto-unlock disabled");
+    return YES;
+}
+
+// 获取自动解锁功能是否已启用
+- (BOOL)isAutoUnlockEnabled {
+    return g_autoUnlockEnabled;
+}
+
+// 立即执行一次锁屏检测和自动解锁（如果启用）
+- (BOOL)checkAndUnlockIfNeeded {
+    if (!g_autoUnlockEnabled) {
+        TVLog(@"checkAndUnlockIfNeeded: Auto-unlock not enabled, skipping");
+        return NO;
     }
     
-    // 读取现有 plist
-    NSDictionary *existingData = [self readPlistFile:filePath];
-    NSMutableDictionary *mutableData = [NSMutableDictionary dictionary];
-    
-    if (existingData) {
-        // 检查是否是包装的数组
-        if (existingData[@"_array"]) {
-            [mutableData addEntriesFromDictionary:existingData];
-        } else {
-            [mutableData addEntriesFromDictionary:existingData];
-        }
+    BOOL isLocked = [self isDeviceLocked];
+    if (isLocked) {
+        TVLog(@"checkAndUnlockIfNeeded: Device is locked, unlocking now...");
+        return [self unlockDeviceScreen];
+    } else {
+        TVLog(@"checkAndUnlockIfNeeded: Device is not locked");
+        return NO;
     }
-    
-    NSMutableArray *modifiedKeys = [NSMutableArray array];
-    
-    // 设置指定的键值对
-    if (setDict && setDict.count > 0) {
-        for (NSString *key in setDict) {
-            mutableData[key] = setDict[key];
-            [modifiedKeys addObject:key];
-            TVLog(@"Plist modify: Set %@ = %@", key, setDict[key]);
-        }
-    }
-    
-    // 匹配键名并设置值
-    if (matchKey && matchKey.length > 0) {
-        NSString *valueToSet = matchValue ?: @"";
-        for (NSString *key in mutableData) {
-            if ([key rangeOfString:matchKey].location != NSNotFound) {
-                mutableData[key] = valueToSet;
-                [modifiedKeys addObject:key];
-                TVLog(@"Plist modify: Matched key %@ = %@", key, valueToSet);
-            }
-        }
-    }
-    
-    // 写入文件
-    NSError *writeError = nil;
-    BOOL success = [self writePlistData:mutableData toFilePath:filePath error:&writeError];
-    
-    if (!success) {
-        TVLog(@"Plist modify: Failed to write modified data: %@", writeError);
-        if (error) {
-            *error = writeError;
-        }
-        return nil;
-    }
-    
-    TVLog(@"Plist modify: Successfully modified %lu keys in %@", (unsigned long)modifiedKeys.count, filePath);
-    
-    // 返回修改后的完整数据
-    return mutableData;
 }
 
 @end
