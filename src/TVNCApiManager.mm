@@ -28,6 +28,7 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
+#import <IOKit/hidsystem/IOHIDUsageTables.h>
 #import <stdlib.h>  // 用于 system()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
@@ -1676,11 +1677,13 @@ extern Class SBLockScreenManager;
             return YES;
         }
         
-        // 方法2: 使用 system 命令执行 reboot（需要 root）
-        TVLog(@"Trying system(\"reboot\")...");
-        int systemResult = system("reboot");
-        TVLog(@"system(\"reboot\") returned: %d", systemResult);
-        if (systemResult == 0) {
+        // 方法2: 使用 posix_spawn 执行 reboot
+        TVLog(@"Trying posix_spawn(\"reboot\")...");
+        pid_t pid;
+        const char *args[] = {"reboot", NULL};
+        int spawnResult = posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        TVLog(@"posix_spawn returned: %d", spawnResult);
+        if (spawnResult == 0) {
             return YES;
         }
         
