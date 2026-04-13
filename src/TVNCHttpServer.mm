@@ -259,12 +259,6 @@
         return [self handleReboot];
     } else if ([path isEqualToString:@"/api/respring"]) {
         return [self handleRespring];
-    } else if ([path isEqualToString:@"/api/files/permissions"]) {
-        return [self handleFilePermissions:query];
-    } else if ([path isEqualToString:@"/api/files/chmod"]) {
-        return [self handleChmod:query];
-    } else if ([path isEqualToString:@"/api/files/chmod_recursive"]) {
-        return [self handleChmodRecursive:query];
     } else if ([path isEqualToString:@"/api/screen/lock"]) {
         return [self handleScreenLock];
     } else if ([path isEqualToString:@"/api/screen/unlock"]) {
@@ -275,15 +269,7 @@
         return [self handleTaskManager];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
-    } else if ([path isEqualToString:@"/api/autounlock/enable"]) {
-        return [self handleAutoUnlockEnable];
-    } else if ([path isEqualToString:@"/api/autounlock/disable"]) {
-        return [self handleAutoUnlockDisable];
-    } else if ([path isEqualToString:@"/api/autounlock/status"]) {
-        return [self handleAutoUnlockStatus];
-    } else if ([path isEqualToString:@"/api/autounlock/check"]) {
-        return [self handleAutoUnlockCheck];
-    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
+ else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
@@ -1405,94 +1391,7 @@
     return response;
 }
 
-#pragma mark - Auto Unlock Handlers
-
-// POST /api/autounlock/enable - 启用自动解锁
-- (TVNCHttpResponse *)handleAutoUnlockEnable {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: Auto-unlock enable request received");
-    
-    BOOL success = [[TVNCApiManager sharedManager] startAutoUnlockOnLock];
-    
-    response.statusCode = success ? 200 : 500;
-    response.contentType = @"application/json";
-    NSDictionary *result = @{
-        @"success": @(success),
-        @"action": @"enable",
-        @"message": success ? @"Auto-unlock enabled" : @"Failed to enable auto-unlock"
-    };
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/autounlock/disable - 禁用自动解锁
-- (TVNCHttpResponse *)handleAutoUnlockDisable {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: Auto-unlock disable request received");
-    
-    BOOL success = [[TVNCApiManager sharedManager] stopAutoUnlockOnLock];
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    NSDictionary *result = @{
-        @"success": @(success),
-        @"action": @"disable",
-        @"message": @"Auto-unlock disabled"
-    };
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// GET /api/autounlock/status - 获取自动解锁状态
-- (TVNCHttpResponse *)handleAutoUnlockStatus {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: Auto-unlock status request received");
-    
-    BOOL enabled = [[TVNCApiManager sharedManager] isAutoUnlockEnabled];
-    BOOL isLocked = [[TVNCApiManager sharedManager] isDeviceLocked];
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    NSDictionary *result = @{
-        @"success": @YES,
-        @"action": @"status",
-        @"autoUnlockEnabled": @(enabled),
-        @"deviceLocked": @(isLocked)
-    };
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// GET /api/autounlock/check - 立即检测并解锁
-- (TVNCHttpResponse *)handleAutoUnlockCheck {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    TVLog(@"HTTP Server: Auto-unlock check request received");
-    
-    BOOL wasLocked = [[TVNCApiManager sharedManager] isDeviceLocked];
-    BOOL unlocked = [[TVNCApiManager sharedManager] checkAndUnlockIfNeeded];
-    
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    NSDictionary *result = @{
-        @"success": @YES,
-        @"action": @"check",
-        @"wasLocked": @(wasLocked),
-        @"unlocked": @(unlocked),
-        @"message": wasLocked ? (unlocked ? @"Device was locked, unlocked" : @"Device is locked but unlock failed") : @"Device was not locked"
-    };
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-#pragma mark - AssistiveTouch Handlers
+@end - AssistiveTouch Handlers
 
 // GET /api/assistivetouch
 // POST /api/assistivetouch?action=enable
@@ -1667,170 +1566,6 @@
     response.statusCode = 200;
     response.contentType = @"text/html; charset=utf-8";
     response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
-    
-    return response;
-}
-
-#pragma mark - 文件权限 API
-
-// GET /api/files/permissions?path=/xxx
-// 获取文件/目录的权限信息
-- (TVNCHttpResponse *)handleFilePermissions:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *filePath = query[@"path"];
-    if (!filePath || filePath.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    TVLog(@"HTTP Server: Getting permissions for %@", filePath);
-    
-    NSDictionary *result = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
-    
-    response.statusCode = [result[@"success"] boolValue] ? 200 : 404;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/files/chmod?path=/xxx&mode=777
-// 修改文件/目录权限
-- (TVNCHttpResponse *)handleChmod:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *filePath = query[@"path"];
-    NSString *modeStr = query[@"mode"];
-    
-    if (!filePath || filePath.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    if (!modeStr || modeStr.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing mode parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    // 解析权限模式（支持 777, 0755 等格式）
-    mode_t mode = 0;
-    if ([modeStr hasPrefix:@"0"]) {
-        // 八进制格式（如 0777）
-        mode = (mode_t)strtoul([modeStr UTF8String], NULL, 8);
-    } else {
-        // 十进制格式（如 777）
-        mode = (mode_t)[modeStr integerValue];
-        mode = (mode_t)(mode | (mode << 3) | (mode << 6)); // 转换为 rwxrwxrwx
-    }
-    
-    TVLog(@"HTTP Server: chmod %@ -> %o", filePath, mode);
-    
-    // 先获取修改前的权限
-    NSDictionary *oldPerm = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
-    NSString *oldMode = oldPerm[@"mode"] ?: @"unknown";
-    
-    // 修改权限
-    BOOL success = [[TVNCApiManager sharedManager] chmod:filePath mode:mode];
-    
-    if (success) {
-        response.statusCode = 200;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @YES,
-            @"path": filePath,
-            @"oldMode": oldMode,
-            @"newMode": [NSString stringWithFormat:@"%o", mode & 0xFFFF],
-            @"newModeValue": @(mode)
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @NO,
-            @"path": filePath,
-            @"error": @"Failed to change permissions"
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    }
-    
-    return response;
-}
-
-// POST /api/files/chmod_recursive?path=/xxx&mode=777
-// 递归修改目录权限
-- (TVNCHttpResponse *)handleChmodRecursive:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *filePath = query[@"path"];
-    NSString *modeStr = query[@"mode"];
-    
-    if (!filePath || filePath.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    if (!modeStr || modeStr.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"Missing mode parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    // 解析权限模式
-    mode_t mode = 0;
-    if ([modeStr hasPrefix:@"0"]) {
-        mode = (mode_t)strtoul([modeStr UTF8String], NULL, 8);
-    } else {
-        mode = (mode_t)[modeStr integerValue];
-        mode = (mode_t)(mode | (mode << 3) | (mode << 6));
-    }
-    
-    TVLog(@"HTTP Server: chmod recursive %@ -> %o", filePath, mode);
-    
-    // 先获取修改前的权限
-    NSDictionary *oldPerm = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
-    NSString *oldMode = oldPerm[@"mode"] ?: @"unknown";
-    
-    // 递归修改权限
-    NSError *error = nil;
-    NSInteger count = [[TVNCApiManager sharedManager] chmodRecursive:filePath mode:mode error:&error];
-    
-    if (count >= 0) {
-        response.statusCode = 200;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @YES,
-            @"path": filePath,
-            @"oldMode": oldMode,
-            @"newMode": [NSString stringWithFormat:@"%o", mode & 0xFFFF],
-            @"itemsModified": @(count)
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @NO,
-            @"path": filePath,
-            @"error": error.localizedDescription ?: @"Failed to change permissions"
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    }
     
     return response;
 }

@@ -531,22 +531,6 @@
             <button onclick="checkFile()" style="margin-top: 15px;">检查 zhuangtai.txt</button>
         </div>
         
-        <!-- 文件权限 -->
-        <div class="panel">
-            <h2>🔐 文件权限</h2>
-            <input type="text" id="permPath" placeholder="文件/目录路径 (如 /var/mobile/Media/Matisu_Output)">
-            <div class="grid" style="margin-top: 10px;">
-                <button onclick="getPermissions()" class="info">查看权限</button>
-                <button onclick="chmod(777, false)" class="success">设为 777</button>
-                <button onclick="chmod(755, false)" class="info">设为 755</button>
-            </div>
-            <div class="grid" style="margin-top: 10px;">
-                <button onclick="chmodRecursive(777)" class="warning">递归 777</button>
-                <button onclick="chmodRecursive(755)" class="warning">递归 755</button>
-            </div>
-            <div id="permResult" class="response-box" style="margin-top: 10px;"></div>
-        </div>
-        
         <!-- API 文档 -->
         <div class="panel">
             <h2>📖 API 参考</h2>
@@ -894,69 +878,6 @@
         
         async function checkFile() {
             await apiCall('GET', 'checkfile');
-        }
-        
-        // 文件权限 API
-        async function getPermissions() {
-            const path = document.getElementById('permPath').value.trim();
-            if (!path) {
-                log('请输入路径', 'error');
-                return;
-            }
-            const resultDiv = document.getElementById('permResult');
-            resultDiv.innerHTML = '正在获取...';
-            
-            try {
-                const res = await fetch(`${baseUrl}/api/files/permissions?path=${encodeURIComponent(path)}`);
-                const data = await res.json();
-                if (data.success) {
-                    const color = data.permissions.includes('700') ? '🔴' : 
-                                 data.permissions.includes('777') ? '🟢' : '🟡';
-                    resultDiv.innerHTML = `
-                        <div style="color: var(--success);">
-                            <b>${color} ${data.name}</b><br>
-                            类型: ${data.type}<br>
-                            权限: <b style="color: ${data.permissions.includes('700') ? '#ff6b6b' : data.permissions.includes('777') ? '#51cf66' : '#ffd43b'};">${data.permissions}</b> (${data.mode})<br>
-                            所有者: ${data.owner}:${data.group}<br>
-                            大小: ${data.sizeFormatted}<br>
-                            修改: ${data.modified}
-                        </div>
-                    `;
-                } else {
-                    resultDiv.innerHTML = `<div style="color: var(--error);">获取失败: ${data.error}</div>`;
-                }
-            } catch (err) {
-                resultDiv.innerHTML = `<div style="color: var(--error);">请求失败: ${err.message}</div>`;
-            }
-        }
-        
-        async function chmod(mode, recursive = false) {
-            const path = document.getElementById('permPath').value.trim();
-            if (!path) {
-                log('请输入路径', 'error');
-                return;
-            }
-            const api = recursive ? 'chmod_recursive' : 'chmod';
-            log(`正在设置权限 ${mode}...`, 'info');
-            
-            try {
-                const res = await fetch(`${baseUrl}/api/files/${api}?path=${encodeURIComponent(path)}&mode=${mode}`, {
-                    method: 'POST'
-                });
-                const data = await res.json();
-                if (data.success) {
-                    log(`权限已修改: ${data.oldMode} → ${data.newMode}${data.itemsModified ? ` (${data.itemsModified} 项)` : ''}`, 'success');
-                    getPermissions(); // 刷新显示
-                } else {
-                    log(`修改失败: ${data.error}`, 'error');
-                }
-            } catch (err) {
-                log(`请求失败: ${err.message}`, 'error');
-            }
-        }
-        
-        async function chmodRecursive(mode) {
-            chmod(mode, true);
         }
         
         // 滑块值更新

@@ -247,57 +247,6 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)isDeviceLocked;
 
-/**
- * 启动锁屏监听 - 检测到锁屏后自动解锁
- * 使用事件驱动方式，几乎不占用性能
- * @return 是否成功启动
- */
-- (BOOL)startAutoUnlockOnLock;
-
-/**
- * 停止锁屏监听
- * @return 是否成功停止
- */
-- (BOOL)stopAutoUnlockOnLock;
-
-/**
- * 获取自动解锁功能是否已启用
- * @return YES=已启用，NO=未启用
- */
-- (BOOL)isAutoUnlockEnabled;
-
-/**
- * 立即执行一次锁屏检测和自动解锁（如果启用）
- * @return YES=执行了解锁操作，NO=未解锁（可能未锁定或功能未启用）
- */
-- (BOOL)checkAndUnlockIfNeeded;
-
-#pragma mark - 文件权限 API
-
-/**
- * 获取文件/目录的权限信息
- * @param path 文件或目录的完整路径
- * @return 权限信息字典，包含 name/type/permissions/mode/owner/group/size/modified
- */
-- (NSDictionary *)getFilePermissions:(NSString *)path;
-
-/**
- * 修改文件/目录的权限
- * @param path 文件或目录的完整路径
- * @param mode 权限模式（如 0777, 0755, 0644）
- * @return 是否成功
- */
-- (BOOL)chmod:(NSString *)path mode:(mode_t)mode;
-
-/**
- * 递归修改目录及其所有子项的权限
- * @param path 目录的完整路径
- * @param mode 权限模式（如 0777）
- * @param error 错误信息输出
- * @return 修改的项目数量，-1 表示失败
- */
-- (NSInteger)chmodRecursive:(NSString *)path mode:(mode_t)mode error:(NSError **)error;
-
 @end
 
 NS_ASSUME_NONNULL_END
