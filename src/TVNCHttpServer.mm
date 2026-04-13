@@ -486,7 +486,7 @@
     
     response.statusCode = 200;
     response.contentType = @"text/plain; charset=utf-8";
-    response.body = [text ? [text dataUsingEncoding:NSUTF8StringEncoding] : [NSData data]];
+    response.body = (text ? [text dataUsingEncoding:NSUTF8StringEncoding] : [NSData data]);
     
     return response;
 }
@@ -532,12 +532,8 @@
 - (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
-    // 获取设备名称 (支持 iOS 16+)
+    // 获取设备名称
     NSString *deviceName = [[UIDevice currentDevice] name];
-    // 备用方案：iOS 16+ 可能返回 nil，使用 hostName
-    if (!deviceName || deviceName.length == 0) {
-        deviceName = [[NSHost currentHost] localizedName];
-    }
     if (!deviceName || deviceName.length == 0) {
         deviceName = [[NSProcessInfo processInfo] hostName];
     }
@@ -1579,8 +1575,9 @@
     return response;
 }
 
-// GET /api/clients
-- (TVNCHttpResponse *)handleClients:(NSDictionary *)query {
+// POST /api/uninstall?bundleId=com.example.app
+// 通过 TrollStore 卸载应用
+- (TVNCHttpResponse *)handleUninstallApp:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
     NSString *bundleId = query[@"bundleId"];
