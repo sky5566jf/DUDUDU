@@ -3,118 +3,314 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TrollVNC HTTP API 测试</title>
+    <title>TrollVNC API 测试工具</title>
     <style>
+        :root {
+            --primary: #007AFF;
+            --success: #34C759;
+            --danger: #FF3B30;
+            --warning: #FF9500;
+            --bg-dark: #1a1a1a;
+            --bg-panel: #2d2d2d;
+            --bg-input: #3d3d3d;
+            --text: #fff;
+            --text-muted: #8e8e93;
+            --border: #444;
+        }
+        
         * { margin: 0; padding: 0; box-sizing: border-box; }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #1a1a1a; color: #fff; min-height: 100vh; padding: 20px;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
         }
-        .container { max-width: 1400px; margin: 0 auto; }
-        h1 { text-align: center; margin-bottom: 20px; color: #007AFF; }
-        h2 { color: #007AFF; margin: 20px 0 10px 0; font-size: 18px; }
+        
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        
+        h1 .icon { font-size: 32px; }
+        
+        h2 {
+            color: var(--primary);
+            margin: 25px 0 15px 0;
+            font-size: 18px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        
+        h3 {
+            color: var(--text);
+            margin: 15px 0 10px 0;
+            font-size: 15px;
+        }
+        
         .panel {
-            background: #2d2d2d; padding: 20px; border-radius: 10px;
+            background: var(--bg-panel);
+            padding: 20px;
+            border-radius: 12px;
             margin-bottom: 20px;
         }
-        .input-group {
-            display: flex; gap: 10px; margin-bottom: 10px; flex-wrap: wrap;
+        
+        .connection-bar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
             align-items: center;
         }
+        
         input, textarea, select {
-            padding: 10px; border: 1px solid #444; border-radius: 5px;
-            background: #3d3d3d; color: #fff; font-size: 14px;
-        }
-        input[type="text"], input[type="number"] { flex: 1; min-width: 150px; }
-        textarea { width: 100%; min-height: 80px; resize: vertical; }
-        button {
-            padding: 10px 20px; border: none; border-radius: 5px;
-            background: #007AFF; color: #fff; cursor: pointer;
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-input);
+            color: var(--text);
             font-size: 14px;
+            transition: border-color 0.2s;
         }
-        button:hover { background: #0056b3; }
-        button.danger { background: #ff3b30; }
-        button.success { background: #34c759; }
-        button.warning { background: #ff9500; }
-        button.info { background: #5856d6; }
-        #screen {
-            max-width: 100%; max-height: 500px; border: 2px solid #444;
-            border-radius: 5px; background: #1a1a1a;
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
         }
-        #screen.no-image { width: 300px; height: 500px; display: flex; align-items: center; justify-content: center; color: #666; }
-        .controls-grid {
-            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 10px; margin-top: 10px;
+        
+        input[type="text"], input[type="number"] { flex: 1; min-width: 180px; }
+        input[type="number"] { width: 100px; flex: none; }
+        
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            resize: vertical;
+            font-family: 'Monaco', 'Menlo', monospace;
         }
-        #log {
-            background: #1a1a1a; border: 1px solid #444; border-radius: 5px;
-            padding: 10px; height: 250px; overflow-y: auto;
-            font-family: 'Consolas', monospace; font-size: 12px;
+        
+        select { cursor: pointer; }
+        
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            background: var(--primary);
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
         }
+        
+        button:hover { opacity: 0.85; transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        
+        button.danger { background: var(--danger); }
+        button.success { background: var(--success); }
+        button.warning { background: var(--warning); }
+        
+        button.small { padding: 8px 12px; font-size: 12px; }
+        
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .status-badge.connected { background: var(--success); }
+        .status-badge.disconnected { background: var(--text-muted); }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        
+        .response-box {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .screen-container {
+            text-align: center;
+            background: #000;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .screen-placeholder {
+            color: var(--text-muted);
+            font-size: 16px;
+        }
+        
+        #screen img {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+        }
+        
+        .controls-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 15px;
+        }
+        
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 250px;
+        }
+        
+        .slider-group label { white-space: nowrap; }
+        
+        input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            background: var(--border);
+            height: 6px;
+            border-radius: 3px;
+            padding: 0;
+            border: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+        }
+        
+        .slider-value {
+            min-width: 45px;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .note {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        
+        .section-divider {
+            border-top: 1px solid var(--border);
+            margin: 20px 0;
+        }
+        
+        .api-method {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        
+        .api-method.get { background: var(--success); }
+        .api-method.post { background: var(--primary); }
+        
+        .log-container {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+        }
+        
         .log-entry { margin-bottom: 5px; }
-        .log-entry.success { color: #34c759; }
-        .log-entry.error { color: #ff3b30; }
-        .log-entry.info { color: #007AFF; }
-        .log-entry.warn { color: #ff9500; }
-        .status {
-            padding: 5px 10px; border-radius: 3px; font-size: 12px;
+        .log-entry.success { color: var(--success); }
+        .log-entry.error { color: var(--danger); }
+        .log-entry.info { color: var(--primary); }
+        .log-entry.warn { color: var(--warning); }
+        
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
         }
-        .status.connected { background: #34c759; }
-        .status.disconnected { background: #ff3b30; }
-        .api-section { margin-bottom: 15px; padding: 15px; background: #363636; border-radius: 8px; }
-        .api-section h3 { margin-bottom: 10px; color: #fff; font-size: 16px; }
-        .slider-container { display: flex; align-items: center; gap: 10px; }
-        .slider-container input[type="range"] { flex: 1; }
-        .slider-value { min-width: 50px; text-align: center; }
-        .note { color: #888; font-size: 12px; margin-top: 5px; }
-        .warning { color: #ff9500; font-size: 12px; margin-top: 5px; }
-        .info-box { background: #2a3f5f; padding: 10px; border-radius: 5px; margin-top: 10px; }
-        .info-box pre { margin: 0; font-size: 12px; color: #8ab4f8; overflow-x: auto; }
-        .response-display {
-            background: #1a1a1a; border: 1px solid #444; border-radius: 5px;
-            padding: 10px; margin-top: 10px; max-height: 200px; overflow-y: auto;
-            font-family: 'Consolas', monospace; font-size: 12px; white-space: pre-wrap;
+        
+        @media (max-width: 768px) {
+            .two-col { grid-template-columns: 1fr; }
+            .grid-2 { grid-template-columns: 1fr; }
         }
-        .two-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        @media (max-width: 768px) { .two-cols { grid-template-columns: 1fr; } }
+        
+        .hidden { display: none; }
+        
+        .file-upload {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        
+        .file-upload:hover { border-color: var(--primary); }
+        .file-upload input { display: none; }
+        .file-upload .icon { font-size: 32px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🎮 TrollVNC HTTP API 测试</h1>
+        <h1><span class="icon">📱</span> TrollVNC API 测试工具</h1>
         
+        <!-- 连接设置 -->
         <div class="panel">
-            <h2>连接设置</h2>
-            <div class="input-group">
+            <h2>🔗 连接设置</h2>
+            <div class="connection-bar">
                 <input type="text" id="ip" placeholder="设备 IP (如: 192.168.1.100)">
-                <input type="number" id="port" value="8182" min="1" max="65535" style="width:100px;">
+                <input type="number" id="port" value="8182" min="1" max="65535">
                 <button onclick="connect()">连接</button>
                 <button onclick="disconnect()" class="danger">断开</button>
-                <button onclick="getDeviceInfo()" class="info">设备信息</button>
-                <button onclick="getServerStatus()" class="info">服务器状态</button>
-                <span id="status" class="status disconnected">未连接</span>
+                <span id="status" class="status-badge disconnected">未连接</span>
             </div>
-            <div class="input-group" style="margin-top: 10px;">
-                <input type="text" id="clientIp" placeholder="客户端 IP (保存设备时使用，选填)" style="flex: 1;">
-                <button onclick="saveDevice()" class="success">💾 保存设备</button>
+            <div id="deviceInfo" class="response-box hidden"></div>
+        </div>
+        
+        <!-- 屏幕预览 -->
+        <div class="panel">
+            <h2>🖥️ 屏幕预览</h2>
+            <div class="screen-container">
+                <div id="screen" class="screen-placeholder">连接后显示屏幕</div>
             </div>
-            <div id="deviceInfo" class="info-box" style="display:none;">
-                <pre id="deviceInfoContent"></pre>
-            </div>
-            <div class="input-group">
-                <label>刷新率:</label>
-                <input type="number" id="fps" value="5" min="1" max="30" style="width:60px;">
-                <label>FPS</label>
-                <button onclick="toggleAutoRefresh()" id="refreshBtn">开始刷新</button>
-                <button onclick="refreshScreen()">刷新一次</button>
-            </div>
-            <div class="input-group">
+            <div class="controls-row">
                 <label>旋转:</label>
                 <select id="rotation" style="width:120px;">
-                    <option value="0">0° (Home下)</option>
-                    <option value="90">90° (Home右)</option>
-                    <option value="180">180° (Home上)</option>
-                    <option value="270">270° (Home左)</option>
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
                 </select>
                 <label>格式:</label>
                 <select id="format" style="width:80px;">
@@ -122,224 +318,223 @@
                     <option value="jpeg">JPEG</option>
                 </select>
                 <label>质量:</label>
-                <input type="number" id="quality" value="0.9" min="0.1" max="1.0" step="0.1" style="width:70px;">
+                <input type="number" id="quality" value="0.8" min="0.1" max="1" step="0.1" style="width:60px;">
                 <label>缩放:</label>
-                <input type="number" id="scale" value="1.0" min="0.1" max="1.0" step="0.1" style="width:70px;">
+                <input type="number" id="scale" value="0.5" min="0.1" max="1" step="0.1" style="width:60px;">
+                <button onclick="refreshScreen()">刷新</button>
+                <button onclick="toggleAutoRefresh()" id="autoRefreshBtn">自动刷新</button>
             </div>
         </div>
-
-        <div class="panel" style="text-align:center;">
-            <h2>屏幕截图 <span id="screenSize"></span></h2>
-            <div id="screen" class="no-image">点击连接后显示屏幕</div>
-            <p class="note">提示: 触摸/滑动控制请使用 VNC 客户端连接 5901 端口</p>
-        </div>
-
-        <div class="two-cols">
+        
+        <div class="two-col">
             <!-- 左列 -->
             <div>
+                <!-- 设备信息 -->
                 <div class="panel">
-                    <h2>快捷操作</h2>
-                    <div class="controls-grid">
-                        <button onclick="apiCall('POST', 'clearapps/smart')">🧹 智能清理</button>
-                        <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
-                        <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
-                        <button onclick="getClients()">👥 客户端</button>
+                    <h2>📊 设备信息</h2>
+                    <div class="grid">
+                        <button onclick="getDeviceInfo()">获取设备信息</button>
+                        <button onclick="getServerStatus()">服务器状态</button>
+                        <button onclick="getClients()">VNC 客户端</button>
                     </div>
                 </div>
-
+                
+                <!-- 快捷操作 -->
                 <div class="panel">
-                    <h2>♿ AssistiveTouch</h2>
-                    <div class="controls-grid">
-                        <button onclick="getAssistiveTouchStatus()">📊 状态</button>
-                        <button onclick="toggleAssistiveTouch('enable')" class="success">✅ 启用</button>
-                        <button onclick="toggleAssistiveTouch('disable')" class="warning">❌ 禁用</button>
+                    <h2>⚡ 快捷操作</h2>
+                    <div class="grid">
+                        <button onclick="apiCall('POST', 'home')">🏠 Home</button>
+                        <button onclick="apiCall('POST', 'taskmanager')">📋 任务管理</button>
+                        <button onclick="apiCall('POST', 'clearapps/smart')">🧹 清理后台</button>
                     </div>
-                    <div id="assistivetouchStatus" class="response-display" style="display:none;"></div>
                 </div>
-
+                
+                <!-- 屏幕控制 -->
                 <div class="panel">
-                    <h2>🏠 Home 控制</h2>
-                    <div class="controls-grid">
-                        <button onclick="apiCall('POST', 'home')">🏠 返回桌面</button>
-                        <button onclick="apiCall('POST', 'taskmanager')">📋 任务管理器</button>
+                    <h2>🔐 屏幕控制</h2>
+                    <div class="grid">
                         <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
                         <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
                     </div>
                 </div>
-
+                
+                <!-- 系统控制 -->
                 <div class="panel">
-                    <h2>系统信息</h2>
-                    <div class="controls-grid">
-                        <button onclick="getDeviceInfo()">📱 设备</button>
-                        <button onclick="getServerStatus()">📊 状态</button>
+                    <h2>⚙️ 系统控制</h2>
+                    <div class="grid">
+                        <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
+                        <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
                     </div>
-                    <div id="systemInfoResponse" class="response-display" style="display:none;"></div>
+                </div>
+                
+                <!-- 音量亮度 -->
+                <div class="panel">
+                    <h2>🔊 音量与亮度</h2>
+                    <div class="slider-group">
+                        <label>音量:</label>
+                        <input type="range" id="volumeSlider" min="0" max="100" value="50">
+                        <span class="slider-value" id="volumeValue">50%</span>
+                        <button class="small" onclick="setVolume()">设置</button>
+                    </div>
+                    <div class="slider-group" style="margin-top: 15px;">
+                        <label>亮度:</label>
+                        <input type="range" id="brightnessSlider" min="0" max="100" value="50">
+                        <span class="slider-value" id="brightnessValue">50%</span>
+                        <button class="small" onclick="setBrightness()">设置</button>
+                    </div>
                 </div>
             </div>
-
+            
             <!-- 右列 -->
             <div>
+                <!-- 文本输入 -->
                 <div class="panel">
-                    <h2>系统控制</h2>
-                    
-                    <div class="api-section">
-                        <h3>🔊 音量控制</h3>
-                        <div class="slider-container">
-                            <input type="range" id="volumeSlider" min="0" max="100" value="50" oninput="updateSliderValue('volumeValue', this.value)">
-                            <span class="slider-value" id="volumeValue">50%</span>
-                            <button onclick="setVolume()">设置</button>
-                            <button onclick="getVolume()">获取</button>
-                        </div>
+                    <h2>⌨️ 文本输入</h2>
+                    <textarea id="inputText" placeholder="输入要发送的文本..."></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="sendInput()">发送文本</button>
+                        <button onclick="sendKey(13)">⏎ 回车</button>
+                        <button onclick="sendKey(8)">⌫ 退格</button>
                     </div>
-
-                    <div class="api-section">
-                        <h3>🔆 亮度控制</h3>
-                        <div class="slider-container">
-                            <input type="range" id="brightnessSlider" min="0" max="100" value="50" oninput="updateSliderValue('brightnessValue', this.value)">
-                            <span class="slider-value" id="brightnessValue">50%</span>
-                            <button onclick="setBrightness()">设置</button>
-                            <button onclick="getBrightness()">获取</button>
-                        </div>
-                    </div>
-
-                    <div class="api-section">
-                        <h3>🔒 屏幕控制</h3>
-                        <div class="controls-grid">
-                            <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
-                            <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
-                        </div>
                 </div>
-                </div>
-
+                
+                <!-- 剪贴板 -->
                 <div class="panel">
-                    <h2>应用管理 (TrollStore)</h2>
+                    <h2>📋 剪贴板</h2>
+                    <textarea id="clipboardText" placeholder="剪贴板内容..."></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="setClipboard()">设置剪贴板</button>
+                        <button onclick="getClipboard()">获取剪贴板</button>
+                    </div>
+                </div>
+                
+                <!-- AssistiveTouch -->
+                <div class="panel">
+                    <h2>✋ AssistiveTouch</h2>
+                    <div class="grid">
+                        <button onclick="getAssistiveTouchStatus()">状态</button>
+                        <button onclick="toggleAssistiveTouch('enable')" class="success">启用</button>
+                        <button onclick="toggleAssistiveTouch('disable')" class="warning">禁用</button>
+                    </div>
+                </div>
+                
+                <!-- 应用管理 -->
+                <div class="panel">
+                    <h2>📦 应用管理</h2>
+                    <h3>安装应用</h3>
+                    <input type="text" id="installPath" placeholder="IPA 文件路径">
+                    <button onclick="installApp()" style="margin-top: 10px;">安装</button>
                     
-                    <div class="api-section">
-                        <h3>📲 安装 IPA</h3>
-                        <div class="input-group">
-                            <input type="text" id="installPath" placeholder="IPA 文件路径" style="flex:2;">
-                            <button onclick="installApp()">安装</button>
-                        </div>
+                    <div class="section-divider"></div>
+                    
+                    <h3>卸载应用</h3>
+                    <input type="text" id="uninstallBundleId" placeholder="Bundle ID">
+                    <button onclick="uninstallApp()" class="danger" style="margin-top: 10px;">卸载</button>
+                    
+                    <div class="section-divider"></div>
+                    
+                    <button onclick="trollStoreDiagnostics()">TrollStore 诊断</button>
+                </div>
+                
+                <!-- 懒人精灵 -->
+                <div class="panel">
+                    <h2>🤖 懒人精灵</h2>
+                    <div class="connection-bar">
+                        <label>端口:</label>
+                        <input type="number" id="triggerPort" value="3333" style="width:80px;">
+                        <label>延迟:</label>
+                        <input type="number" id="triggerDelay" value="5" style="width:60px;">
+                        <button onclick="triggerLazyElf()">触发</button>
                     </div>
-
-                    <div class="api-section">
-                        <h3>🗑️ 卸载应用</h3>
-                        <div class="input-group">
-                            <input type="text" id="uninstallBundleId" placeholder="Bundle ID" style="flex:2;">
-                            <button onclick="uninstallApp()" class="danger">卸载</button>
-                        </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 文件操作 -->
+        <div class="panel">
+            <h2>📁 文件操作</h2>
+            <div class="grid-2" style="display: grid; gap: 20px;">
+                <div>
+                    <h3>写入文本文件</h3>
+                    <input type="text" id="writeFilePath" placeholder="文件路径">
+                    <textarea id="writeFileContent" placeholder="文件内容" style="margin-top: 10px;"></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="writeFile(false)">写入</button>
+                        <button onclick="writeFile(true)">追加</button>
                     </div>
-
-                    <div class="api-section">
-                        <h3>🔍 TrollStore 诊断</h3>
-                        <button onclick="trollStoreDiagnostics()">诊断</button>
+                </div>
+                <div>
+                    <h3>上传文件</h3>
+                    <div class="file-upload" onclick="document.getElementById('uploadFile').click()">
+                        <div class="icon">📤</div>
+                        <div>点击选择文件</div>
+                        <div id="fileName" style="margin-top: 5px; font-size: 12px; color: var(--text-muted);"></div>
+                        <input type="file" id="uploadFile" onchange="onFileSelected(this)">
                     </div>
+                    <input type="text" id="uploadPath" placeholder="目标路径" style="margin-top: 10px;">
+                    <button onclick="uploadFile()" style="margin-top: 10px;">上传</button>
                 </div>
+            </div>
+            <button onclick="checkFile()" style="margin-top: 15px;">检查 zhuangtai.txt</button>
+        </div>
+        
+        <!-- API 文档 -->
+        <div class="panel">
+            <h2>📖 API 参考</h2>
+            <div id="apiRef" class="response-box" style="max-height: 500px;">
+<span class="api-method get">GET</span><b>/api/device</b> - 设备信息
+<span class="api-method get">GET</span><b>/api/status</b> - 服务器状态
+<span class="api-method get">GET</b></span><b>/api/clients</b> - VNC 客户端列表
+<span class="api-method get">GET</span><b>/api/screenshot</b> - 屏幕截图
+
+<span class="api-method post">POST</span><b>/api/input</b> - 输入文本
+<span class="api-method post">POST</span><b>/api/key?code=13</b> - 发送按键
+<span class="api-method post">POST</span><b>/api/clipboard_text</b> - 设置剪贴板
+<span class="api-method get">GET</span><b>/api/clipboard_text</b> - 获取剪贴板
+
+<span class="api-method post">POST</span><b>/api/writefile_text?path=xxx</b> - 写入文件
+<span class="api-method post">POST</span><b>/api/upload?path=xxx</b> - 上传文件
+
+<span class="api-method post">POST</span><b>/api/reboot</b> - 重启
+<span class="api-method post">POST</span><b>/api/respring</b> - 注销
+<span class="api-method post">POST</b>/api/screen/lock</b> - 锁屏
+<span class="api-method post">POST</span><b>/api/screen/unlock</b> - 解锁
+<span class="api-method post">POST</span><b>/api/home</b> - Home 键
+<span class="api-method post">POST</span><b>/api/taskmanager</b> - 任务管理器
+
+<span class="api-method get">GET</span><b>/api/volume</b> - 获取音量
+<span class="api-method post">POST</span><b>/api/volume?value=0.5</b> - 设置音量
+<span class="api-method get">GET</span><b>/api/brightness</b> - 获取亮度
+<span class="api-method post">POST</span><b>/api/brightness?value=0.5</b> - 设置亮度
+
+<span class="api-method post">POST</span><b>/api/install?path=xxx.ipa</b> - 安装应用
+<span class="api-method post">POST</span><b>/api/uninstall?bundleId=xxx</b> - 卸载应用
+<span class="api-method get">GET</span><b>/api/trollstore/diagnostics</b> - TrollStore 诊断
+
+<span class="api-method post">POST</span><b>/api/clearapps/smart</b> - 智能清理后台
+
+<span class="api-method get">GET</span><b>/api/assistivetouch</b> - 小白点状态
+<span class="api-method post">POST</span><b>/api/assistivetouch?action=enable</b> - 启用小白点
+<span class="api-method post">POST</span><b>/api/assistivetouch?action=disable</b> - 禁用小白点
+
+<span class="api-method get">GET</span><b>/api/trigger?port=3333&delay=5</b> - 触发懒人精灵
             </div>
         </div>
-
+        
+        <!-- 日志 -->
         <div class="panel">
-            <h2>文本操作</h2>
-            
-            <div class="api-section">
-                <h3>📝 输入文本到焦点输入框</h3>
-                <textarea id="inputText" placeholder="输入要发送到当前焦点输入框的文本..."></textarea>
-                <div class="input-group" style="margin-top:10px;">
-                    <button onclick="sendInput()">发送输入</button>
-                    <button onclick="sendKey(13)">⏎ 回车</button>
-                    <button onclick="sendKey(8)">⌫ 退格</button>
-                    <button onclick="sendKey(9)">⇥ Tab</button>
-                    <button onclick="sendKey(27)">ESC</button>
-                </div>
-                <p class="note">提示: 发送前请确保设备上有输入框获得焦点</p>
-            </div>
-
-            <div class="api-section">
-                <h3>📋 剪贴板操作</h3>
-                <textarea id="clipboardText" placeholder="输入要复制到剪贴板的文本..."></textarea>
-                <div class="input-group" style="margin-top:10px;">
-                    <button onclick="setClipboard()">设置剪贴板</button>
-                    <button onclick="getClipboard()">获取剪贴板</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="panel">
-            <h2>文件操作</h2>
-            
-            <div class="api-section">
-                <h3>📝 写入文本文件</h3>
-                <div class="input-group">
-                    <input type="text" id="writeFilePath" placeholder="文件路径 (如: /var/mobile/Documents/test.txt)">
-                </div>
-                <textarea id="writeFileContent" placeholder="文件内容..."></textarea>
-                <div class="input-group" style="margin-top:10px;">
-                    <button onclick="writeFile(false)">写入</button>
-                    <button onclick="writeFile(true)">追加</button>
-                </div>
-            </div>
-
-            <div class="api-section">
-                <h3>📤 上传文件</h3>
-                <div class="input-group">
-                    <input type="file" id="uploadFile" style="flex:1;">
-                </div>
-                <div class="input-group">
-                    <input type="text" id="uploadPath" placeholder="目标路径 (如: /var/mobile/Documents/)">
-                    <button onclick="uploadFile()">上传</button>
-                </div>
-            </div>
-
-            <div class="api-section">
-                <h3>📄 检查文件</h3>
-                <button onclick="checkFile()">检查 zhuangtai.txt</button>
-            </div>
-
-            <div class="api-section">
-                <h3>📋 Plist 文件操作</h3>
-                <div class="input-group">
-                    <input type="text" id="plistPath" placeholder="plist 路径 (如: /var/mobile/Library/Preferences/com.jao.yhdl.plist)" style="flex:1;">
-                </div>
-                <div class="input-group" style="margin-top:5px;">
-                    <input type="text" id="plistSetKey" placeholder="设置键名 (如: jieao_GameSid)" style="width:45%;">
-                    <input type="text" id="plistSetValue" placeholder="设置值" style="width:45%;">
-                </div>
-                <div class="input-group" style="margin-top:5px;">
-                    <input type="text" id="plistMatchKey" placeholder="匹配键名 (部分匹配)" style="width:45%;">
-                    <input type="text" id="plistMatchValue" placeholder="匹配后设置的值" style="width:45%;">
-                </div>
-                <div class="input-group" style="margin-top:10px;">
-                    <button onclick="modifyPlist()" class="success">🔧 修改 Plist</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="panel">
-            <h2>其他</h2>
-            
-            <div class="api-section">
-                <h3>🤖 触发懒人精灵</h3>
-                <div class="input-group">
-                    <label>端口:</label>
-                    <input type="number" id="triggerPort" value="3333" style="width:80px;">
-                    <label>延迟(秒):</label>
-                    <input type="number" id="triggerDelay" value="5" style="width:80px;">
-                    <button onclick="triggerLazyElf()">触发</button>
-                </div>
-                <p class="note">IP 会自动检测为调用者的 IP</p>
-            </div>
-        </div>
-
-        <div class="panel">
-            <h2>日志 <button onclick="clearLog()" style="float:right;">清空</button></h2>
-            <div id="log"></div>
+            <h2>📋 日志 <button onclick="clearLog()" style="float: right; padding: 5px 15px;">清空</button></h2>
+            <div id="log" class="log-container"></div>
         </div>
     </div>
-
+    
     <script>
-        let baseUrl = '', autoRefreshInterval = null, isAutoRefreshing = false;
-        let screenWidth = 0, screenHeight = 0;
-
+        let baseUrl = '';
+        let autoRefreshInterval = null;
+        let isAutoRefreshing = false;
+        let selectedFile = null;
+        
+        // 日志
         function log(msg, type = 'info') {
             const el = document.getElementById('log');
             const entry = document.createElement('div');
@@ -348,322 +543,313 @@
             el.appendChild(entry);
             el.scrollTop = el.scrollHeight;
         }
-        function clearLog() { document.getElementById('log').innerHTML = ''; }
-
+        
+        function clearLog() {
+            document.getElementById('log').length = 0;
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // 获取基础 URL
         function getBaseUrl() {
             const ip = document.getElementById('ip').value.trim();
             const port = document.getElementById('port').value;
-            if (!ip) { alert('请输入设备 IP'); return null; }
+            if (!ip) {
+                alert('请输入设备 IP');
+                return null;
+            }
             return `http://${ip}:${port}`;
         }
-
+        
+        // 连接
         async function connect() {
             baseUrl = getBaseUrl();
             if (!baseUrl) return;
-            log('连接中...', 'info');
+            
+            log('正在连接...', 'info');
             try {
                 const res = await fetch(`${baseUrl}/api/device`);
                 if (res.ok) {
                     const data = await res.json();
-                    log(`成功: ${data.deviceName} (${data.deviceModelName}) iOS ${data.systemVersion}`, 'success');
+                    log(`连接成功: ${data.deviceName} (${data.deviceModelName || data.deviceModel}) iOS ${data.systemVersion}`, 'success');
+                    
                     document.getElementById('status').textContent = '已连接';
-                    document.getElementById('status').className = 'status connected';
+                    document.getElementById('status').className = 'status-badge connected';
                     
-                    screenWidth = data.screenWidth || 0;
-                    screenHeight = data.screenHeight || 0;
-                    
-                    document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
-                    document.getElementById('deviceInfo').style.display = 'block';
+                    document.getElementById('deviceInfo').textContent = JSON.stringify(data, null, 2);
+                    document.getElementById('deviceInfo').classList.remove('hidden');
                     
                     refreshScreen();
-                } else throw new Error('HTTP ' + res.status);
+                } else {
+                    throw new Error('HTTP ' + res.status);
+                }
             } catch (err) {
-                log(`失败: ${err.message}`, 'error');
+                log(`连接失败: ${err.message}`, 'error');
                 alert('连接失败: ' + err.message);
             }
         }
-
+        
+        // 断开
         function disconnect() {
             stopAutoRefresh();
             baseUrl = '';
             document.getElementById('status').textContent = '未连接';
-            document.getElementById('status').className = 'status disconnected';
-            document.getElementById('screen').textContent = '点击连接后显示屏幕';
-            document.getElementById('screen').className = 'no-image';
-            document.getElementById('deviceInfo').style.display = 'none';
-            log('已断开', 'info');
+            document.getElementById('status').className = 'status-badge disconnected';
+            document.getElementById('screen').innerHTML = '<div class="screen-placeholder">连接后显示屏幕</div>';
+            document.getElementById('deviceInfo').classList.add('hidden');
+            log('已断开连接', 'info');
         }
-
+        
+        // 刷新屏幕
         async function refreshScreen() {
             if (!baseUrl) return;
+            
             try {
                 const rotation = document.getElementById('rotation').value;
                 const format = document.getElementById('format').value;
                 const quality = document.getElementById('quality').value;
                 const scale = document.getElementById('scale').value;
-                const res = await fetch(`${baseUrl}/api/screenshot?${Date.now()}&rotation=${rotation}&format=${format}&quality=${quality}&scale=${scale}`);
+                
+                const res = await fetch(`${baseUrl}/api/screenshot?ts=${Date.now()}&rotation=${rotation}&format=${format}&quality=${quality}&scale=${scale}`);
+                
                 if (res.ok) {
                     const blob = await res.blob();
                     const url = URL.createObjectURL(blob);
                     const screen = document.getElementById('screen');
                     screen.innerHTML = '';
                     const img = document.createElement('img');
-                    img.style.maxWidth = '100%';
-                    img.style.maxHeight = '500px';
-                    img.onload = () => {
-                        document.getElementById('screenSize').textContent = `(${img.naturalWidth}x${img.naturalHeight})`;
-                        screen.className = '';
-                    };
                     img.src = url;
                     screen.appendChild(img);
+                    log(`截图已刷新 (${format.toUpperCase()})`, 'success');
                 }
-            } catch (err) { console.error(err); }
-        }
-
-        function toggleAutoRefresh() {
-            const btn = document.getElementById('refreshBtn');
-            if (isAutoRefreshing) {
-                stopAutoRefresh();
-                btn.textContent = '开始刷新';
-            } else {
-                if (!baseUrl) { alert('请先连接'); return; }
-                isAutoRefreshing = true;
-                const fps = parseInt(document.getElementById('fps').value) || 5;
-                autoRefreshInterval = setInterval(refreshScreen, 1000 / fps);
-                btn.textContent = '停止刷新';
-                log(`自动刷新 ${fps} FPS`, 'info');
+            } catch (err) {
+                log(`截图失败: ${err.message}`, 'error');
             }
         }
+        
+        // 自动刷新
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            
+            if (isAutoRefreshing) {
+                stopAutoRefresh();
+                btn.textContent = '自动刷新';
+                btn.className = '';
+            } else {
+                if (!baseUrl) {
+                    alert('请先连接');
+                    return;
+                }
+                isAutoRefreshing = true;
+                const interval = setInterval(refreshScreen, 2000);
+                autoRefreshInterval = interval;
+                btn.textContent = '停止刷新';
+                btn.className = 'warning';
+                log('开始自动刷新 (2秒/次)', 'info');
+            }
+        }
+        
         function stopAutoRefresh() {
             isAutoRefreshing = false;
-            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
         }
-
+        
+        // API 调用
         async function apiCall(method, endpoint, body = null, params = '') {
-            if (!baseUrl) { alert('请先连接'); return; }
-            log(`${method} /api/${endpoint}${params}`, 'info');
+            if (!baseUrl) {
+                alert('请先连接');
+                return null;
+            }
+            
+            const url = `${baseUrl}/api/${endpoint}${params}`;
+            log(`${method} ${url}`, 'info');
+            
             try {
                 const opts = { method: method };
                 if (body) {
-                    opts.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+                    opts.headers = { 'Content-Type': 'text/plain; charset=utf-8' };
                     opts.body = body;
                 }
-                const res = await fetch(`${baseUrl}/api/${endpoint}${params}`, opts);
+                
+                const res = await fetch(url, opts);
                 const data = await res.json().catch(() => ({}));
-                log(`${endpoint}: ${res.ok ? '成功' : '失败 ' + res.status} ${JSON.stringify(data).slice(0, 150)}`, res.ok ? 'success' : 'error');
+                
+                if (res.ok) {
+                    log(`成功: ${JSON.stringify(data).slice(0, 100)}`, 'success');
+                } else {
+                    log(`失败 (${res.status}): ${JSON.stringify(data)}`, 'error');
+                }
+                
                 return data;
-            } catch (err) { 
-                log(`${endpoint}: ${err.message}`, 'error'); 
+            } catch (err) {
+                log(`错误: ${err.message}`, 'error');
                 return null;
             }
         }
-
-        function updateSliderValue(id, value) {
-            document.getElementById(id).textContent = value + '%';
+        
+        // 设备信息
+        async function getDeviceInfo() {
+            const data = await apiCall('GET', 'device');
+            if (data) {
+                document.getElementById('deviceInfo').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('deviceInfo').classList.remove('hidden');
+            }
         }
-
+        
+        async function getServerStatus() {
+            await apiCall('GET', 'status');
+        }
+        
+        async function getClients() {
+            await apiCall('GET', 'clients');
+        }
+        
+        // 音量亮度
         async function setVolume() {
             const value = document.getElementById('volumeSlider').value / 100;
             await apiCall('POST', 'volume', null, `?value=${value}`);
         }
-        async function getVolume() {
-            const data = await apiCall('GET', 'volume');
-            if (data && data.volume !== undefined) {
-                document.getElementById('volumeSlider').value = data.volume * 100;
-                document.getElementById('volumeValue').textContent = Math.round(data.volume * 100) + '%';
-            }
-        }
-
+        
         async function setBrightness() {
             const value = document.getElementById('brightnessSlider').value / 100;
             await apiCall('POST', 'brightness', null, `?value=${value}`);
         }
-        async function getBrightness() {
-            const data = await apiCall('GET', 'brightness');
-            if (data && data.brightness !== undefined) {
-                document.getElementById('brightnessSlider').value = data.brightness * 100;
-                document.getElementById('brightnessValue').textContent = Math.round(data.brightness * 100) + '%';
-            }
-        }
-
-        async function getDeviceInfo() {
-            const data = await apiCall('GET', 'device');
-            if (data) {
-                document.getElementById('deviceInfoContent').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('deviceInfo').style.display = 'block';
-                screenWidth = data.screenWidth || 0;
-                screenHeight = data.screenHeight || 0;
-            }
-        }
-
-        async function saveDevice() {
-            const clientIp = document.getElementById('clientIp').value.trim();
-            let url = 'device?save=true';
-            if (clientIp) {
-                url += `&ip=${encodeURIComponent(clientIp)}`;
-            }
-            const data = await apiCall('GET', url);
-            if (data) {
-                const result = data._saved ? '保存成功' : '保存失败';
-                const msg = data._saved ? `${result} → /var/mobile/Media/fuwuduan.txt\n设备ID固化文件: /var/mobile/Media/.matisu_device_id\n固化设备ID: ${data.deviceId}` : `${result}: ${data._saveError}`;
-                log(msg, data._saved ? 'success' : 'error');
-            }
-        }
-
-        async function getServerStatus() {
-            const data = await apiCall('GET', 'status');
-            if (data) showResponse('systemInfoResponse', data);
-        }
-
-        async function getClients() { const data = await apiCall('GET', 'clients'); if (data) showResponse('systemInfoResponse', data); }
-
-        async function getAssistiveTouchStatus() {
-            const data = await apiCall('GET', 'assistivetouch');
-            if (data) {
-                if (data.success) {
-                    showResponse('assistivetouchStatus', data);
-                    log(`AssistiveTouch: ${data.enabled ? '已启用' : '已禁用'}`, data.enabled ? 'success' : 'warning');
-                } else {
-                    showResponse('assistivetouchStatus', data);
-                    log(`获取状态失败: ${data.error || data.message}`, 'error');
-                }
-            }
-        }
-
-        async function toggleAssistiveTouch(action) {
-            const data = await apiCall('POST', `assistivetouch?action=${action}`);
-            if (data) {
-                if (data.success) {
-                    log(`AssistiveTouch ${action === 'enable' ? '启用' : '禁用'}成功`, 'success');
-                    getAssistiveTouchStatus();
-                } else {
-                    log(`操作失败: ${data.error || data.message}`, 'error');
-                }
-            }
-        }
-
-        function showResponse(id, data) {
-            document.getElementById(id).textContent = JSON.stringify(data, null, 2);
-            document.getElementById(id).style.display = 'block';
-        }
-
+        
+        // 文本输入
         async function sendInput() {
             const text = document.getElementById('inputText').value;
-            if (!text) { alert('请输入文本'); return; }
+            if (!text) {
+                alert('请输入文本');
+                return;
+            }
             await apiCall('POST', 'input', text);
         }
-
+        
         async function sendKey(code) {
             await apiCall('POST', 'key', null, `?code=${code}`);
         }
-
+        
+        // 剪贴板
         async function setClipboard() {
             const text = document.getElementById('clipboardText').value;
-            if (!text) { alert('请输入文本'); return; }
-            await apiCall('POST', 'clipboard_text', text);
-        }
-
-        async function getClipboard() {
-            const data = await apiCall('GET', 'clipboard_text');
-            if (data && data.text !== undefined) {
-                document.getElementById('clipboardText').value = data.text;
-            }
-        }
-
-        async function writeFile(append) {
-            const path = document.getElementById('writeFilePath').value;
-            const content = document.getElementById('writeFileContent').value;
-            if (!path) { alert('请输入文件路径'); return; }
-            await apiCall('POST', 'writefile_text', content, `?path=${encodeURIComponent(path)}&append=${append}`);
-        }
-
-        async function uploadFile() {
-            const fileInput = document.getElementById('uploadFile');
-            const path = document.getElementById('uploadPath').value;
-            if (!fileInput.files.length) { alert('请选择文件'); return; }
-            if (!path) { alert('请输入目标路径'); return; }
-            
-            const file = fileInput.files[0];
-            const fullPath = path.endsWith('/') ? path + file.name : path;
-            
-            log(`上传 ${file.name} 到 ${fullPath}...`, 'info');
-            try {
-                const res = await fetch(`${baseUrl}/api/upload?path=${encodeURIComponent(fullPath)}`, {
-                    method: 'POST',
-                    body: file
-                });
-                const data = await res.json();
-                log(`上传: ${data.success ? '成功' : '失败'} ${data.bytes || ''} bytes`, data.success ? 'success' : 'error');
-            } catch (err) { log(`上传失败: ${err.message}`, 'error'); }
-        }
-
-        async function checkFile() { await apiCall('GET', 'checkfile'); }
-
-        async function modifyPlist() {
-            const path = document.getElementById('plistPath').value.trim();
-            const setKey = document.getElementById('plistSetKey').value.trim();
-            const setValue = document.getElementById('plistSetValue').value.trim();
-            const matchKey = document.getElementById('plistMatchKey').value.trim();
-            const matchValue = document.getElementById('plistMatchValue').value.trim();
-
-            if (!path) {
-                alert('请输入 plist 路径');
+            if (!text) {
+                alert('请输入文本');
                 return;
             }
-
-            const requestData = { path };
-
-            // 添加 set 参数
-            if (setKey && setValue) {
-                requestData.set = {};
-                requestData.set[setKey] = setValue;
-            }
-
-            // 添加 match 参数
-            if (matchKey) {
-                requestData.match = matchKey;
-                if (matchValue) {
-                    requestData.matchValue = matchValue;
-                }
-            }
-
-            try {
-                const res = await fetch(`${baseUrl}/api/plist`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(requestData)
-                });
-                const data = await res.json();
-                if (data.success) {
-                    log(`Plist 修改成功！修改了 ${data.modified.length} 个键: ${data.modified.join(', ')}`, 'success');
-                } else {
-                    log(`Plist 修改失败: ${data.error}`, 'error');
-                }
-            } catch (err) {
-                log(`Plist 操作失败: ${err.message}`, 'error');
-            }
+            await apiCall('POST', 'clipboard_text', text);
         }
-
+        
+        async function getClipboard() {
+            await apiCall('GET', 'clipboard_text');
+        }
+        
+        // AssistiveTouch
+        async function getAssistiveTouchStatus() {
+            await apiCall('GET', 'assistivetouch');
+        }
+        
+        async function toggleAssistiveTouch(action) {
+            await apiCall('POST', `assistivetouch`, null, `?action=${action}`);
+        }
+        
+        // 应用管理
         async function installApp() {
             const path = document.getElementById('installPath').value;
-            if (!path) { alert('请输入 IPA 路径'); return; }
+            if (!path) {
+                alert('请输入 IPA 路径');
+                return;
+            }
             await apiCall('POST', 'install', null, `?path=${encodeURIComponent(path)}`);
         }
-
+        
         async function uninstallApp() {
             const bundleId = document.getElementById('uninstallBundleId').value;
-            if (!bundleId) { alert('请输入 Bundle ID'); return; }
+            if (!bundleId) {
+                alert('请输入 Bundle ID');
+                return;
+            }
             if (!confirm(`确定要卸载 ${bundleId} 吗？`)) return;
             await apiCall('POST', 'uninstall', null, `?bundleId=${encodeURIComponent(bundleId)}`);
         }
-
-        async function trollStoreDiagnostics() { await apiCall('GET', 'trollstore/diagnostics'); }
-
+        
+        async function trollStoreDiagnostics() {
+            await apiCall('GET', 'trollstore/diagnostics');
+        }
+        
+        // 懒人精灵
         async function triggerLazyElf() {
             const port = document.getElementById('triggerPort').value;
             const delay = document.getElementById('triggerDelay').value;
             await apiCall('GET', 'trigger', null, `?port=${port}&delay=${delay}`);
         }
+        
+        // 文件操作
+        async function writeFile(append) {
+            const path = document.getElementById('writeFilePath').value;
+            const content = document.getElementById('writeFileContent').value;
+            if (!path) {
+                alert('请输入文件路径');
+                return;
+            }
+            await apiCall('POST', 'writefile_text', content, `?path=${encodeURIComponent(path)}&append=${append}`);
+        }
+        
+        function onFileSelected(input) {
+            if (input.files.length > 0) {
+                selectedFile = input.files[0];
+                document.getElementById('fileName').textContent = selectedFile.name;
+            }
+        }
+        
+        async function uploadFile() {
+            if (!selectedFile) {
+                alert('请选择文件');
+                return;
+            }
+            const path = document.getElementById('uploadPath').value;
+            if (!path) {
+                alert('请输入目标路径');
+                return;
+            }
+            
+            const fullPath = path.endsWith('/') ? path + selectedFile.name : path;
+            log(`上传 ${selectedFile.name}...`, 'info');
+            
+            try {
+                const res = await fetch(`${baseUrl}/api/upload?path=${encodeURIComponent(fullPath)}`, {
+                    method: 'POST',
+                    body: selectedFile
+                });
+                const data = await res.json();
+                log(`上传: ${data.success ? '成功' : '失败'} (${data.bytes || 0} bytes)`, data.success ? 'success' : 'error');
+            } catch (err) {
+                log(`上传失败: ${err.message}`, 'error');
+            }
+        }
+        
+        async function checkFile() {
+            await apiCall('GET', 'checkfile');
+        }
+        
+        // 滑块值更新
+        document.getElementById('volumeSlider')?.addEventListener('input', function() {
+            document.getElementById('volumeValue').textContent = this.value + '%';
+        });
+        
+        document.getElementById('brightnessSlider')?.addEventListener('input', function() {
+            document.getElementById('brightnessValue').textContent = this.value + '%';
+        });
+        
+        // 键盘快捷键
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                if (document.activeElement.id === 'inputText') {
+                    sendInput();
+                }
+            }
+        });
     </script>
 </body>
 </html>

@@ -623,6 +623,27 @@
     // 电量为 -1 表示无法获取
     NSNumber *batteryLevelNumber = (batteryLevel >= 0) ? @(batteryLevel * 100) : @(-1);
     
+    // 获取存储空间信息
+    NSError *storageError = nil;
+    NSDictionary *storageAttrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:&storageError];
+    
+    NSMutableDictionary *storage = [NSMutableDictionary dictionary];
+    if (storageAttrs) {
+        unsigned long long totalSpace = [storageAttrs[NSFileSystemSize] unsignedLongLongValue];
+        unsigned long long freeSpace = [storageAttrs[NSFileSystemFreeSize] unsignedLongLongValue];
+        unsigned long long usedSpace = totalSpace - freeSpace;
+        
+        storage[@"totalBytes"] = @(totalSpace);
+        storage[@"freeBytes"] = @(freeSpace);
+        storage[@"usedBytes"] = @(usedSpace);
+        storage[@"totalGB"] = [NSString stringWithFormat:@"%.1f", totalSpace / (1024.0 * 1024.0 * 1024.0)];
+        storage[@"freeGB"] = [NSString stringWithFormat:@"%.1f", freeSpace / (1024.0 * 1024.0 * 1024.0)];
+        storage[@"usedGB"] = [NSString stringWithFormat:@"%.1f", usedSpace / (1024.0 * 1024.0 * 1024.0)];
+        storage[@"usagePercent"] = @(totalSpace > 0 ? (usedSpace * 100.0 / totalSpace) : 0);
+    } else {
+        storage[@"error"] = storageError.localizedDescription ?: @"Unable to get storage info";
+    }
+    
     // 构建设备信息字典
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     result[@"deviceName"] = deviceName ?: @"Unknown";
@@ -633,6 +654,7 @@
     result[@"systemName"] = [[UIDevice currentDevice] systemName] ?: @"iOS";
     result[@"batteryLevel"] = batteryLevelNumber;
     result[@"batteryState"] = batteryStateString;
+    result[@"storage"] = storage;
     
     // 处理 save 参数
     NSString *saveParam = query[@"save"];
