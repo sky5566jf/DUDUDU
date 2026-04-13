@@ -28,7 +28,11 @@
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
-#import <IOKit/hidsystem/IOHIDUsageTables.h>
+
+// HID Page 常量
+#ifndef kHIDPage_KeyboardOrKeypad
+#define kHIDPage_KeyboardOrKeypad 0x07
+#endif
 #import <stdlib.h>  // 用于 system()
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
