@@ -217,14 +217,20 @@
     // API 路由处理
     if ([path isEqualToString:@"/api/screenshot"]) {
         return [self handleScreenshot:query];
-    } else if ([path isEqualToString:@"/api/writefile"]) {
-        return [self handleWriteFile:query body:body];
     } else if ([path isEqualToString:@"/api/writefile_text"]) {
         return [self handleWriteFileText:query body:body];
     } else if ([path isEqualToString:@"/api/clipboard"]) {
-        return [self handleClipboard:query body:body];
+        if ([method isEqualToString:@"GET"]) {
+            return [self handleClipboardGet:query];
+        } else {
+            return [self handleClipboard:query body:body];
+        }
     } else if ([path isEqualToString:@"/api/clipboard_text"]) {
-        return [self handleClipboardText:query body:body];
+        if ([method isEqualToString:@"GET"]) {
+            return [self handleClipboardTextGet:query];
+        } else {
+            return [self handleClipboardText:query body:body];
+        }
     } else if ([path isEqualToString:@"/api/input"]) {
         return [self handleInput:query body:body];
     } else if ([path isEqualToString:@"/api/key"]) {
@@ -249,8 +255,6 @@
         return [self handleUninstallApp:query];
     } else if ([path isEqualToString:@"/api/trollstore/diagnostics"]) {
         return [self handleTrollStoreDiagnostics];
-    } else if ([path isEqualToString:@"/api/trigger"]) {
-        return [self handleTrigger:query clientAddr:clientAddr];
     } else if ([path isEqualToString:@"/api/reboot"]) {
         return [self handleReboot];
     } else if ([path isEqualToString:@"/api/respring"]) {
@@ -346,57 +350,6 @@
         response.contentType = @"application/json";
         NSDictionary *error = @{@"error": @"Screenshot failed"};
         response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-    }
-    
-    return response;
-}
-
-// POST /api/writefile?path=/xxx&append=true
-// Body: base64 encoded content
-- (TVNCHttpResponse *)handleWriteFile:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *filePath = query[@"path"];
-    if (!filePath || filePath.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Missing path parameter"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    BOOL append = [query[@"append"] isEqualToString:@"true"];
-    
-    // 解析 body（base64）
-    NSString *base64Content = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-    base64Content = [base64Content stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    
-    NSData *contentData = [[NSData alloc] initWithBase64EncodedString:base64Content options:0];
-    if (!contentData) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Invalid base64 content"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
-    NSError *error = nil;
-    BOOL success = [[TVNCApiManager sharedManager] writeContent:contentData
-                                                      toFilePath:filePath
-                                                          append:append
-                                                           error:&error];
-    
-    if (success) {
-        response.statusCode = 200;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{@"success": @YES, @"path": filePath, @"bytes": @(contentData.length)};
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSString *errMsg = error ? error.localizedDescription : @"Unknown error";
-        NSDictionary *result = @{@"success": @NO, @"error": errMsg};
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     }
     
     return response;
@@ -511,6 +464,33 @@
     return response;
 }
 
+// GET /api/clipboard - 获取剪贴板内容
+- (TVNCHttpResponse *)handleClipboardGet:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *text = [[TVNCApiManager sharedManager] getClipboardText];
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{@"success": @YES, @"text": text ?: @""};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/clipboard_text - 获取剪贴板内容（纯文本）
+- (TVNCHttpResponse *)handleClipboardTextGet:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *text = [[TVNCApiManager sharedManager] getClipboardText];
+    
+    response.statusCode = 200;
+    response.contentType = @"text/plain; charset=utf-8";
+    response.body = [text ? [text dataUsingEncoding:NSUTF8StringEncoding] : [NSData data]];
+    
+    return response;
+}
+
 // GET /api/clients
 - (TVNCHttpResponse *)handleClients {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -552,8 +532,18 @@
 - (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
-    // 获取设备名称
+    // 获取设备名称 (支持 iOS 16+)
     NSString *deviceName = [[UIDevice currentDevice] name];
+    // 备用方案：iOS 16+ 可能返回 nil，使用 hostName
+    if (!deviceName || deviceName.length == 0) {
+        deviceName = [[NSHost currentHost] localizedName];
+    }
+    if (!deviceName || deviceName.length == 0) {
+        deviceName = [[NSProcessInfo processInfo] hostName];
+    }
+    if (!deviceName || deviceName.length == 0) {
+        deviceName = @"iPhone";
+    }
     
     // 获取系统版本
     NSString *systemVersion = [[UIDevice currentDevice] systemVersion];
@@ -1589,118 +1579,8 @@
     return response;
 }
 
-// GET /api/trigger?ip=192.168.x.x&port=3333&delay=5
-// 等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行
-- (TVNCHttpResponse *)handleTrigger:(NSDictionary *)query clientAddr:(nullable NSString *)clientAddr {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    // 获取目标 IP（优先级：传入参数 > 调用者IP > 127.0.0.1）
-    NSString *targetIP = query[@"ip"];
-    if (!targetIP || targetIP.length == 0) {
-        // 如果没有传 IP 参数，使用调用者的 IP
-        if (clientAddr && clientAddr.length > 0) {
-            targetIP = clientAddr;
-            TVLog(@"HTTP Server: Using caller's IP: %@", targetIP);
-        } else {
-            targetIP = @"127.0.0.1";
-        }
-    }
-    
-    // 获取目标端口（默认 3333）
-    NSString *portStr = query[@"port"] ?: @"3333";
-    NSInteger port = [portStr integerValue];
-    if (port <= 0 || port > 65535) {
-        port = 3333;
-    }
-    
-    // 获取延迟秒数（默认 5 秒）
-    NSString *delayStr = query[@"delay"] ?: @"5";
-    NSInteger delay = [delayStr integerValue];
-    if (delay < 0) {
-        delay = 5;
-    }
-    
-    TVLog(@"HTTP Server: Trigger request - IP: %@, Port: %ld, Delay: %ld seconds", 
-          targetIP, (long)port, (long)delay);
-    
-    // 在后台线程执行延迟和 HTTP 请求
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 等待指定秒数
-        if (delay > 0) {
-            TVLog(@"HTTP Server: Waiting %ld seconds before sending request...", (long)delay);
-            [NSThread sleepForTimeInterval:(NSTimeInterval)delay];
-        }
-        
-        // 构建请求 URL
-        NSString *urlString = [NSString stringWithFormat:@"http://%@:%ld/api/command", targetIP, (long)port];
-        NSURL *url = [NSURL URLWithString:urlString];
-        
-        if (!url) {
-            TVLog(@"HTTP Server: Invalid URL: %@", urlString);
-            return;
-        }
-        
-        // 创建请求
-        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-        request.HTTPMethod = @"POST";
-        request.timeoutInterval = 30.0;
-        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        
-        // 构建请求体
-        NSDictionary *bodyDict = @{@"cmd": @"runscript"};
-        NSError *jsonError = nil;
-        NSData *bodyData = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:&jsonError];
-        
-        if (jsonError) {
-            TVLog(@"HTTP Server: Failed to serialize JSON: %@", jsonError.localizedDescription);
-            return;
-        }
-        
-        request.HTTPBody = bodyData;
-        
-        TVLog(@"HTTP Server: Sending POST request to %@", urlString);
-        
-        // 发送请求
-        NSURLSession *session = [NSURLSession sharedSession];
-        NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable urlResponse, NSError * _Nullable error) {
-            if (error) {
-                TVLog(@"HTTP Server: Request failed - %@", error.localizedDescription);
-            } else {
-                NSHTTPURLResponse *httpResponse = (NSHTTPURLResponse *)urlResponse;
-                TVLog(@"HTTP Server: Request completed - Status: %ld", (long)httpResponse.statusCode);
-                if (data && data.length > 0) {
-                    NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                    TVLog(@"HTTP Server: Response - %@", responseString);
-                }
-            }
-        }];
-        
-        [task resume];
-    });
-    
-    // 立即返回响应（不等待后台任务完成）
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    
-    NSDictionary *result = @{
-        @"success": @YES,
-        @"message": @"Trigger scheduled",
-        @"target": @{
-            @"ip": targetIP,
-            @"port": @(port)
-        },
-        @"delay": @(delay),
-        @"command": @"runscript"
-    };
-    
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
-    return response;
-}
-
-// POST /api/uninstall?bundleId=com.example.app
-// 通过 TrollStore 卸载应用
-- (TVNCHttpResponse *)handleUninstallApp:(NSDictionary *)query {
+// GET /api/clients
+- (TVNCHttpResponse *)handleClients:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
     NSString *bundleId = query[@"bundleId"];
@@ -1754,7 +1634,6 @@
         "<body><h1>TrollVNC HTTP API</h1>"
         "<h2>Endpoints:</h2><ul>"
         "<li><b>GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0&scale=1.0</b> - 获取截图（rotation: 0=Home下, 90=Home右, 180=Home上, 270=Home左; scale: 0.1~1.0 缩放比例）</li>"
-        "<li><b>POST /api/writefile?path=/xxx&append=true|false</b> - 写入文件（body: base64）</li>"
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
@@ -1770,7 +1649,6 @@
         "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
         "<li><b>POST /api/uninstall?bundleId=com.xxx.app</b> - 通过 TrollStore 卸载应用</li>"
         "<li><b>GET /api/trollstore/diagnostics</b> - 获取 TrollStore 诊断信息</li>"
-        "<li><b>GET /api/trigger?port=3333&delay=5</b> - 触发懒人精灵运行脚本（IP 自动检测）</li>"
         "<li><b>POST /api/reboot</b> - 重启设备</li>"
         "<li><b>POST /api/respring</b> - 注销设备（Respring），15秒后自动解锁屏幕</li>"
         "<li><b>POST /api/screen/lock</b> - 锁定屏幕（电源键）</li>"

@@ -209,8 +209,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)lockDeviceScreen;
 
 /**
- * 解锁屏幕（唤醒并滑动解锁）
- * 先唤醒屏幕，等待后执行向上滑动解锁
+ * 解锁屏幕
+ * 方式：按一下 Home 键唤醒，等待 1.5 秒，再按一次 Home 键解锁
  */
 - (BOOL)unlockDeviceScreen;
 

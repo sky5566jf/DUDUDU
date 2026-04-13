@@ -396,6 +396,27 @@
                         <button onclick="sendKey(13)">⏎ 回车</button>
                         <button onclick="sendKey(8)">⌫ 退格</button>
                     </div>
+                    
+                    <h3 style="margin-top: 15px; font-size: 14px;">常用按键 (macOS 键码)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(27)" title="Escape">ESC</button>
+                        <button onclick="sendKey(32)" title="Space">空格</button>
+                        <button onclick="sendKey(9)" title="Tab">Tab</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">方向键 (macOS 键码)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(126)" title="Up">↑</button>
+                        <button onclick="sendKey(125)" title="Down">↓</button>
+                        <button onclick="sendKey(123)" title="Left">←</button>
+                        <button onclick="sendKey(124)" title="Right">→</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(115)" title="Home">Home</button>
+                        <button onclick="sendKey(119)" title="End">End</button>
+                        <button onclick="sendKey(116)" title="PageUp">PgUp</button>
+                        <button onclick="sendKey(117)" title="PageDown">PgDn</button>
+                    </div>
                 </div>
                 
                 <!-- 剪贴板 -->
@@ -489,6 +510,7 @@
 
 <span class="api-method post">POST</span><b>/api/input</b> - 输入文本
 <span class="api-method post">POST</span><b>/api/key?code=13</b> - 发送按键
+<span style="color:#888;font-size:11px;">  方向键: 上126 下125 左123 右124 | Home115 End119</span>
 <span class="api-method post">POST</span><b>/api/clipboard_text</b> - 设置剪贴板
 <span class="api-method get">GET</span><b>/api/clipboard_text</b> - 获取剪贴板
 

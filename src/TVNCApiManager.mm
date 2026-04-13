@@ -991,44 +991,69 @@ extern Class SBLockScreenManager;
         return result;
     }
     
-    UIView *firstResponder = [self findFirstResponder];
-    if (!firstResponder) {
-        return NO;
+    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+    
+    // 特殊按键映射到 HID usage codes
+    // 使用 kHIDPage_KeyboardOrKeypad (0x07)
+    static NSDictionary<NSNumber *, NSNumber *> *keyToHIDMap = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        // macOS/iOS 键码到 HID usage code 的映射
+        // 参考: https://developer.apple.com/library/archive/technotes/tn2450/_index.html
+        keyToHIDMap = @{
+            // 功能键
+            @(27): @0x29,   // ESC
+            @(13): @0x28,   // Return/Enter
+            @(8): @0x2A,    // Delete/Backspace
+            @(9): @0x2B,    // Tab
+            @(32): @0x2C,   // Space
+            
+            // 方向键 (macOS 键码)
+            @(126): @0x52,  // Up Arrow
+            @(125): @0x51,  // Down Arrow
+            @(123): @0x50,  // Left Arrow
+            @(124): @0x4F,  // Right Arrow
+            
+            // Home/End/Page Up/Down (macOS 键码)
+            @(115): @0x4A,  // Home
+            @(119): @0x4D,  // End
+            @(116): @0x4B,  // Page Up
+            @(117): @0x4E,  // Page Down
+            
+            // macOS 键盘键码
+            @(0x24): @0x28, // Return
+            @(0x30): @0x2B, // Tab
+            @(0x33): @0x2A, // Delete (Backspace)
+            @(0x35): @0x29, // Escape
+            @(0x7B): @0x50, // Left Arrow
+            @(0x7C): @0x4F, // Right Arrow
+            @(0x7E): @0x52, // Up Arrow
+            @(0x7D): @0x51, // Down Arrow
+            
+            // 常用标点
+            @(127): @0x2A,  // Delete/Forward Delete
+        };
+    });
+    
+    NSNumber *hidUsage = keyToHIDMap[@(keyCode)];
+    if (hidUsage) {
+        // 使用 HID 事件发送特殊按键
+        [generator otherPage:kHIDPage_KeyboardOrKeypad usagePress:hidUsage.unsignedIntValue];
+        return YES;
     }
     
-    // 处理特殊按键
-    switch (keyCode) {
-        case 13: // 回车键
-        case 0x24: // 回车 (Mac)
-            if ([firstResponder isKindOfClass:[UITextField class]]) {
-                UITextField *textField = (UITextField *)firstResponder;
-                [textField sendActionsForControlEvents:UIControlEventEditingDidEndOnExit];
-                return YES;
-            }
-            // 插入换行
-            return [self inputText:@"\n"];
-            
-        case 8:  // 退格键
-        case 0x33: // 退格 (Mac)
-        case 127: // Delete
-            return [self deleteBackward:firstResponder];
-            
-        case 9:  // Tab
-        case 0x30: // Tab (Mac)
-            return [self inputText:@"\t"];
-            
-        case 27: // ESC
-            [firstResponder resignFirstResponder];
+    // 尝试转换为字符并发送
+    NSString *charStr = [self stringForKeyCode:keyCode];
+    if (charStr.length > 0 && ![charStr isEqualToString:@"ESC"] && ![charStr isEqualToString:@"CMD"] && ![charStr isEqualToString:@"SHIFT"] && ![charStr isEqualToString:@"OPTION"] && ![charStr isEqualToString:@"CONTROL"]) {
+        @try {
+            [generator keyPress:charStr];
             return YES;
-            
-        default:
-            // 尝试转换为字符
-            NSString *charStr = [self stringForKeyCode:keyCode];
-            if (charStr.length > 0) {
-                return [self inputText:charStr];
-            }
-            return NO;
+        } @catch (NSException *e) {
+            TVLog(@"keyPress failed: %@", e.reason);
+        }
     }
+    
+    return NO;
 }
 
 - (BOOL)sendKeyCombination:(NSArray<NSNumber *> *)keyCodes {
@@ -1642,38 +1667,31 @@ extern Class SBLockScreenManager;
 // 重启设备
 - (BOOL)rebootDevice {
     @try {
-        TVLog(@"Attempting to reboot device (iOS 15)...");
+        TVLog(@"Attempting to reboot device...");
         
-        // iOS 15 上 TrollStore 环境使用以下方式重启
-        // 方法1: 使用 notify 触发系统重启
-        int ret = notify_post("com.apple.system.reboot");
-        TVLog(@"notify_post(com.apple.system.reboot) returned: %d", ret);
+        // 方法1: 使用 notify_post 通知系统重启
+        int ret = notify_post("com.apple.shutdown.reboot");
+        TVLog(@"notify_post(com.apple.shutdown.reboot) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"Reboot notification sent successfully");
             return YES;
         }
         
-        // 方法3: 尝试其他重启通知
-        ret = notify_post("com.apple.mobile.reboot");
-        TVLog(@"notify_post(com.apple.mobile.reboot) returned: %d", ret);
-        if (ret == NOTIFY_STATUS_OK) {
-            TVLog(@"Mobile reboot notification sent successfully");
+        // 方法2: 使用 system 命令执行 reboot（需要 root）
+        TVLog(@"Trying system(\"reboot\")...");
+        int systemResult = system("reboot");
+        TVLog(@"system(\"reboot\") returned: %d", systemResult);
+        if (systemResult == 0) {
             return YES;
         }
         
-        // 方法4: 使用 posix_spawn 执行 reboot 命令
-        TVLog(@"Trying posix_spawn /sbin/reboot...");
-        pid_t pid;
-        const char *args[] = {"/sbin/reboot", NULL};
-        int status = posix_spawn(&pid, "/sbin/reboot", NULL, NULL, (char **)args, NULL);
-        TVLog(@"posix_spawn returned: %d", status);
-        if (status == 0) {
-            TVLog(@"Reboot command executed");
-            return YES;
-        }
+        // 方法3: 通过终止 SpringBoard 触发重启（fallback）
+        TVLog(@"Trying to terminate SpringBoard...");
+        [self killall:@"SpringBoard"];
         
-        TVLog(@"All reboot methods failed");
-        return NO;
+        // 给一点时间让 SpringBoard 重启
+        [NSThread sleepForTimeInterval:1.0];
+        
+        return YES;
     } @catch (NSException *exception) {
         TVLog(@"Reboot failed: %@", exception.reason);
         return NO;
@@ -1789,36 +1807,32 @@ extern Class SBLockScreenManager;
     }
 }
 
-// 解锁屏幕（使用 SBLockScreenManager 私有 API）
+// 解锁屏幕（按 Home 键唤醒/解锁）
 - (BOOL)unlockDeviceScreen {
     @try {
         TVLog(@"Unlocking device screen...");
 
-        // 尝试使用 SBLockScreenManager 私有 API 解锁
-        Class lockScreenManagerClass = NSClassFromString(@"SBLockScreenManager");
-        if (lockScreenManagerClass) {
-            SEL unlockSelector = NSSelectorFromString(@"unlockUIFromSource:withOptions:");
-            id manager = [lockScreenManagerClass sharedInstance];
-            if (manager && [manager respondsToSelector:unlockSelector]) {
-                // 使用 performSelector 调用私有方法
-                NSMethodSignature *signature = [manager methodSignatureForSelector:unlockSelector];
-                NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-                [invocation setSelector:unlockSelector];
-                [invocation setTarget:manager];
-                // 设置参数: source=0, options=nil
-                int source = 0;
-                [invocation setArgument:&source atIndex:2];
-                [invocation setArgument:&source atIndex:3];  // nil = 0
-                [invocation invoke];
-                TVLog(@"SBLockScreenManager unlockUIFromSource called");
-                return YES;
-            }
+        // 在主线程执行解锁操作
+        if (![NSThread isMainThread]) {
+            __block BOOL result = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                result = [self unlockDeviceScreen];
+            });
+            return result;
         }
 
-        // 如果 SBLockScreenManager 不可用，尝试使用 HID 事件唤醒
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-        [generator hardwareUnlock];
-        TVLog(@"Fallback: hardwareUnlock called");
+        
+        // 方法: 按一下 Home 唤醒屏幕，等待 1.5 秒，再按一次 Home 解锁
+        [generator menuPress];
+        TVLog(@"Home press sent (wake up)");
+        
+        // 等待 1.5 秒
+        [NSThread sleepForTimeInterval:1.5];
+        
+        // 再按一次 Home
+        [generator menuPress];
+        TVLog(@"Home press sent again (unlock)");
 
         return YES;
     } @catch (NSException *exception) {
