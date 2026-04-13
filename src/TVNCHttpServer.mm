@@ -259,6 +259,12 @@
         return [self handleReboot];
     } else if ([path isEqualToString:@"/api/respring"]) {
         return [self handleRespring];
+    } else if ([path isEqualToString:@"/api/files/permissions"]) {
+        return [self handleFilePermissions:query];
+    } else if ([path isEqualToString:@"/api/files/chmod"]) {
+        return [self handleChmod:query];
+    } else if ([path isEqualToString:@"/api/files/chmod_recursive"]) {
+        return [self handleChmodRecursive:query];
     } else if ([path isEqualToString:@"/api/screen/lock"]) {
         return [self handleScreenLock];
     } else if ([path isEqualToString:@"/api/screen/unlock"]) {
@@ -1661,6 +1667,170 @@
     response.statusCode = 200;
     response.contentType = @"text/html; charset=utf-8";
     response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
+    
+    return response;
+}
+
+#pragma mark - 文件权限 API
+
+// GET /api/files/permissions?path=/xxx
+// 获取文件/目录的权限信息
+- (TVNCHttpResponse *)handleFilePermissions:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = query[@"path"];
+    if (!filePath || filePath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Getting permissions for %@", filePath);
+    
+    NSDictionary *result = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
+    
+    response.statusCode = [result[@"success"] boolValue] ? 200 : 404;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/files/chmod?path=/xxx&mode=777
+// 修改文件/目录权限
+- (TVNCHttpResponse *)handleChmod:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = query[@"path"];
+    NSString *modeStr = query[@"mode"];
+    
+    if (!filePath || filePath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    if (!modeStr || modeStr.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing mode parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 解析权限模式（支持 777, 0755 等格式）
+    mode_t mode = 0;
+    if ([modeStr hasPrefix:@"0"]) {
+        // 八进制格式（如 0777）
+        mode = (mode_t)strtoul([modeStr UTF8String], NULL, 8);
+    } else {
+        // 十进制格式（如 777）
+        mode = (mode_t)[modeStr integerValue];
+        mode = (mode_t)(mode | (mode << 3) | (mode << 6)); // 转换为 rwxrwxrwx
+    }
+    
+    TVLog(@"HTTP Server: chmod %@ -> %o", filePath, mode);
+    
+    // 先获取修改前的权限
+    NSDictionary *oldPerm = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
+    NSString *oldMode = oldPerm[@"mode"] ?: @"unknown";
+    
+    // 修改权限
+    BOOL success = [[TVNCApiManager sharedManager] chmod:filePath mode:mode];
+    
+    if (success) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{
+            @"success": @YES,
+            @"path": filePath,
+            @"oldMode": oldMode,
+            @"newMode": [NSString stringWithFormat:@"%o", mode & 0xFFFF],
+            @"newModeValue": @(mode)
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{
+            @"success": @NO,
+            @"path": filePath,
+            @"error": @"Failed to change permissions"
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
+// POST /api/files/chmod_recursive?path=/xxx&mode=777
+// 递归修改目录权限
+- (TVNCHttpResponse *)handleChmodRecursive:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *filePath = query[@"path"];
+    NSString *modeStr = query[@"mode"];
+    
+    if (!filePath || filePath.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    if (!modeStr || modeStr.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"success": @NO, @"error": @"Missing mode parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+    
+    // 解析权限模式
+    mode_t mode = 0;
+    if ([modeStr hasPrefix:@"0"]) {
+        mode = (mode_t)strtoul([modeStr UTF8String], NULL, 8);
+    } else {
+        mode = (mode_t)[modeStr integerValue];
+        mode = (mode_t)(mode | (mode << 3) | (mode << 6));
+    }
+    
+    TVLog(@"HTTP Server: chmod recursive %@ -> %o", filePath, mode);
+    
+    // 先获取修改前的权限
+    NSDictionary *oldPerm = [[TVNCApiManager sharedManager] getFilePermissions:filePath];
+    NSString *oldMode = oldPerm[@"mode"] ?: @"unknown";
+    
+    // 递归修改权限
+    NSError *error = nil;
+    NSInteger count = [[TVNCApiManager sharedManager] chmodRecursive:filePath mode:mode error:&error];
+    
+    if (count >= 0) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{
+            @"success": @YES,
+            @"path": filePath,
+            @"oldMode": oldMode,
+            @"newMode": [NSString stringWithFormat:@"%o", mode & 0xFFFF],
+            @"itemsModified": @(count)
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{
+            @"success": @NO,
+            @"path": filePath,
+            @"error": error.localizedDescription ?: @"Failed to change permissions"
+        };
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
     
     return response;
 }

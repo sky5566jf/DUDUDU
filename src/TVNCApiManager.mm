@@ -25,9 +25,13 @@
 #import <ImageIO/ImageIO.h>
 #import <Accelerate/Accelerate.h>
 #import <sys/stat.h>
+#import <sys/types.h>
 #import <fcntl.h>
 #import <unistd.h>
 #import <errno.h>
+#import <dirent.h>
+#import <pwd.h>
+#import <grp.h>
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -1003,29 +1007,30 @@ extern Class SBLockScreenManager;
     static NSDictionary<NSNumber *, NSNumber *> *keyToHIDMap = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        // macOS/iOS 键码到 HID usage code 的映射
-        // 参考: https://developer.apple.com/library/archive/technotes/tn2450/_index.html
+        // USB HID Keyboard/Keypad Usage Codes (0x07)
+        // 参考: https://www.usb.org/sites/default/files/documents/hut1_12v2.pdf
         keyToHIDMap = @{
-            // 功能键
+            // ===== 功能键 =====
             @(27): @0x29,   // ESC
             @(13): @0x28,   // Return/Enter
             @(8): @0x2A,    // Delete/Backspace
             @(9): @0x2B,    // Tab
             @(32): @0x2C,   // Space
             
-            // 方向键 (macOS 键码)
+            // ===== 方向键 (macOS 键码) =====
             @(126): @0x52,  // Up Arrow
             @(125): @0x51,  // Down Arrow
             @(123): @0x50,  // Left Arrow
             @(124): @0x4F,  // Right Arrow
             
-            // Home/End/Page Up/Down (macOS 键码)
+            // ===== 导航键 (macOS 键码) =====
             @(115): @0x4A,  // Home
             @(119): @0x4D,  // End
             @(116): @0x4B,  // Page Up
             @(117): @0x4E,  // Page Down
+            @(118): @0x4C,  // Forward Delete (Delete/Insert)
             
-            // macOS 键盘键码
+            // ===== macOS 键盘键码 =====
             @(0x24): @0x28, // Return
             @(0x30): @0x2B, // Tab
             @(0x33): @0x2A, // Delete (Backspace)
@@ -1034,9 +1039,78 @@ extern Class SBLockScreenManager;
             @(0x7C): @0x4F, // Right Arrow
             @(0x7E): @0x52, // Up Arrow
             @(0x7D): @0x51, // Down Arrow
+            @(0x77): @0x4A, // Home
+            @(0x74): @0x4D, // End
+            @(0x79): @0x4B, // Page Up
+            @(0x7A): @0x4E, // Page Down
+            @(0x75): @0x4C, // Forward Delete
             
-            // 常用标点
-            @(127): @0x2A,  // Delete/Forward Delete
+            // ===== 功能键 F1-F12 =====
+            @(122): @0x3A,  // F1
+            @(120): @0x3B,  // F2
+            @(99): @0x3C,   // F3
+            @(118): @0x3D,  // F4
+            @(96): @0x3E,   // F5
+            @(97): @0x3F,   // F6
+            @(98): @0x40,   // F7
+            @(100): @0x41,  // F8
+            @(101): @0x42,  // F9
+            @(109): @0x43,  // F10
+            @(103): @0x44,  // F11
+            @(111): @0x45,  // F12
+            
+            // ===== macOS 功能键码 =====
+            @(0xF704): @0x3A, // F1
+            @(0xF705): @0x3B, // F2
+            @(0xF706): @0x3C, // F3
+            @(0xF707): @0x3D, // F4
+            @(0xF708): @0x3E, // F5
+            @(0xF709): @0x3F, // F6
+            @(0xF70A): @0x40, // F7
+            @(0xF70B): @0x41, // F8
+            @(0xF70C): @0x42, // F9
+            @(0xF70D): @0x43, // F10
+            @(0xF70E): @0x44, // F11
+            @(0xF70F): @0x45, // F12
+            
+            // ===== 小键盘 =====
+            @(96): @0x62,   // Keypad 0
+            @(97): @0x63,   // Keypad 1
+            @(98): @0x64,   // Keypad 2
+            @(99): @0x65,   // Keypad 3
+            @(100): @0x66,  // Keypad 4
+            @(101): @0x67,  // Keypad 5
+            @(102): @0x68,  // Keypad 6
+            @(103): @0x69,  // Keypad 7
+            @(104): @0x6A,  // Keypad 8
+            @(105): @0x6B,  // Keypad 9
+            @(67): @0x6C,   // Keypad *
+            @(69): @0x6D,   // Keypad +
+            @(76): @0x6E,   // Keypad .
+            @(78): @0x6F,   // Keypad -
+            @(75): @0x7C,  // Keypad /
+            @(81): @0x59,   // Keypad =
+            @(53): @0x54,   // Keypad Clear
+            
+            // ===== 修饰键 (单独按下) =====
+            @(54): @0xE3,   // Right Command
+            @(55): @0xE3,   // Left Command (also 0xE7 for Windows key)
+            @(56): @0xE1,   // Left Shift
+            @(57): @0xE5,   // Caps Lock
+            @(58): @0xE0,   // Left Option
+            @(59): @0xE2,   // Left Control
+            @(60): @0xE1,   // Right Shift
+            @(61): @0xE0,   // Right Option
+            @(62): @0xE4,   // Right Control
+            
+            // ===== 其他特殊键 =====
+            @(127): @0x2A,  // Forward Delete
+            @(50): @0x64,   // International1 (非英文键盘)
+            @(104): @0x65,  // International2
+            @(105): @0x66,  // International3
+            @(106): @0x67,  // International4
+            @(107): @0x68,  // International5
+            @(10): @0x2D,   // Insert (= + on some keyboards)
         };
     });
     
@@ -2270,5 +2344,198 @@ static NSTimer *g_lockPollingTimer = nil;
     return YES;  // 总是返回 YES 因为我们不知道解锁是否成功
 }
 #endif
+
+#pragma mark - 文件权限 API
+
+// 将 POSIX 权限模式转换为字符串（如 "drwxr-xr-x"）
+static NSString *permissionString(mode_t mode) {
+    char str[11] = "----------";
+    
+    // 文件类型
+    if (S_ISDIR(mode)) str[0] = 'd';
+    else if (S_ISLNK(mode)) str[0] = 'l';
+    else if (S_ISREG(mode)) str[0] = '-';
+    else if (S_ISCHR(mode)) str[0] = 'c';
+    else if (S_ISBLK(mode)) str[0] = 'b';
+    else if (S_ISFIFO(mode)) str[0] = 'p';
+    else if (S_ISSOCK(mode)) str[0] = 's';
+    
+    // Owner 权限
+    if (mode & S_IRUSR) str[1] = 'r';
+    if (mode & S_IWUSR) str[2] = 'w';
+    if (mode & S_IXUSR) str[3] = 'x';
+    
+    // Group 权限
+    if (mode & S_IRGRP) str[4] = 'r';
+    if (mode & S_IWGRP) str[5] = 'w';
+    if (mode & S_IXGRP) str[6] = 'x';
+    
+    // Other 权限
+    if (mode & S_IROTH) str[7] = 'r';
+    if (mode & S_IWOTH) str[8] = 'w';
+    if (mode & S_IXOTH) str[9] = 'x';
+    
+    // Setuid/Setgid/Sticky
+    if (mode & S_ISUID) str[3] = (str[3] == 'x') ? 's' : 'S';
+    if (mode & S_ISGID) str[6] = (str[6] == 'x') ? 's' : 'S';
+    if (mode & S_ISVTX) str[9] = (str[9] == 'x') ? 't' : 'T';
+    
+    return [NSString stringWithUTF8String:str];
+}
+
+// 获取 uid 对应的用户名
+static NSString *ownerName(uid_t uid) {
+    struct passwd *pw = getpwuid(uid);
+    if (pw) {
+        return [NSString stringWithUTF8String:pw->pw_name];
+    }
+    return [NSString stringWithFormat:@"%d", uid];
+}
+
+// 获取 gid 对应的组名
+static NSString *groupName(gid_t gid) {
+    struct group *gr = getgrgid(gid);
+    if (gr) {
+        return [NSString stringWithUTF8String:gr->gr_name];
+    }
+    return [NSString stringWithFormat:@"%d", gid];
+}
+
+// 获取文件类型描述
+static NSString *fileType(mode_t mode) {
+    if (S_ISDIR(mode)) return @"directory";
+    if (S_ISLNK(mode)) return @"symlink";
+    if (S_ISREG(mode)) return @"file";
+    if (S_ISCHR(mode)) return @"character device";
+    if (S_ISBLK(mode)) return @"block device";
+    if (S_ISFIFO(mode)) return @"fifo";
+    if (S_ISSOCK(mode)) return @"socket";
+    return @"unknown";
+}
+
+// 获取文件/目录的权限信息
+- (NSDictionary *)getFilePermissions:(NSString *)path {
+    if (!path || path.length == 0) {
+        return @{@"success": @NO, @"error": @"Path is empty"};
+    }
+    
+    struct stat st;
+    if (lstat([path UTF8String], &st) != 0) {
+        return @{@"success": @NO, @"error": [NSString stringWithUTF8String:strerror(errno)]};
+    }
+    
+    NSString *permStr = permissionString(st.st_mode);
+    NSString *type = fileType(st.st_mode);
+    NSString *owner = ownerName(st.st_uid);
+    NSString *group = groupName(st.st_gid);
+    
+    // 修改时间
+    NSDate *modDate = [NSDate dateWithTimeIntervalSince1970:st.st_mtime];
+    NSDateFormatter *df = [[NSDateFormatter alloc] init];
+    [df setDateFormat:@"yyyy-MM-dd HH:mm:ss"];
+    NSString *modified = [df stringFromDate:modDate];
+    
+    return @{
+        @"success": @YES,
+        @"path": path,
+        @"name": [path lastPathComponent],
+        @"type": type,
+        @"permissions": permStr,
+        @"mode": [NSString stringWithFormat:@"%o", st.st_mode & 0xFFFF],
+        @"modeValue": @(st.st_mode),
+        @"owner": owner,
+        @"ownerUID": @(st.st_uid),
+        @"group": group,
+        @"groupGID": @(st.st_gid),
+        @"size": @(st.st_size),
+        @"sizeFormatted": [NSByteCountFormatter stringFromByteCount:st.st_size countStyle:NSByteCountFormatterCountStyleFile],
+        @"modified": modified,
+        @"isDirectory": @(S_ISDIR(st.st_mode))
+    };
+}
+
+// 修改文件/目录的权限
+- (BOOL)chmod:(NSString *)path mode:(mode_t)mode {
+    if (!path || path.length == 0) {
+        TVLog(@"chmod: Path is empty");
+        return NO;
+    }
+    
+    TVLog(@"chmod: %@ -> %o", path, mode);
+    
+    int result = chmod([path UTF8String], mode);
+    if (result != 0) {
+        TVLog(@"chmod failed: %s", strerror(errno));
+        return NO;
+    }
+    
+    TVLog(@"chmod succeeded");
+    return YES;
+}
+
+// 递归修改目录及其所有子项的权限
+- (NSInteger)chmodRecursive:(NSString *)path mode:(mode_t)mode error:(NSError **)error {
+    if (!path || path.length == 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:EINVAL userInfo:@{NSLocalizedDescriptionKey: @"Path is empty"}];
+        }
+        return -1;
+    }
+    
+    TVLog(@"chmodRecursive: %@ -> %o", path, mode);
+    
+    __block NSInteger count = 0;
+    
+    // 先修改当前目录/文件
+    if (chmod([path UTF8String], mode) == 0) {
+        count++;
+    } else {
+        TVLog(@"chmodRecursive: Failed to chmod %@: %s", path, strerror(errno));
+    }
+    
+    // 如果是目录，递归处理子项
+    struct stat st;
+    if (lstat([path UTF8String], &st) != 0) {
+        if (error) {
+            *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:strerror(errno)]}];
+        }
+        return -1;
+    }
+    
+    if (S_ISDIR(st.st_mode)) {
+        DIR *dir = opendir([path UTF8String]);
+        if (!dir) {
+            if (error) {
+                *error = [NSError errorWithDomain:NSPOSIXErrorDomain code:errno userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithUTF8String:strerror(errno)]}];
+            }
+            return -1;
+        }
+        
+        struct dirent *entry;
+        while ((entry = readdir(dir)) != NULL) {
+            // 跳过 . 和 ..
+            if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) {
+                continue;
+            }
+            
+            // 构建子路径
+            NSString *subPath = [path stringByAppendingPathComponent:[NSString stringWithUTF8String:entry->d_name]];
+            
+            // 递归处理
+            NSError *subError = nil;
+            NSInteger subCount = [self chmodRecursive:subPath mode:mode error:&subError];
+            if (subCount > 0) {
+                count += subCount;
+            } else if (subError) {
+                TVLog(@"chmodRecursive: Sub item error: %@", subError.localizedDescription);
+            }
+        }
+        
+        closedir(dir);
+    }
+    
+    TVLog(@"chmodRecursive: Modified %ld items", (long)count);
+    return count;
+}
 
 @end

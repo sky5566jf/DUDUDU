@@ -16,15 +16,14 @@ TrollVNC 提供 HTTP REST API 接口，默认在 **8182 端口**启动。
 
 | 分类 | 端点数量 | 说明 |
 |------|----------|------|
-| [设备信息](#1-设备信息) | 3 | 设备、状态、客户端 |
+| [设备信息](#1-设备信息) | 3 | 设备、状态、客户端、存储空间 |
 | [截图](#2-截图) | 1 | 获取屏幕截图 |
 | [文本输入](#3-文本输入) | 4 | 文本输入、按键、剪贴板 |
-| [文件操作](#4-文件操作) | 4 | 读写文件、上传、检查 |
+| [文件操作](#4-文件操作) | 3 | 写入文件、上传、检查 |
 | [系统控制](#5-系统控制) | 9 | 重启、注销、屏幕、Home、音量、亮度 |
 | [应用管理](#6-应用管理) | 3 | 安装、卸载、TrollStore |
 | [后台管理](#7-后台管理) | 1 | 智能清理后台应用 |
 | [辅助功能](#8-辅助功能) | 3 | AssistiveTouch 启用/禁用 |
-| [其他](#9-其他) | 1 | 触发懒人精灵 |
 
 ---
 
@@ -61,7 +60,16 @@ GET /api/device?ip=192.168.1.100&save=true
   "systemVersion": "17.4.1",
   "systemName": "iOS",
   "batteryLevel": 85,
-  "batteryState": "charging"
+  "batteryState": "charging",
+  "storage": {
+    "totalBytes": 128000000000,
+    "freeBytes": 64000000000,
+    "usedBytes": 64000000000,
+    "totalGB": "119.2",
+    "freeGB": "59.6",
+    "usedGB": "59.6",
+    "usagePercent": 50
+  }
 }
 ```
 
@@ -206,7 +214,7 @@ Content-Type: text/plain; charset=utf-8
 
 ### 3.2 发送按键
 
-发送单个按键事件。
+使用 HID 事件发送按键，无需焦点。使用 `kHIDPage_KeyboardOrKeypad` 页面。
 
 **请求:**
 ```
@@ -216,16 +224,52 @@ POST /api/key?code=13
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| code | int | 是 | 按键代码 |
+| code | int | 是 | macOS 键码 |
 
-**常用按键代码:**
+**按键代码 (macOS 键码):**
+
+| 代码 | 按键 | 代码 | 按键 |
+|------|------|------|------|
+| 13 | 回车 (Enter) | 8 | 退格 (Backspace) |
+| 9 | Tab | 27 | Escape |
+| 32 | 空格 | 118 | Forward Delete |
+
+**方向键:**
 | 代码 | 按键 |
 |------|------|
-| 13 | 回车键 (Enter) |
-| 8 | 退格键 (Backspace) |
-| 9 | Tab 键 |
-| 27 | Escape 键 |
-| 32 | 空格键 |
+| 126 | ↑ 上 |
+| 125 | ↓ 下 |
+| 123 | ← 左 |
+| 124 | → 右 |
+
+**导航键:**
+| 代码 | 按键 |
+|------|------|
+| 115 | Home |
+| 119 | End |
+| 116 | Page Up |
+| 117 | Page Down |
+
+**功能键:**
+| 代码 | 按键 | 代码 | 按键 |
+|------|------|------|------|
+| 122 | F1 | 123 | F2 |
+| 99 | F3 | 118 | F4 |
+| 96 | F5 | 97 | F6 |
+| 98 | F7 | 100 | F8 |
+| 101 | F9 | 109 | F10 |
+| 103 | F11 | 111 | F12 |
+
+**小键盘:**
+| 代码 | 按键 | 代码 | 按键 |
+|------|------|------|------|
+| 96 | Num 7 | 97 | Num 8 |
+| 98 | Num 9 | 100 | Num 4 |
+| 101 | Num 5 | 102 | Num 6 |
+| 103 | Num 1 | 104 | Num 2 |
+| 105 | Num 3 | 67 | Num * |
+| 78 | Num - | 69 | Num + |
+| 76 | Num . | 53 | Clear |
 
 ---
 
@@ -348,21 +392,7 @@ GET /api/checkfile
 
 ---
 
-### 4.4 写入 Base64 文件（不推荐）
-
-写入 Base64 编码的内容。
-
-**请求:**
-```
-POST /api/writefile?path=/var/mobile/test.txt&append=false
-Content-Type: text/plain
-
-<base64-encoded-content>
-```
-
----
-
-### 4.5 Plist 文件操作
+### 4.4 Plist 文件操作
 
 读取、修改 plist 文件中的键值对。
 
@@ -444,7 +474,7 @@ POST /api/reboot
 
 ### 5.2 注销设备 (Respring)
 
-重启 SpringBoard（注销），完成后等待 30 秒再解锁屏幕。
+重启 SpringBoard（注销），完成后等待 15 秒再按两次 Home 键解锁屏幕。
 
 **请求:**
 ```
@@ -456,7 +486,7 @@ POST /api/respring
 {
   "success": true,
   "message": "Respring initiated",
-  "warning": "Screen will unlock after 30 seconds"
+  "warning": "Screen will unlock after 15 seconds"
 }
 ```
 
@@ -483,7 +513,7 @@ POST /api/screen/lock
 
 ### 5.4 解锁屏幕
 
-唤醒设备并通过 Home 键解锁。
+唤醒设备：按一下 Home 键 → 等待 1.5 秒 → 再按一次 Home 键解锁。
 
 **请求:**
 ```
@@ -759,36 +789,90 @@ POST /api/assistivetouch?action=disable
 
 ---
 
-## 9. 其他
+## 8. 文件权限
 
+用于修改 `/var/mobile/Media` 目录下文件夹的权限，解决 Matisu 脚本等工具创建的 700 权限文件夹无法被其他 App 访问的问题。
 
-### 9.1 触发懒人精灵
-
-等待指定秒数后向懒人精灵发送 POST 请求触发脚本运行。
+### 8.1 获取文件/目录权限信息
 
 **请求:**
 ```
-GET /api/trigger?port=3333&delay=5
+GET /api/files/permissions?path=/var/mobile/Media/Matisu_Output
 ```
 
 **参数:**
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| port | int | 否 | 懒人精灵端口，默认 `3333` |
-| delay | int | 否 | 延迟秒数，默认 `5` |
-
-**说明:** IP 地址会自动检测为调用者的 IP。
+| path | string | 是 | 文件或目录的完整路径 |
 
 **响应:**
 ```json
 {
   "success": true,
-  "message": "Trigger scheduled",
-  "target": {
-    "ip": "192.168.1.100",
-    "port": 3333
-  },
-  "delay": 5
+  "path": "/var/mobile/Media/Matisu_Output",
+  "name": "Matisu_Output",
+  "type": "directory",
+  "permissions": "drwx------",
+  "mode": "40700",
+  "owner": "mobile",
+  "group": "mobile",
+  "size": 4096,
+  "sizeFormatted": "4 KB",
+  "modified": "2024-01-15 10:30:00",
+  "isDirectory": true
+}
+```
+
+**权限颜色标识:**
+| 权限 | 颜色 | 含义 |
+|------|------|------|
+| `drwx------` (700) | 🔴 红色 | 仅 owner 可访问，其他 App 无法操作 |
+| `drwxr-xr-x` (755) | 🟡 黄色 | owner 可写，其他可读可执行 |
+| `drwxrwxrwx` (777) | 🟢 绿色 | 所有进程可读写执行 |
+
+---
+
+### 8.2 修改文件/目录权限
+
+**请求:**
+```
+POST /api/files/chmod?path=/var/mobile/Media/Matisu_Output&mode=777
+```
+
+**参数:**
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| path | string | 是 | 文件或目录的完整路径 |
+| mode | int | 是 | 权限模式 (如 777, 755, 644) |
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/Media/Matisu_Output",
+  "oldMode": "40700",
+  "newMode": "40777",
+  "newModeValue": 832
+}
+```
+
+---
+
+### 8.3 递归修改目录权限
+
+**请求:**
+```
+POST /api/files/chmod_recursive?path=/var/mobile/Media/Matisu_Output&mode=777
+```
+
+**响应:**
+```json
+{
+  "success": true,
+  "path": "/var/mobile/Media/Matisu_Output",
+  "oldMode": "40700",
+  "newMode": "40777",
+  "itemsModified": 15
 }
 ```
 

@@ -417,6 +417,50 @@
                         <button onclick="sendKey(116)" title="PageUp">PgUp</button>
                         <button onclick="sendKey(117)" title="PageDown">PgDn</button>
                     </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">功能键 (F1-F12)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(122)">F1</button>
+                        <button onclick="sendKey(120)">F2</button>
+                        <button onclick="sendKey(99)">F3</button>
+                        <button onclick="sendKey(118)">F4</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(96)">F5</button>
+                        <button onclick="sendKey(97)">F6</button>
+                        <button onclick="sendKey(98)">F7</button>
+                        <button onclick="sendKey(100)">F8</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(101)">F9</button>
+                        <button onclick="sendKey(109)">F10</button>
+                        <button onclick="sendKey(103)">F11</button>
+                        <button onclick="sendKey(111)">F12</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">小键盘</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(96)">Num7</button>
+                        <button onclick="sendKey(97)">Num8</button>
+                        <button onclick="sendKey(98)">Num9</button>
+                        <button onclick="sendKey(67)">Num*</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(100)">Num4</button>
+                        <button onclick="sendKey(101)">Num5</button>
+                        <button onclick="sendKey(102)">Num6</button>
+                        <button onclick="sendKey(78)">Num-</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(103)">Num1</button>
+                        <button onclick="sendKey(104)">Num2</button>
+                        <button onclick="sendKey(105)">Num3</button>
+                        <button onclick="sendKey(69)">Num+</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(76)">Num.</button>
+                        <button onclick="sendKey(53)">Clear</button>
+                    </div>
                 </div>
                 
                 <!-- 剪贴板 -->
@@ -456,18 +500,6 @@
                     
                     <button onclick="trollStoreDiagnostics()">TrollStore 诊断</button>
                 </div>
-                
-                <!-- 懒人精灵 -->
-                <div class="panel">
-                    <h2>🤖 懒人精灵</h2>
-                    <div class="connection-bar">
-                        <label>端口:</label>
-                        <input type="number" id="triggerPort" value="3333" style="width:80px;">
-                        <label>延迟:</label>
-                        <input type="number" id="triggerDelay" value="5" style="width:60px;">
-                        <button onclick="triggerLazyElf()">触发</button>
-                    </div>
-                </div>
             </div>
         </div>
         
@@ -499,6 +531,22 @@
             <button onclick="checkFile()" style="margin-top: 15px;">检查 zhuangtai.txt</button>
         </div>
         
+        <!-- 文件权限 -->
+        <div class="panel">
+            <h2>🔐 文件权限</h2>
+            <input type="text" id="permPath" placeholder="文件/目录路径 (如 /var/mobile/Media/Matisu_Output)">
+            <div class="grid" style="margin-top: 10px;">
+                <button onclick="getPermissions()" class="info">查看权限</button>
+                <button onclick="chmod(777, false)" class="success">设为 777</button>
+                <button onclick="chmod(755, false)" class="info">设为 755</button>
+            </div>
+            <div class="grid" style="margin-top: 10px;">
+                <button onclick="chmodRecursive(777)" class="warning">递归 777</button>
+                <button onclick="chmodRecursive(755)" class="warning">递归 755</button>
+            </div>
+            <div id="permResult" class="response-box" style="margin-top: 10px;"></div>
+        </div>
+        
         <!-- API 文档 -->
         <div class="panel">
             <h2>📖 API 参考</h2>
@@ -515,6 +563,8 @@
 <span class="api-method get">GET</span><b>/api/clipboard_text</b> - 获取剪贴板
 
 <span class="api-method post">POST</span><b>/api/writefile_text?path=xxx</b> - 写入文件
+<span class="api-method post">POST</span><b>/api/upload?path=xxx</b> - 上传文件
+
 <span class="api-method post">POST</span><b>/api/upload?path=xxx</b> - 上传文件
 
 <span class="api-method post">POST</span><b>/api/reboot</b> - 重启
@@ -538,8 +588,6 @@
 <span class="api-method get">GET</span><b>/api/assistivetouch</b> - 小白点状态
 <span class="api-method post">POST</span><b>/api/assistivetouch?action=enable</b> - 启用小白点
 <span class="api-method post">POST</span><b>/api/assistivetouch?action=disable</b> - 禁用小白点
-
-<span class="api-method get">GET</span><b>/api/trigger?port=3333&delay=5</b> - 触发懒人精灵
             </div>
         </div>
         
@@ -800,13 +848,6 @@
             await apiCall('GET', 'trollstore/diagnostics');
         }
         
-        // 懒人精灵
-        async function triggerLazyElf() {
-            const port = document.getElementById('triggerPort').value;
-            const delay = document.getElementById('triggerDelay').value;
-            await apiCall('GET', 'trigger', null, `?port=${port}&delay=${delay}`);
-        }
-        
         // 文件操作
         async function writeFile(append) {
             const path = document.getElementById('writeFilePath').value;
@@ -853,6 +894,69 @@
         
         async function checkFile() {
             await apiCall('GET', 'checkfile');
+        }
+        
+        // 文件权限 API
+        async function getPermissions() {
+            const path = document.getElementById('permPath').value.trim();
+            if (!path) {
+                log('请输入路径', 'error');
+                return;
+            }
+            const resultDiv = document.getElementById('permResult');
+            resultDiv.innerHTML = '正在获取...';
+            
+            try {
+                const res = await fetch(`${baseUrl}/api/files/permissions?path=${encodeURIComponent(path)}`);
+                const data = await res.json();
+                if (data.success) {
+                    const color = data.permissions.includes('700') ? '🔴' : 
+                                 data.permissions.includes('777') ? '🟢' : '🟡';
+                    resultDiv.innerHTML = `
+                        <div style="color: var(--success);">
+                            <b>${color} ${data.name}</b><br>
+                            类型: ${data.type}<br>
+                            权限: <b style="color: ${data.permissions.includes('700') ? '#ff6b6b' : data.permissions.includes('777') ? '#51cf66' : '#ffd43b'};">${data.permissions}</b> (${data.mode})<br>
+                            所有者: ${data.owner}:${data.group}<br>
+                            大小: ${data.sizeFormatted}<br>
+                            修改: ${data.modified}
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div style="color: var(--error);">获取失败: ${data.error}</div>`;
+                }
+            } catch (err) {
+                resultDiv.innerHTML = `<div style="color: var(--error);">请求失败: ${err.message}</div>`;
+            }
+        }
+        
+        async function chmod(mode, recursive = false) {
+            const path = document.getElementById('permPath').value.trim();
+            if (!path) {
+                log('请输入路径', 'error');
+                return;
+            }
+            const api = recursive ? 'chmod_recursive' : 'chmod';
+            log(`正在设置权限 ${mode}...`, 'info');
+            
+            try {
+                const res = await fetch(`${baseUrl}/api/files/${api}?path=${encodeURIComponent(path)}&mode=${mode}`, {
+                    method: 'POST'
+                });
+                const data = await res.json();
+                if (data.success) {
+                    log(`权限已修改: ${data.oldMode} → ${data.newMode}${data.itemsModified ? ` (${data.itemsModified} 项)` : ''}`, 'success');
+                    getPermissions(); // 刷新显示
+                } else {
+                    log(`修改失败: ${data.error}`, 'error');
+                }
+            } catch (err) {
+                log(`请求失败: ${err.message}`, 'error');
+            }
+        }
+        
+        async function chmodRecursive(mode) {
+            chmod(mode, true);
         }
         
         // 滑块值更新
