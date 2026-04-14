@@ -1391,7 +1391,7 @@
     return response;
 }
 
-@end - AssistiveTouch Handlers
+// @end - AssistiveTouch Handlers
 
 // GET /api/assistivetouch
 // POST /api/assistivetouch?action=enable
