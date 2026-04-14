@@ -269,7 +269,7 @@
         return [self handleTaskManager];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
- else if ([path isEqualToString:@"/api/assistivetouch"]) {
+    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
