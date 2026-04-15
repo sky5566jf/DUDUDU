@@ -271,6 +271,14 @@
         return [self handleClearAppsSmart];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
+    } else if ([path isEqualToString:@"/api/filelist"]) {
+        return [self handleFileList:query];
+    } else if ([path isEqualToString:@"/api/readfile"]) {
+        return [self handleReadFile:query];
+    } else if ([path isEqualToString:@"/api/deletefile"]) {
+        return [self handleDeleteFile:query];
+    } else if ([path isEqualToString:@"/api/createfolder"]) {
+        return [self handleCreateFolder:query];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1527,6 +1535,198 @@
     return response;
 }
 
+// GET /api/filelist?path=/var/mobile/Media/xxx
+- (TVNCHttpResponse *)handleFileList:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *path = query[@"path"];
+    if (!path || path.length == 0) {
+        // 默认列出懒人精灵目录
+        path = @"/var/mobile/Media/com.matisu.one.nxs.rootcore";
+    }
+    
+    TVLog(@"HTTP Server: File list request - path: %@", path);
+    
+    NSMutableArray *files = [NSMutableArray array];
+    NSError *error = nil;
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *contents = [fm contentsOfDirectoryAtPath:path error:&error];
+    
+    if (error) {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": error.localizedDescription, @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    for (NSString *name in contents) {
+        NSString *fullPath = [path stringByAppendingPathComponent:name];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+        if (attrs) {
+            NSString *type = attrs[NSFileType];
+            BOOL isDir = [type isEqualToString:NSFileTypeDirectory];
+            [files addObject:@{
+                @"name": name,
+                @"path": fullPath,
+                @"isDirectory": @(isDir),
+                @"size": attrs[NSFileSize] ?: @(0),
+                @"modDate": attrs[NSFileModificationDate] ?: [NSDate date]
+            }];
+        }
+    }
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{@"success": @YES, @"path": path, @"files": files};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// GET /api/readfile?path=/var/mobile/Media/xxx/file.txt
+- (TVNCHttpResponse *)handleReadFile:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *path = query[@"path"];
+    if (!path || path.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Read file request - path: %@", path);
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:path]) {
+        response.statusCode = 404;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"File not found", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+    NSData *data = [NSData dataWithContentsOfFile:path];
+    
+    if (!data) {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"Failed to read file", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    // 返回文件内容（如果是文本则尝试解码）
+    NSString *content = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!content) {
+        content = [[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding];
+    }
+    
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    NSDictionary *result = @{
+        @"success": @YES,
+        @"path": path,
+        @"size": @(data.length),
+        @"content": content ?: @"<binary data>",
+        @"modDate": attrs[NSFileModificationDate] ?: [NSDate date]
+    };
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    
+    return response;
+}
+
+// POST /api/deletefile?path=/var/mobile/Media/xxx/file.txt
+- (TVNCHttpResponse *)handleDeleteFile:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *path = query[@"path"];
+    if (!path || path.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Delete file request - path: %@", path);
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    
+    BOOL isDir;
+    if (![fm fileExistsAtPath:path isDirectory:&isDir]) {
+        response.statusCode = 404;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"File not found", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    BOOL success;
+    if (isDir) {
+        success = [fm removeItemAtPath:path error:&error];
+    } else {
+        success = [fm removeItemAtPath:path error:&error];
+    }
+    
+    if (success) {
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"message": @"Deleted successfully", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": error.localizedDescription ?: @"Delete failed", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
+// POST /api/createfolder?path=/var/mobile/Media/xxx/newfolder
+- (TVNCHttpResponse *)handleCreateFolder:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    
+    NSString *path = query[@"path"];
+    if (!path || path.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": @"Missing path parameter"};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    TVLog(@"HTTP Server: Create folder request - path: %@", path);
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    
+    BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
+    
+    if (success) {
+        // 设置目录权限为可读写
+        chmod([path UTF8String], 0777);
+        
+        response.statusCode = 200;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @YES, @"message": @"Folder created successfully", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    } else {
+        response.statusCode = 500;
+        response.contentType = @"application/json";
+        NSDictionary *result = @{@"success": @NO, @"error": error.localizedDescription ?: @"Create folder failed", @"path": path};
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    }
+    
+    return response;
+}
+
 // GET /
 - (TVNCHttpResponse *)handleRoot {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -1561,6 +1761,10 @@
         "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
         "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"
         "<li><b>POST /api/assistivetouch?action=disable</b> - 禁用 AssistiveTouch（小白点）</li>"
+        "<li><b>GET /api/filelist?path=/var/mobile/Media/xxx</b> - 列出目录（默认：懒人精灵目录）</li>"
+        "<li><b>GET /api/readfile?path=/var/mobile/Media/xxx/file.txt</b> - 读取文件内容</li>"
+        "<li><b>POST /api/deletefile?path=/var/mobile/Media/xxx/file.txt</b> - 删除文件或目录</li>"
+        "<li><b>POST /api/createfolder?path=/var/mobile/Media/xxx/newfolder</b> - 创建目录</li>"
         "</ul></body></html>";
     
     response.statusCode = 200;
