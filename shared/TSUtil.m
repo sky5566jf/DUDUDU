@@ -1,6 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <spawn.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // 手动声明 persona API（iOS 私有 API，SDK 不含）
 extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
 extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
@@ -136,3 +140,7 @@ int runCommandAsRoot(NSString* command, NSString** stdOut, NSString** stdErr) {
     
     return -1;
 }
+
+#ifdef __cplusplus
+}
+#endif
