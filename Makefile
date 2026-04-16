@@ -30,6 +30,10 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
+trollvncserver_FILES += shared/TSUtil.m
+
+# 添加 shared 目录到 include 路径
+trollvncserver_CFLAGS += -Ishared
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option

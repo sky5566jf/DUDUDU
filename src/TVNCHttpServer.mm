@@ -33,6 +33,7 @@
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
 #import "Logging.h"
+#import "TSUtil.h"
 
 // 简单的 HTTP 响应结构
 @interface TVNCHttpResponse : NSObject
@@ -1655,11 +1656,9 @@
     
     TVLog(@"HTTP Server: Delete file request - path: %@", path);
     
+    // 先检查文件是否存在
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
-    
-    BOOL isDir;
-    if (![fm fileExistsAtPath:path isDirectory:&isDir]) {
+    if (![fm fileExistsAtPath:path]) {
         response.statusCode = 404;
         response.contentType = @"application/json";
         NSDictionary *result = @{@"success": @NO, @"error": @"File not found", @"path": path};
@@ -1667,14 +1666,11 @@
         return response;
     }
     
-    BOOL success;
-    if (isDir) {
-        success = [fm removeItemAtPath:path error:&error];
-    } else {
-        success = [fm removeItemAtPath:path error:&error];
-    }
+    // 使用 spawnRoot 以 root 权限删除
+    NSString *output = nil;
+    int exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
     
-    if (success) {
+    if (exitCode == 0) {
         response.statusCode = 200;
         response.contentType = @"application/json";
         NSDictionary *result = @{@"success": @YES, @"message": @"Deleted successfully", @"path": path};
@@ -1682,7 +1678,11 @@
     } else {
         response.statusCode = 500;
         response.contentType = @"application/json";
-        NSDictionary *result = @{@"success": @NO, @"error": error.localizedDescription ?: @"Delete failed", @"path": path};
+        NSDictionary *result = @{
+            @"success": @NO,
+            @"error": output ?: [NSString stringWithFormat:@"Delete failed with exit code %d", exitCode],
+            @"path": path
+        };
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     }
     
@@ -1704,12 +1704,11 @@
     
     TVLog(@"HTTP Server: Create folder request - path: %@", path);
     
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSError *error = nil;
+    // 使用 spawnRoot 以 root 权限创建目录
+    NSString *output = nil;
+    int exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
     
-    BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
-    
-    if (success) {
+    if (exitCode == 0) {
         // 设置目录权限为可读写
         chmod([path UTF8String], 0777);
         
@@ -1720,7 +1719,11 @@
     } else {
         response.statusCode = 500;
         response.contentType = @"application/json";
-        NSDictionary *result = @{@"success": @NO, @"error": error.localizedDescription ?: @"Create folder failed", @"path": path};
+        NSDictionary *result = @{
+            @"success": @NO,
+            @"error": output ?: [NSString stringWithFormat:@"Create folder failed with exit code %d", exitCode],
+            @"path": path
+        };
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     }
     
