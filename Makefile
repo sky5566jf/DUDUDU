@@ -1,4 +1,46 @@
-export PACKAGE_VERSION := 3.1
+# 自动递增版本号
+VERSION_FILE := .version
+LAST_COMMIT := .last_commit
+
+# 读取当前版本号
+CURRENT_VERSION := 3.1
+AUTO_BUILD := 0
+
+# 检查是否有版本号文件
+ifeq ($(wildcard $(VERSION_FILE)),$(VERSION_FILE))
+	CURRENT_VERSION := $(shell cat $(VERSION_FILE))
+endif
+
+# 检查是否需要自增
+ifneq ($(wildcard $(VERSION_FILE)),)
+ifneq ($(wildcard $(LAST_COMMIT)),)
+	# 如果有新的commit，自增版本号
+	ifneq ($(shell cat $(LAST_COMMIT)),$(shell git rev-parse HEAD 2>/dev/null))
+		AUTO_BUILD := 1
+	endif
+endif
+endif
+
+# 如果需要自增版本号
+ifeq ($(AUTO_BUILD),1)
+	# 解析版本号并自增第三位
+	VERSION_PARTS := $(subst ., ,$(CURRENT_VERSION))
+	MAJOR := $(word 1,$(VERSION_PARTS))
+	MINOR := $(word 2,$(VERSION_PARTS))
+	BUILD := $(word 3,$(VERSION_PARTS))
+	ifeq ($(BUILD),)
+		BUILD := 1
+	else
+		BUILD := $$(($(BUILD) + 1))
+	endif
+	PACKAGE_VERSION := $(MAJOR).$(MINOR).$(BUILD)
+	@echo "Auto-incrementing version to $(PACKAGE_VERSION)"
+else
+	# 首次或无变化，使用当前版本号
+	PACKAGE_VERSION := $(CURRENT_VERSION)
+endif
+
+export PACKAGE_VERSION := $(PACKAGE_VERSION)
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)

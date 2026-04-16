@@ -2,6 +2,10 @@
 
 set -e
 
+# 保存版本号和 commit hash 用于下次构建检测
+echo "$PACKAGE_VERSION" > .version
+git rev-parse HEAD > .last_commit
+
 if [ "$THEOS_PACKAGE_SCHEME" = "rootless" ]; then
     /usr/libexec/PlistBuddy -c 'Set :ProgramArguments:0 /var/jb/usr/bin/trollvncserver' "$THEOS_STAGING_DIR/Library/LaunchDaemons/com.82flex.trollvnc.plist"
     /usr/libexec/PlistBuddy -c 'Set :StandardOutPath /var/jb/tmp/trollvnc-stdout.log' "$THEOS_STAGING_DIR/Library/LaunchDaemons/com.82flex.trollvnc.plist"
