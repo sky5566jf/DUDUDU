@@ -31,6 +31,7 @@
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
+#import "TVNCApiManager.h"
 #import "TVNCRootListController.h"
 #import "TVNCUtil.h"
 #import "ZTSelfSignedCertificate.h"
@@ -833,6 +834,34 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         }
     }
     return nil;
+}
+
+#pragma mark - Respring & Reboot
+
+- (void)respringDevice {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"注销设备"
+                                                                   message:@"确定要注销设备吗？"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"注销" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [[TVNCApiManager sharedManager] respringDevice];
+        });
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)rebootDevice {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"重启设备"
+                                                                   message:@"确定要重启设备吗？"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"重启" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            [[TVNCApiManager sharedManager] rebootDevice];
+        });
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 @end

@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>title</key>
-	<string>MatisuXCS</string>
+	<string>Matisu</string>
 	<key>items</key>
 	<array>
 		<dict>
@@ -12,11 +12,27 @@
 		</dict>
 		<dict>
 			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>注销设备</string>
+			<key>action</key>
+			<string>respringDevice</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>重启设备</string>
+			<key>action</key>
+			<string>rebootDevice</string>
+		</dict>
+		<dict>
+			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>软件版本</string>
 			<key>footerText</key>
-			<string>v3.1.1</string>
+			<string>v3.1.2</string>
 		</dict>
 	</array>
 </dict>
