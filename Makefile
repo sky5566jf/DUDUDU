@@ -30,10 +30,16 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
-trollvncserver_FILES += shared/TSUtil.m
 
+# 只在 roothide/rootless 方案下添加 root 权限支持（使用 roothide SDK）
+ifneq ($(THEOS_PACKAGE_SCHEME),rootless)
+ifneq ($(THEOS_PACKAGE_SCHEME),default)
+trollvncserver_FILES += shared/TSUtil.m
+trollvncserver_CFLAGS += -DHAS_ROOT_SUPPORT=1
 # 添加 shared 目录到 include 路径
 trollvncserver_CFLAGS += -Ishared
+endif
+endif
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option

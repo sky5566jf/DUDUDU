@@ -33,7 +33,9 @@
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
 #import "Logging.h"
+#ifdef HAS_ROOT_SUPPORT
 #import "TSUtil.h"
+#endif
 
 // 简单的 HTTP 响应结构
 @interface TVNCHttpResponse : NSObject
@@ -1666,9 +1668,17 @@
         return response;
     }
     
+#ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限删除
     NSString *output = nil;
     int exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
+#else
+    // 降级为 mobile 权限删除
+    NSError *error = nil;
+    BOOL success = [fm removeItemAtPath:path error:&error];
+    int exitCode = success ? 0 : 1;
+    NSString *output = error.localizedDescription;
+#endif
     
     if (exitCode == 0) {
         response.statusCode = 200;
@@ -1704,9 +1714,18 @@
     
     TVLog(@"HTTP Server: Create folder request - path: %@", path);
     
+#ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限创建目录
     NSString *output = nil;
     int exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
+#else
+    // 降级为 mobile 权限创建目录
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
+    int exitCode = success ? 0 : 1;
+    NSString *output = error.localizedDescription;
+#endif
     
     if (exitCode == 0) {
         // 设置目录权限为可读写
