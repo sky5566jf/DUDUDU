@@ -1677,8 +1677,23 @@
     
 #ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限删除
+    // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
     NSString *output = nil;
-    int exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
+    @try {
+        int exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
+        if (exitCode != 0) {
+            // spawnRoot 失败，降级为 mobile 权限
+            NSError *error = nil;
+            BOOL success = [fm removeItemAtPath:path error:&error];
+            exitCode = success ? 0 : 1;
+            output = error.localizedDescription;
+        }
+    } @catch (NSException *exception) {
+        // spawnRoot 崩溃，降级为 NSFileManager
+        NSError *error = nil;
+        [fm removeItemAtPath:path error:&error];
+        output = [NSString stringWithFormat:@"spawnRoot failed: %@, fallback: %@", exception.reason, error.localizedDescription];
+    }
 #else
     // 降级为 mobile 权限删除
     NSError *error = nil;
@@ -1723,8 +1738,25 @@
     
 #ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限创建目录
+    // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
     NSString *output = nil;
-    int exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
+    @try {
+        int exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
+        if (exitCode != 0) {
+            // spawnRoot 失败，降级为 mobile 权限
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSError *error = nil;
+            BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
+            exitCode = success ? 0 : 1;
+            output = error.localizedDescription;
+        }
+    } @catch (NSException *exception) {
+        // spawnRoot 崩溃，降级为 NSFileManager
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSError *error = nil;
+        [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
+        output = [NSString stringWithFormat:@"spawnRoot failed: %@, fallback: %@", exception.reason, error.localizedDescription];
+    }
 #else
     // 降级为 mobile 权限创建目录
     NSFileManager *fm = [NSFileManager defaultManager];
