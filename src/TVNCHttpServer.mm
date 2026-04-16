@@ -1570,12 +1570,15 @@
         if (attrs) {
             NSString *type = attrs[NSFileType];
             BOOL isDir = [type isEqualToString:NSFileTypeDirectory];
+            NSDate *modDate = attrs[NSFileModificationDate];
+            // 将 NSDate 转换为时间戳（可序列化）
+            NSNumber *modTimestamp = modDate ? @([modDate timeIntervalSince1970]) : @0;
             [files addObject:@{
                 @"name": name,
                 @"path": fullPath,
                 @"isDirectory": @(isDir),
                 @"size": attrs[NSFileSize] ?: @(0),
-                @"modDate": attrs[NSFileModificationDate] ?: [NSDate date]
+                @"modTimestamp": modTimestamp
             }];
         }
     }

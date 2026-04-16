@@ -51,6 +51,26 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
 - HTTP 服务器: `src/TVNCHttpServer.mm`
 - 测试页面: `test_api.html`
 
+## Artifact 下载方法
+由于 Azure Blob（`*.blob.core.windows.net`）网络不通，使用 Python 脚本绕过：
+```
+python devkit/download_artifact.py <artifact_id> <output_path>
+```
+脚本路径：`devkit/download_artifact.py`
+原理：先用 gh token 获取 GitHub API 的重定向 URL，再直接请求 Azure Blob URL（不带 token）。
+
+## 文件管理 API
+- `GET /api/filelist?path=xxx` - 列出目录（默认懒人精灵目录）
+- `GET /api/readfile?path=xxx` - 读取文件
+- `POST /api/deletefile?path=xxx` - 删除文件/目录（使用 spawnRoot）
+- `POST /api/createfolder?path=xxx` - 创建目录（使用 spawnRoot）
+- 默认操作目录：`/var/mobile/Media/com.matisu.one.nxs.rootcore`
+
+## 仓库状态
+- 仓库已改为**公开（Public）**，GitHub Actions 完全免费
+- spawnRoot 使用 system()/popen() 实现（iOS 不支持 NSTask、posix_spawnattr_set_persona_np）
+- theos-roothide SDK 版本为 iPhoneOS16.5，不含 persona_np API
+
 ## 修改历史
 - 2025-03-29: 添加重启、注销、智能清理后台应用功能
 - 2025-03-29: 修改 `/api/trigger` 自动使用调用者 IP
@@ -64,3 +84,13 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
   - 修复 SDK 下载 URL（改为 `master-146e41f`）
   - 修复 `sys/reboot.h` 编译错误（iOS SDK 不支持）
   - 编译成功（run 23724901481）
+- 2026-04-16: 实现真正的 root 权限（spawnRoot）
+  - 创建 shared/TSUtil.m，手动声明 persona API
+  - posix_spawnattr_set_persona_np 设置 root persona (99)
+  - posix_spawnattr_set_persona_uid_np 设置 UID 0
+  - posix_spawnattr_set_persona_gid_np 设置 GID 0
+  - 添加 extern "C" 解决 C++ 链接问题
+  - 使用条件编译，只在 roothide/bootstrap 方案启用 root 权限
+  - rootless/default 方案降级为 mobile 权限
+  - 编译成功（run 24492597572）
+  - bootstrap tipa 已复制到 C:\lmp\release\public\TrollVNC_3.1.tipa
