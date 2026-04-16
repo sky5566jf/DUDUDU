@@ -1679,8 +1679,9 @@
     // 使用 spawnRoot 以 root 权限删除
     // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
     NSString *output = nil;
+    int exitCode = 1;
     @try {
-        int exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
+        exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
         if (exitCode != 0) {
             // spawnRoot 失败，降级为 mobile 权限
             NSError *error = nil;
@@ -1740,8 +1741,9 @@
     // 使用 spawnRoot 以 root 权限创建目录
     // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
     NSString *output = nil;
+    int exitCode = 1;
     @try {
-        int exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
+        exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
         if (exitCode != 0) {
             // spawnRoot 失败，降级为 mobile 权限
             NSFileManager *fm = [NSFileManager defaultManager];
