@@ -31,7 +31,7 @@
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
-#import "../../src/TVNCApiManager.h"
+// Note: TVNCApiManager is in a different target, so we implement respring/reboot directly
 #import "TVNCRootListController.h"
 #import "TVNCUtil.h"
 #import "ZTSelfSignedCertificate.h"
@@ -838,6 +838,42 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 #pragma mark - Respring & Reboot
 
+// Helper: kill all processes with the given name
+- (void)killall:(NSString *)processName {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
+    
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return;
+    
+    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
+        free(procs);
+        return;
+    }
+    
+    size_t count = size / sizeof(struct kinfo_proc);
+    
+    for (size_t i = 0; i < count; i++) {
+        struct kinfo_proc *p = &procs[i];
+        pid_t pid = p->kp_proc.p_pid;
+        
+        char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
+        int pathLength = proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
+        if (pathLength > 0) {
+            NSString *fullPath = [NSString stringWithUTF8String:pathBuffer];
+            NSString *procName = [fullPath lastPathComponent];
+            
+            if ([procName isEqualToString:processName]) {
+                kill(pid, SIGTERM);
+            }
+        }
+    }
+    
+    free(procs);
+}
+
 - (void)respringDevice {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"注销设备"
                                                                    message:@"确定要注销设备吗？"
@@ -845,7 +881,13 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"注销" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [[TVNCApiManager sharedManager] respringDevice];
+            @try {
+                [self killall:@"SpringBoard"];
+                [self killall:@"FrontBoard"];
+                [self killall:@"BackBoard"];
+            } @catch (NSException *exception) {
+                // Ignore errors
+            }
         });
     }]];
     [self presentViewController:alert animated:YES completion:nil];
@@ -858,7 +900,16 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"重启" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
         dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [[TVNCApiManager sharedManager] rebootDevice];
+            @try {
+                // Try notify_post first
+                int ret = notify_post("com.apple.shutdown.reboot");
+                if (ret != NOTIFY_STATUS_OK) {
+                    // Fallback: terminate SpringBoard
+                    [self killall:@"SpringBoard"];
+                }
+            } @catch (NSException *exception) {
+                // Ignore errors
+            }
         });
     }]];
     [self presentViewController:alert animated:YES completion:nil];
