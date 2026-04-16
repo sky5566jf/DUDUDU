@@ -31,7 +31,7 @@
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
-#import "TVNCApiManager.h"
+#import "../../src/TVNCApiManager.h"
 #import "TVNCRootListController.h"
 #import "TVNCUtil.h"
 #import "ZTSelfSignedCertificate.h"
