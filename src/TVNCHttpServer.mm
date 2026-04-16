@@ -1632,6 +1632,10 @@
         content = [[NSString alloc] initWithData:data encoding:NSASCIIStringEncoding];
     }
     
+    // 将 NSDate 转换为时间戳
+    NSDate *modDate = attrs[NSFileModificationDate];
+    NSNumber *modTimestamp = modDate ? @([modDate timeIntervalSince1970]) : @0;
+    
     response.statusCode = 200;
     response.contentType = @"application/json";
     NSDictionary *result = @{
@@ -1639,7 +1643,7 @@
         @"path": path,
         @"size": @(data.length),
         @"content": content ?: @"<binary data>",
-        @"modDate": attrs[NSFileModificationDate] ?: [NSDate date]
+        @"modTimestamp": modTimestamp
     };
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     
