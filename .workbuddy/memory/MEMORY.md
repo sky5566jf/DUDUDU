@@ -46,7 +46,8 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
 - 重启/注销使用 notify_post 和 system 命令
 - 智能清理通过检测前台应用实现
 
-## 文件位置
+## 配置文件
+- 主界面定义: `prefs/TrollVNCPrefs/Resources/ManagedRoot.plist`（标题 "Matisu" 可自定义）
 - API 管理器: `src/TVNCApiManager.h/mm`
 - HTTP 服务器: `src/TVNCHttpServer.mm`
 - 测试页面: `test_api.html`

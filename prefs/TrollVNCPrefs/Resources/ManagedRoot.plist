@@ -10,6 +10,14 @@
 			<key>footerText</key>
 			<string>Matisu专用</string>
 		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>软件版本</string>
+			<key>footerText</key>
+			<string>v3.1.1</string>
+		</dict>
 	</array>
 </dict>
 </plist>
