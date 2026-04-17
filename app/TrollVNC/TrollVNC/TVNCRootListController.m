@@ -883,22 +883,89 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     });
 }
 
+// 使用 XPC 与 mmaintenanced 通信进行用户空间重启（不需要 root 权限）
+- (BOOL)rebootWithXPC {
+    // 动态加载 libxpc.dylib
+    void *lib = dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY);
+    if (!lib) {
+        return NO;
+    }
+    
+    // 获取 xpc_connection_create_service 函数
+    typedef void* (*xpc_connection_create_service_t)(const char *name);
+    xpc_connection_create_service_t xpc_connection_create_service = 
+        (xpc_connection_create_service_t)dlsym(lib, "xpc_connection_create_service");
+    
+    if (!xpc_connection_create_service) {
+        dlclose(lib);
+        return NO;
+    }
+    
+    // 创建到 mmaintenanced 服务的连接
+    void *conn = xpc_connection_create_service("com.apple.mmaintenanced");
+    if (!conn) {
+        dlclose(lib);
+        return NO;
+    }
+    
+    // 设置事件处理
+    typedef void (*xpc_event_handler_t)(void *conn, void *event);
+    typedef void (*xpc_connection_set_event_handler_t)(void *conn, void *handler);
+    typedef void (*xpc_connection_resume_t)(void *conn);
+    typedef void (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
+    typedef void* (*xpc_dictionary_create_t)(const void **keys, const void **values, size_t count);
+    typedef void* (*xpc_dictionary_get_value_t)(void *dict, const char *key);
+    typedef int (*xpc_dictionary_get_int64_t)(void *dict, const char *key);
+    
+    xpc_connection_set_event_handler_t xpc_connection_set_event_handler = 
+        (xpc_connection_set_event_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
+    xpc_connection_resume_t xpc_connection_resume = 
+        (xpc_connection_resume_t)dlsym(lib, "xpc_connection_resume");
+    xpc_dictionary_create_t xpc_dictionary_create = 
+        (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
+    xpc_dictionary_get_int64_t xpc_dictionary_get_int64 = 
+        (xpc_dictionary_get_int64_t)dlsym(lib, "xpc_dictionary_get_int64");
+    
+    // 设置空的事件处理
+    xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {});
+    xpc_connection_resume(conn);
+    
+    // 构造重启命令消息 { cmd = 5 }
+    const char *keys[] = {"cmd"};
+    int64_t values[] = {5};
+    void *dict = xpc_dictionary_create(keys, (const void **)values, 1);
+    
+    // 发送同步消息
+    typedef void* (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
+    xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
+        (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
+    
+    if (xpc_connection_send_message_with_reply_sync) {
+        xpc_connection_send_message_with_reply_sync(conn, dict);
+    }
+    
+    dlclose(lib);
+    return YES;
+}
+
 - (void)rebootDevice {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 尝试多种方式重启设备
-        // 方法1: 尝试直接调用 reboot (需要 root 权限)
-        pid_t pid1;
-        const char *args1[] = {"reboot", NULL};
-        int spawnResult = posix_spawn(&pid1, "/usr/sbin/reboot", NULL, NULL, (char **)args1, NULL);
+        // 方法1: XPC 用户空间重启（不需要 root 权限）
+        BOOL xpcResult = [self rebootWithXPC];
         
-        if (spawnResult != 0) {
-            // 方法2: 尝试 killall -9 launchd (强制重启)
-            [self killall:@"launchd"];
-            usleep(100000); // 100ms
-            
-            // 方法3: 使用系统通知
-            notify_post("com.apple.shutdown.reboot");
+        if (xpcResult) {
+            return; // XPC 重启成功
         }
+        
+        // 方法2: 尝试直接调用 reboot 系统调用（需要 root 权限）
+        // reboot(0) 在 sys/reboot.h 中定义
+        extern int reboot(int);
+        reboot(0);
+        
+        // 方法3: 如果上面都失败，尝试 posix_spawn
+        pid_t pid;
+        const char *args[] = {"reboot", NULL};
+        posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
     });
 }
 
@@ -957,6 +1024,194 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     [self setAssistiveTouchEnabled:YES];
     // 立即重启 SpringBoard 使更改生效
     [self respringDevice];
+}
+
+#pragma mark - Device Info
+
+// 获取设备名称
+- (NSString *)deviceName {
+    NSString *name = [[UIDevice currentDevice] name];
+    if (!name || name.length == 0) {
+        name = [[NSProcessInfo processInfo] hostName];
+    }
+    if (!name || name.length == 0) {
+        name = @"iPhone";
+    }
+    return name;
+}
+
+// 获取系统版本
+- (NSString *)systemVersion {
+    return [[UIDevice currentDevice] systemVersion];
+}
+
+// 获取设备型号（友好名称）
+- (NSString *)deviceModelName {
+    struct utsname systemInfo;
+    uname(&systemInfo);
+    NSString *identifier = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
+    return [self friendlyModelName:identifier];
+}
+
+// 获取局域网IP
+- (NSString *)localIPAddress {
+    NSString *ip = TVNCGetEn0IPAddress();
+    return ip ?: @"不可用";
+}
+
+// 将设备标识符转换为友好名称
+- (NSString *)friendlyModelName:(NSString *)identifier {
+    NSDictionary *modelMap = @{
+        // iPhone
+        @"iPhone1,1": @"iPhone",
+        @"iPhone1,2": @"iPhone 3G",
+        @"iPhone2,1": @"iPhone 3GS",
+        @"iPhone3,1": @"iPhone 4",
+        @"iPhone3,2": @"iPhone 4",
+        @"iPhone3,3": @"iPhone 4",
+        @"iPhone4,1": @"iPhone 4S",
+        @"iPhone5,1": @"iPhone 5",
+        @"iPhone5,2": @"iPhone 5",
+        @"iPhone5,3": @"iPhone 5c",
+        @"iPhone5,4": @"iPhone 5c",
+        @"iPhone6,1": @"iPhone 5s",
+        @"iPhone6,2": @"iPhone 5s",
+        @"iPhone6,3": @"iPhone 5s",
+        @"iPhone6,4": @"iPhone 5s",
+        @"iPhone7,1": @"iPhone 6 Plus",
+        @"iPhone7,2": @"iPhone 6",
+        @"iPhone8,1": @"iPhone 6s",
+        @"iPhone8,2": @"iPhone 6s Plus",
+        @"iPhone8,3": @"iPhone SE (1st)",
+        @"iPhone8,4": @"iPhone SE (1st)",
+        @"iPhone9,1": @"iPhone 7",
+        @"iPhone9,2": @"iPhone 7 Plus",
+        @"iPhone9,3": @"iPhone 7",
+        @"iPhone9,4": @"iPhone 7 Plus",
+        @"iPhone10,1": @"iPhone 8",
+        @"iPhone10,2": @"iPhone 8 Plus",
+        @"iPhone10,3": @"iPhone X",
+        @"iPhone10,4": @"iPhone 8",
+        @"iPhone10,5": @"iPhone 8 Plus",
+        @"iPhone10,6": @"iPhone X",
+        @"iPhone11,2": @"iPhone XS",
+        @"iPhone11,4": @"iPhone XS Max",
+        @"iPhone11,6": @"iPhone XS Max",
+        @"iPhone11,8": @"iPhone XR",
+        @"iPhone12,1": @"iPhone 11",
+        @"iPhone12,3": @"iPhone 11 Pro",
+        @"iPhone12,5": @"iPhone 11 Pro Max",
+        @"iPhone12,8": @"iPhone SE (2nd)",
+        @"iPhone13,1": @"iPhone 12 mini",
+        @"iPhone13,2": @"iPhone 12",
+        @"iPhone13,3": @"iPhone 12 Pro",
+        @"iPhone13,4": @"iPhone 12 Pro Max",
+        @"iPhone14,2": @"iPhone 13 Pro",
+        @"iPhone14,3": @"iPhone 13 Pro Max",
+        @"iPhone14,4": @"iPhone 13 mini",
+        @"iPhone14,5": @"iPhone 13",
+        @"iPhone14,6": @"iPhone SE (3rd)",
+        @"iPhone14,7": @"iPhone 14",
+        @"iPhone14,8": @"iPhone 14 Plus",
+        @"iPhone15,2": @"iPhone 14 Pro",
+        @"iPhone15,3": @"iPhone 14 Pro Max",
+        @"iPhone15,4": @"iPhone 15",
+        @"iPhone15,5": @"iPhone 15 Plus",
+        @"iPhone16,1": @"iPhone 15 Pro",
+        @"iPhone16,2": @"iPhone 15 Pro Max",
+        @"iPhone17,1": @"iPhone 16 Pro",
+        @"iPhone17,2": @"iPhone 16 Pro Max",
+        @"iPhone17,3": @"iPhone 16",
+        @"iPhone17,4": @"iPhone 16",
+        @"iPhone17,5": @"iPhone 16 Plus",
+        // iPad
+        @"iPad1,1": @"iPad",
+        @"iPad2,1": @"iPad 2",
+        @"iPad2,2": @"iPad 2",
+        @"iPad2,3": @"iPad 2",
+        @"iPad2,4": @"iPad 2",
+        @"iPad3,1": @"iPad (3rd)",
+        @"iPad3,2": @"iPad (3rd)",
+        @"iPad3,3": @"iPad (3rd)",
+        @"iPad3,4": @"iPad (4th)",
+        @"iPad3,5": @"iPad (4th)",
+        @"iPad3,6": @"iPad (4th)",
+        @"iPad4,1": @"iPad Air",
+        @"iPad4,2": @"iPad Air",
+        @"iPad4,3": @"iPad Air",
+        @"iPad5,3": @"iPad Air 2",
+        @"iPad5,4": @"iPad Air 2",
+        @"iPad6,3": @"iPad Pro 9.7",
+        @"iPad6,4": @"iPad Pro 9.7",
+        @"iPad6,7": @"iPad Pro 12.9",
+        @"iPad6,8": @"iPad Pro 12.9",
+        @"iPad6,11": @"iPad (5th)",
+        @"iPad6,12": @"iPad (5th)",
+        @"iPad7,1": @"iPad Pro 12.9 (2nd)",
+        @"iPad7,2": @"iPad Pro 12.9 (2nd)",
+        @"iPad7,3": @"iPad Pro 10.5",
+        @"iPad7,4": @"iPad Pro 10.5",
+        @"iPad7,5": @"iPad (6th)",
+        @"iPad7,6": @"iPad (6th)",
+        @"iPad7,11": @"iPad (7th)",
+        @"iPad7,12": @"iPad (7th)",
+        @"iPad8,1": @"iPad Pro 11",
+        @"iPad8,2": @"iPad Pro 11",
+        @"iPad8,3": @"iPad Pro 11",
+        @"iPad8,4": @"iPad Pro 11",
+        @"iPad8,5": @"iPad Pro 12.9 (3rd)",
+        @"iPad8,6": @"iPad Pro 12.9 (3rd)",
+        @"iPad8,7": @"iPad Pro 12.9 (3rd)",
+        @"iPad8,8": @"iPad Pro 12.9 (3rd)",
+        @"iPad11,1": @"iPad mini (5th)",
+        @"iPad11,2": @"iPad mini (5th)",
+        @"iPad11,3": @"iPad Air (3rd)",
+        @"iPad11,4": @"iPad Air (3rd)",
+        @"iPad13,1": @"iPad Air (4th)",
+        @"iPad13,2": @"iPad Air (4th)",
+        @"iPad13,4": @"iPad Pro 11 (3rd)",
+        @"iPad13,5": @"iPad Pro 11 (3rd)",
+        @"iPad13,6": @"iPad Pro 11 (3rd)",
+        @"iPad13,7": @"iPad Pro 11 (3rd)",
+        @"iPad13,8": @"iPad Pro 12.9 (5th)",
+        @"iPad13,9": @"iPad Pro 12.9 (5th)",
+        @"iPad13,10": @"iPad Pro 12.9 (5th)",
+        @"iPad13,11": @"iPad Pro 12.9 (5th)",
+        @"iPad13,16": @"iPad Air (5th)",
+        @"iPad13,17": @"iPad Air (5th)",
+        @"iPad13,18": @"iPad (10th)",
+        @"iPad13,19": @"iPad (10th)",
+        @"iPad14,1": @"iPad mini (6th)",
+        @"iPad14,2": @"iPad mini (6th)",
+    };
+    
+    return modelMap[identifier] ?: identifier ?: @"Unknown";
+}
+
+// 更新设备信息到 specifiers
+- (void)updateDeviceInfoSpecifiers {
+    for (PSSpecifier *specifier in _specifiers) {
+        NSString *specId = [specifier propertyForKey:@"id"];
+        
+        if ([specId isEqualToString:@"DeviceName"]) {
+            [specifier setProperty:[self deviceName] forKey:@"footerText"];
+        } else if ([specId isEqualToString:@"SystemVersion"]) {
+            [specifier setProperty:[NSString stringWithFormat:@"iOS %@", [self systemVersion]] forKey:@"footerText"];
+        } else if ([specId isEqualToString:@"DeviceModel"]) {
+            [specifier setProperty:[self deviceModelName] forKey:@"footerText"];
+        } else if ([specId isEqualToString:@"DeviceIP"]) {
+            [specifier setProperty:[self localIPAddress] forKey:@"footerText"];
+        }
+    }
+}
+
+// 重写 viewWillAppear 以更新设备信息
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    
+    [self updateFirstGroupAndReload:YES];
+    [self updateDeviceInfoSpecifiers];
+    [self reloadSpecifiers];
 }
 
 @end

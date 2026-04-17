@@ -46,9 +46,45 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>软件版本</string>
-			<key>footerText</key>
-			<string>v3.1.2</string>
+			<string>TrollVNC v3.1.3</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>设备信息</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSStaticTextCell</string>
+			<key>label</key>
+			<string>设备名称</string>
+			<key>id</key>
+			<string>DeviceName</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSStaticTextCell</string>
+			<key>label</key>
+			<string>系统版本</string>
+			<key>id</key>
+			<string>SystemVersion</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSStaticTextCell</string>
+			<key>label</key>
+			<string>设备型号</string>
+			<key>id</key>
+			<string>DeviceModel</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSStaticTextCell</string>
+			<key>label</key>
+			<string>局域网IP</string>
+			<key>id</key>
+			<string>DeviceIP</string>
 		</dict>
 	</array>
 </dict>
