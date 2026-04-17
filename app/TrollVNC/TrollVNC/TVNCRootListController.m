@@ -899,6 +899,23 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 #pragma mark - AssistiveTouch Control
 
+// Helper: run shell command with root privileges
+- (void)runCommandAsRoot:(NSString *)command {
+    pid_t pid;
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    
+    // 设置 root persona
+    posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE_GID);
+    posix_spawnattr_set_gid_np(&attr, 0);
+    posix_spawnattr_set_uid_np(&attr, 0);
+    
+    const char *args[] = {"sh", "-c", [command UTF8String], NULL};
+    posix_spawn(&pid, "/bin/sh", NULL, &attr, (char **)args, NULL);
+    
+    posix_spawnattr_destroy(&attr);
+}
+
 - (void)setAssistiveTouchEnabled:(BOOL)enabled {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSString *disabledPlist = @"/var/db/com.apple.xpc.launchd/disabled.plist";
@@ -907,7 +924,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         
         // 复制 plist 到临时位置
         NSString *cpCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\"", disabledPlist, tempPlist];
-        system([cpCmd UTF8String]);
+        [self runCommandAsRoot:cpCmd];
         
         // 读取并修改 plist
         NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:tempPlist];
@@ -927,11 +944,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         // 复制回原位置并设置正确权限
         NSString *mvCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\" && chmod 644 \"%@\" && chown root:wheel \"%@\"", 
                            tempPlist, disabledPlist, disabledPlist, disabledPlist];
-        system([mvCmd UTF8String]);
+        [self runCommandAsRoot:mvCmd];
         
         // 清理临时文件
         NSString *rmCmd = [NSString stringWithFormat:@"rm -f \"%@\"", tempPlist];
-        system([rmCmd UTF8String]);
+        [self runCommandAsRoot:rmCmd];
     });
 }
 
