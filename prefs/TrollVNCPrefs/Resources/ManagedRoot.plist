@@ -28,6 +28,22 @@
 		</dict>
 		<dict>
 			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>禁用小白点</string>
+			<key>action</key>
+			<string>disableAssistiveTouch</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>恢复小白点</string>
+			<key>action</key>
+			<string>enableAssistiveTouch</string>
+		</dict>
+		<dict>
+			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
 			<string>软件版本</string>

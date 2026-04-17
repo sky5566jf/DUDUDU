@@ -897,4 +897,50 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     });
 }
 
+#pragma mark - AssistiveTouch Control
+
+- (void)setAssistiveTouchEnabled:(BOOL)enabled {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSString *disabledPlist = @"/var/db/com.apple.xpc.launchd/disabled.plist";
+        NSString *tempPlist = @"/tmp/disabled.plist";
+        NSString *daemonLabel = @"com.apple.Accessibility.UIServer";
+        
+        // 复制 plist 到临时位置
+        NSString *cpCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\"", disabledPlist, tempPlist];
+        system([cpCmd UTF8String]);
+        
+        // 读取并修改 plist
+        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:tempPlist];
+        if (!plist) {
+            plist = [NSMutableDictionary dictionary];
+        }
+        
+        if (enabled) {
+            [plist removeObjectForKey:daemonLabel];
+        } else {
+            plist[daemonLabel] = @YES;
+        }
+        
+        // 写回临时文件
+        [plist writeToFile:tempPlist atomically:YES];
+        
+        // 复制回原位置并设置正确权限
+        NSString *mvCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\" && chmod 644 \"%@\" && chown root:wheel \"%@\"", 
+                           tempPlist, disabledPlist, disabledPlist, disabledPlist];
+        system([mvCmd UTF8String]);
+        
+        // 清理临时文件
+        NSString *rmCmd = [NSString stringWithFormat:@"rm -f \"%@\"", tempPlist];
+        system([rmCmd UTF8String]);
+    });
+}
+
+- (void)disableAssistiveTouch {
+    [self setAssistiveTouchEnabled:NO];
+}
+
+- (void)enableAssistiveTouch {
+    [self setAssistiveTouchEnabled:YES];
+}
+
 @end
