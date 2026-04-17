@@ -25,6 +25,7 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <notify.h>
+#import <spawn.h>
 #import <signal.h>
 #import <stdlib.h>
 #import <sys/sysctl.h>
@@ -875,44 +876,25 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (void)respringDevice {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"注销设备"
-                                                                   message:@"确定要注销设备吗？"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"注销" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            @try {
-                [self killall:@"SpringBoard"];
-                [self killall:@"FrontBoard"];
-                [self killall:@"BackBoard"];
-            } @catch (NSException *exception) {
-                // Ignore errors
-            }
-        });
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        [self killall:@"SpringBoard"];
+        [self killall:@"FrontBoard"];
+        [self killall:@"BackBoard"];
+    });
 }
 
 - (void)rebootDevice {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"重启设备"
-                                                                   message:@"确定要重启设备吗？"
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"重启" style:UIAlertActionStyleDestructive handler:^(UIAlertAction *_Nonnull action) {
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            @try {
-                // Try notify_post first
-                int ret = notify_post("com.apple.shutdown.reboot");
-                if (ret != NOTIFY_STATUS_OK) {
-                    // Fallback: terminate SpringBoard
-                    [self killall:@"SpringBoard"];
-                }
-            } @catch (NSException *exception) {
-                // Ignore errors
-            }
-        });
-    }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // 方法1: 使用 posix_spawn 执行 reboot (需要 root 权限)
+        pid_t pid;
+        const char *args[] = {"reboot", NULL};
+        int spawnResult = posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        
+        if (spawnResult != 0) {
+            // 方法2: 使用 notify_post
+            notify_post("com.apple.shutdown.reboot");
+        }
+    });
 }
 
 @end
