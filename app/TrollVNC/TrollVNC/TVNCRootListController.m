@@ -25,7 +25,6 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <notify.h>
-#import <libproc.h>
 #import <signal.h>
 #import <stdlib.h>
 #import <sys/sysctl.h>
@@ -861,15 +860,14 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         struct kinfo_proc *p = &procs[i];
         pid_t pid = p->kp_proc.p_pid;
         
-        char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
-        int pathLength = proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
-        if (pathLength > 0) {
-            NSString *fullPath = [NSString stringWithUTF8String:pathBuffer];
-            NSString *procName = [fullPath lastPathComponent];
-            
-            if ([procName isEqualToString:processName]) {
-                kill(pid, SIGTERM);
-            }
+        // 获取进程名称 (ki_name 可能为空，改用 ki_comm)
+        char nameBuffer[MAXCOMLEN + 1];
+        strncpy(nameBuffer, p->kp_proc.p_comm, MAXCOMLEN);
+        nameBuffer[MAXCOMLEN] = '\0';
+        NSString *procName = [NSString stringWithUTF8String:nameBuffer];
+        
+        if ([procName isEqualToString:processName]) {
+            kill(pid, SIGTERM);
         }
     }
     
