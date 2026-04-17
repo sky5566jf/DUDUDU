@@ -52,6 +52,10 @@ iOS 设备远程控制工具，通过 HTTP API 提供设备操作功能。
 - HTTP 服务器: `src/TVNCHttpServer.mm`
 - 测试页面: `test_api.html`
 
+## 安装方式
+- **TrollStore（巨魔）安装**，非越狱环境
+- 因此重启设备功能需要 XPC 用户空间方案，无法使用 root 权限
+
 ## Artifact 下载方法
 由于 Azure Blob（`*.blob.core.windows.net`）网络不通，使用 Python 脚本绕过：
 ```
@@ -63,6 +67,10 @@ python devkit/download_artifact.py <artifact_id> <output_path>
 ## tipa 产物目录
 - **下载目录**: `C:\lmp\release\public`（不含子目录）
 - 每次编译后用 `gh run download` 或 Python 脚本下载到该目录
+
+## 编译习惯
+- **等用户说"推送编译"再触发 GitHub Actions 编译**
+- 不要每次提交后自动触发编译
 
 ## 文件管理 API
 - `GET /api/filelist?path=xxx` - 列出目录（默认懒人精灵目录）

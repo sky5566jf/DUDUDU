@@ -999,37 +999,37 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)setAssistiveTouchEnabled:(BOOL)enabled {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSString *disabledPlist = @"/var/db/com.apple.xpc.launchd/disabled.plist";
-        NSString *tempPlist = @"/tmp/disabled.plist";
-        NSString *daemonLabel = @"com.apple.Accessibility.UIServer";
+        // 方法1: 使用 com.apple.Accessibility.AssistiveTouchEnabledByiTunes 键
+        // 这是 Appium/tidevice 等工具使用的方法
+        NSString *accessibilityPlist = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
         
-        // 复制 plist 到临时位置
-        NSString *cpCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\"", disabledPlist, tempPlist];
-        [self runCommand:cpCmd];
-        
-        // 读取并修改 plist
-        NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithContentsOfFile:tempPlist];
-        if (!plist) {
-            plist = [NSMutableDictionary dictionary];
+        // 先读取现有 plist
+        NSMutableDictionary *plist = [NSMutableDictionary dictionary];
+        NSDictionary *existingPlist = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
+        if (existingPlist) {
+            [plist addEntriesFromDictionary:existingPlist];
         }
         
-        if (enabled) {
-            [plist removeObjectForKey:daemonLabel];
+        // 设置 AssistiveTouchEnabledByiTunes 键
+        plist[@"AssistiveTouchEnabledByiTunes"] = @(enabled);
+        
+        // 写回 plist
+        BOOL writeSuccess = [plist writeToFile:accessibilityPlist atomically:YES];
+        if (writeSuccess) {
+            // 设置文件权限
+            chmod([accessibilityPlist UTF8String], 0644);
+            NSLog(@"[TrollVNC] AssistiveTouch %@ via Accessibility.plist", enabled ? @"enabled" : @"disabled");
         } else {
-            plist[daemonLabel] = @YES;
+            // 方法2: 使用 defaults 命令
+            NSString *defaultsCmd = [NSString stringWithFormat:
+                @"defaults write com.apple.Accessibility AssistiveTouchEnabledByiTunes -bool %@",
+                enabled ? @"YES" : @"NO"];
+            [self runCommand:defaultsCmd];
         }
         
-        // 写回临时文件
-        [plist writeToFile:tempPlist atomically:YES];
-        
-        // 复制回原位置并设置正确权限
-        NSString *mvCmd = [NSString stringWithFormat:@"cp \"%@\" \"%@\" && chmod 644 \"%@\" && chown root:wheel \"%@\"", 
-                           tempPlist, disabledPlist, disabledPlist, disabledPlist];
-        [self runCommand:mvCmd];
-        
-        // 清理临时文件
-        NSString *rmCmd = [NSString stringWithFormat:@"rm -f \"%@\"", tempPlist];
-        [self runCommand:rmCmd];
+        // 通知 SpringBoard 重新加载设置
+        notify_post("com.apple.springboard.preferenceschanged");
+        [self runCommand:@"killall -9 SpringBoard 2>/dev/null || killall -HUP SpringBoard"];
     });
 }
 
