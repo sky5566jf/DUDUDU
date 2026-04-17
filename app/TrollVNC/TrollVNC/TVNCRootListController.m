@@ -1007,17 +1007,25 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             [plist addEntriesFromDictionary:existingPlist];
         }
         
-        // 核心键值：AssistiveTouchForceDisabled
-        // true = 彻底禁用（设置界面开关灰显，无法打开）
-        // false = 恢复（可以正常在设置里开关）
+        // 设置多个键值确保生效
+        // AssistiveTouchEnabled: 启用状态
+        plist[@"AssistiveTouchEnabled"] = @(enabled);
+        // AssistiveTouchForceDisabled: 强制禁用（true=彻底禁用，设置里无法打开）
         plist[@"AssistiveTouchForceDisabled"] = @(!enabled);
         
-        // 写回 plist
+        // 写回 plist（同步方式确保写入成功）
         BOOL writeSuccess = [plist writeToFile:accessibilityPlist atomically:YES];
-        if (writeSuccess) {
-            // 设置文件权限
-            chmod([accessibilityPlist UTF8String], 0644);
-            NSLog(@"[TrollVNC] AssistiveTouchForceDisabled = %d (%@)", !enabled, enabled ? @"恢复" : @"禁用");
+        
+        // 设置文件权限
+        chmod([accessibilityPlist UTF8String], 0644);
+        
+        // 验证写入
+        NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
+        if (verify) {
+            NSLog(@"[TrollVNC] 写入成功: AssistiveTouchEnabled=%@, AssistiveTouchForceDisabled=%@",
+                  verify[@"AssistiveTouchEnabled"], verify[@"AssistiveTouchForceDisabled"]);
+        } else {
+            NSLog(@"[TrollVNC] 写入验证失败!");
         }
         
         // 通知 SpringBoard 重新加载设置
@@ -1028,13 +1036,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)disableAssistiveTouch {
     [self setAssistiveTouchEnabled:NO];
-    // 立即重启 SpringBoard 使更改生效
     [self respringDevice];
 }
 
 - (void)enableAssistiveTouch {
     [self setAssistiveTouchEnabled:YES];
-    // 立即重启 SpringBoard 使更改生效
     [self respringDevice];
 }
 
