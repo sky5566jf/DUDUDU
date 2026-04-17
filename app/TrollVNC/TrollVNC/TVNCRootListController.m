@@ -997,32 +997,27 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)setAssistiveTouchEnabled:(BOOL)enabled {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 方法1: 使用 com.apple.Accessibility.AssistiveTouchEnabledByiTunes 键
-        // 这是 Appium/tidevice 等工具使用的方法
+        // 目标文件
         NSString *accessibilityPlist = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
         
-        // 先读取现有 plist
+        // 读取现有 plist
         NSMutableDictionary *plist = [NSMutableDictionary dictionary];
         NSDictionary *existingPlist = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
         if (existingPlist) {
             [plist addEntriesFromDictionary:existingPlist];
         }
         
-        // 设置 AssistiveTouchEnabledByiTunes 键
-        plist[@"AssistiveTouchEnabledByiTunes"] = @(enabled);
+        // 核心键值：AssistiveTouchForceDisabled
+        // true = 彻底禁用（设置界面开关灰显，无法打开）
+        // false = 恢复（可以正常在设置里开关）
+        plist[@"AssistiveTouchForceDisabled"] = @(!enabled);
         
         // 写回 plist
         BOOL writeSuccess = [plist writeToFile:accessibilityPlist atomically:YES];
         if (writeSuccess) {
             // 设置文件权限
             chmod([accessibilityPlist UTF8String], 0644);
-            NSLog(@"[TrollVNC] AssistiveTouch %@ via Accessibility.plist", enabled ? @"enabled" : @"disabled");
-        } else {
-            // 方法2: 使用 defaults 命令
-            NSString *defaultsCmd = [NSString stringWithFormat:
-                @"defaults write com.apple.Accessibility AssistiveTouchEnabledByiTunes -bool %@",
-                enabled ? @"YES" : @"NO"];
-            [self runCommand:defaultsCmd];
+            NSLog(@"[TrollVNC] AssistiveTouchForceDisabled = %d (%@)", !enabled, enabled ? @"恢复" : @"禁用");
         }
         
         // 通知 SpringBoard 重新加载设置
