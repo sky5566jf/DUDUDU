@@ -29,7 +29,9 @@
 #import <signal.h>
 #import <stdlib.h>
 #import <sys/sysctl.h>
+#import <sys/utsname.h>
 #import <string.h>
+#import <dlfcn.h>
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
