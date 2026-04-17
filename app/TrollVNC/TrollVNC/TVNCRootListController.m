@@ -938,7 +938,6 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     void *dict = xpc_dictionary_create(keys, (const void **)values, 1);
     
     // 发送同步消息
-    typedef void* (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
     xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
         (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
     
