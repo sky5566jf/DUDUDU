@@ -1205,19 +1205,39 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     return modelMap[identifier] ?: identifier ?: @"Unknown";
 }
 
+// 获取存储空间信息
+- (NSString *)storageSpaceInfo {
+    NSError *error = nil;
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:&error];
+    if (error) return @"未知";
+    
+    // 总空间（字节转 GB）
+    unsigned long long totalSpace = [[attrs objectForKey:NSFileSystemSize] unsignedLongLongValue];
+    // 可用空间
+    unsigned long long freeSpace = [[attrs objectForKey:NSFileSystemFreeSize] unsignedLongLongValue];
+    
+    // 保留两位小数
+    double totalGB = totalSpace / (1024.0 * 1024.0 * 1024.0);
+    double freeGB = freeSpace / (1024.0 * 1024.0 * 1024.0);
+    
+    return [NSString stringWithFormat:@"总 %.1f GB / 可用 %.1f GB", totalGB, freeGB];
+}
+
 // 更新设备信息到 specifiers
 - (void)updateDeviceInfoSpecifiers {
     for (PSSpecifier *specifier in _specifiers) {
         NSString *specId = [specifier propertyForKey:@"id"];
         
         if ([specId isEqualToString:@"DeviceName"]) {
-            [specifier setProperty:[self deviceName] forKey:@"footerText"];
+            [specifier setProperty:[self deviceName] forKey:@"value"];
         } else if ([specId isEqualToString:@"SystemVersion"]) {
-            [specifier setProperty:[NSString stringWithFormat:@"iOS %@", [self systemVersion]] forKey:@"footerText"];
+            [specifier setProperty:[NSString stringWithFormat:@"iOS %@", [self systemVersion]] forKey:@"value"];
         } else if ([specId isEqualToString:@"DeviceModel"]) {
-            [specifier setProperty:[self deviceModelName] forKey:@"footerText"];
+            [specifier setProperty:[self deviceModelName] forKey:@"value"];
         } else if ([specId isEqualToString:@"DeviceIP"]) {
-            [specifier setProperty:[self localIPAddress] forKey:@"footerText"];
+            [specifier setProperty:[self localIPAddress] forKey:@"value"];
+        } else if ([specId isEqualToString:@"StorageSpace"]) {
+            [specifier setProperty:[self storageSpaceInfo] forKey:@"value"];
         }
     }
     // 刷新列表
