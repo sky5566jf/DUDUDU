@@ -997,40 +997,48 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)setAssistiveTouchEnabled:(BOOL)enabled {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 目标文件
-        NSString *accessibilityPlist = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
+        // 使用 defaults 命令设置值（同步执行）
+        NSString *enabledStr = enabled ? @"TRUE" : @"FALSE";
         
-        // 读取现有 plist
+        // 设置 AssistiveTouchEnabled（启用状态）
+        NSString *cmd1 = [NSString stringWithFormat:
+            @"defaults write com.apple.Accessibility AssistiveTouchEnabled -bool %@", enabledStr];
+        
+        // 设置 AssistiveTouchForceDisabled（强制禁用，true=彻底禁用）
+        NSString *cmd2 = [NSString stringWithFormat:
+            @"defaults write com.apple.Accessibility AssistiveTouchForceDisabled -bool %@",
+            enabled ? @"FALSE" : @"TRUE"];
+        
+        // 同步执行命令
+        FILE *fp1 = popen([cmd1 UTF8String], "r");
+        if (fp1) pclose(fp1);
+        
+        FILE *fp2 = popen([cmd2 UTF8String], "r");
+        if (fp2) pclose(fp2);
+        
+        // 同步方式写 plist
+        NSString *accessibilityPlist = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
         NSMutableDictionary *plist = [NSMutableDictionary dictionary];
         NSDictionary *existingPlist = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
         if (existingPlist) {
             [plist addEntriesFromDictionary:existingPlist];
         }
-        
-        // 设置多个键值确保生效
-        // AssistiveTouchEnabled: 启用状态
         plist[@"AssistiveTouchEnabled"] = @(enabled);
-        // AssistiveTouchForceDisabled: 强制禁用（true=彻底禁用，设置里无法打开）
         plist[@"AssistiveTouchForceDisabled"] = @(!enabled);
-        
-        // 写回 plist（同步方式确保写入成功）
-        BOOL writeSuccess = [plist writeToFile:accessibilityPlist atomically:YES];
-        
-        // 设置文件权限
+        [plist writeToFile:accessibilityPlist atomically:YES];
         chmod([accessibilityPlist UTF8String], 0644);
         
-        // 验证写入
+        // 验证
         NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
-        if (verify) {
-            NSLog(@"[TrollVNC] 写入成功: AssistiveTouchEnabled=%@, AssistiveTouchForceDisabled=%@",
-                  verify[@"AssistiveTouchEnabled"], verify[@"AssistiveTouchForceDisabled"]);
-        } else {
-            NSLog(@"[TrollVNC] 写入验证失败!");
-        }
+        NSLog(@"[TrollVNC] AssistiveTouch %@: Enabled=%@, ForceDisabled=%@",
+              enabled ? @"enable" : @"disable",
+              verify[@"AssistiveTouchEnabled"], verify[@"AssistiveTouchForceDisabled"]);
         
-        // 通知 SpringBoard 重新加载设置
+        // 通知 SpringBoard
         notify_post("com.apple.springboard.preferenceschanged");
-        [self runCommand:@"killall -9 SpringBoard 2>/dev/null || killall -HUP SpringBoard"];
+        
+        // 强制重启 SpringBoard
+        [self runCommand:@"killall -9 SpringBoard"];
     });
 }
 
