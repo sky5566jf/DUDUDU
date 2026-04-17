@@ -311,6 +311,8 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     [super viewWillAppear:animated];
 
     [self updateFirstGroupAndReload:YES];
+    [self updateDeviceInfoSpecifiers];
+    [self reloadSpecifiers];
 }
 
 - (void)showClients {
@@ -926,8 +928,8 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         return NO;
     }
     
-    // 设置事件处理
-    xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {});
+    // 设置事件处理（使用 NULL 避免 ARC 桥接问题）
+    xpc_connection_set_event_handler(conn, NULL);
     xpc_connection_resume(conn);
     
     // 构造重启命令消息 { cmd = 5 }
@@ -1200,15 +1202,6 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             [specifier setProperty:[self localIPAddress] forKey:@"footerText"];
         }
     }
-}
-
-// 重写 viewWillAppear 以更新设备信息
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
-    
-    [self updateFirstGroupAndReload:YES];
-    [self updateDeviceInfoSpecifiers];
-    [self reloadSpecifiers];
 }
 
 @end
