@@ -949,22 +949,42 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)rebootDevice {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        // 尝试多种重启方法，按顺序执行
+        
         // 方法1: XPC 用户空间重启（不需要 root 权限）
         BOOL xpcResult = [self rebootWithXPC];
-        
         if (xpcResult) {
-            return; // XPC 重启成功
+            return;
         }
         
-        // 方法2: 尝试直接调用 reboot 系统调用（需要 root 权限）
-        // reboot(0) 在 sys/reboot.h 中定义
-        extern int reboot(int);
-        reboot(0);
+        // 方法2: fork + execve 执行 reboot（最可靠的用户空间方式）
+        pid_t pid = fork();
+        if (pid == 0) {
+            // 子进程
+            // 尝试 /sbin/reboot
+            execve("/sbin/reboot", (char *[]){"reboot", NULL}, (char *[]){"PATH=/sbin:/usr/sbin:/usr/bin:/bin", NULL});
+            // 如果 /sbin/reboot 不存在，尝试 /usr/sbin/reboot
+            execve("/usr/sbin/reboot", (char *[]){"reboot", NULL}, (char *[]){"PATH=/sbin:/usr/sbin:/usr/bin:/bin", NULL});
+            _exit(1);
+        } else if (pid > 0) {
+            // 父进程等待子进程
+            return;
+        }
         
-        // 方法3: 如果上面都失败，尝试 posix_spawn
-        pid_t pid;
+        // 方法3: posix_spawn 执行 reboot
+        pid_t pid2;
         const char *args[] = {"reboot", NULL};
-        posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        posix_spawn(&pid2, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        
+        // 方法4: system() 执行 reboot
+        system("/usr/sbin/reboot");
+        
+        // 方法5: 尝试使用 notify_post 发送系统重启通知
+        notify_post("com.apple.system.powermanagement.rebootRequested");
+        notify_post("com.apple.shutdown.reboot");
+        
+        // 方法6: 最后尝试 killall launchd
+        [self killall:@"launchd"];
     });
 }
 
@@ -1202,6 +1222,10 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             [specifier setProperty:[self localIPAddress] forKey:@"footerText"];
         }
     }
+    // 刷新列表
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self reloadSpecifiers];
+    });
 }
 
 @end

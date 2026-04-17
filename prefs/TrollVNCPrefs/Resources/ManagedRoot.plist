@@ -33,6 +33,8 @@
 			<string>禁用小白点</string>
 			<key>action</key>
 			<string>disableAssistiveTouch</string>
+			<key>postAction</key>
+			<string>respringDevice</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -41,6 +43,8 @@
 			<string>恢复小白点</string>
 			<key>action</key>
 			<string>enableAssistiveTouch</string>
+			<key>postAction</key>
+			<string>respringDevice</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -61,6 +65,8 @@
 			<string>设备名称</string>
 			<key>id</key>
 			<string>DeviceName</string>
+			<key>footerText</key>
+			<string>加载中...</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -69,6 +75,8 @@
 			<string>系统版本</string>
 			<key>id</key>
 			<string>SystemVersion</string>
+			<key>footerText</key>
+			<string>加载中...</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -77,6 +85,8 @@
 			<string>设备型号</string>
 			<key>id</key>
 			<string>DeviceModel</string>
+			<key>footerText</key>
+			<string>加载中...</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -85,6 +95,8 @@
 			<string>局域网IP</string>
 			<key>id</key>
 			<string>DeviceIP</string>
+			<key>footerText</key>
+			<string>加载中...</string>
 		</dict>
 	</array>
 </dict>

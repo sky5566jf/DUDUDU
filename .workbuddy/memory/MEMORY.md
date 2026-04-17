@@ -60,6 +60,10 @@ python devkit/download_artifact.py <artifact_id> <output_path>
 脚本路径：`devkit/download_artifact.py`
 原理：先用 gh token 获取 GitHub API 的重定向 URL，再直接请求 Azure Blob URL（不带 token）。
 
+## tipa 产物目录
+- **下载目录**: `C:\lmp\release\public`（不含子目录）
+- 每次编译后用 `gh run download` 或 Python 脚本下载到该目录
+
 ## 文件管理 API
 - `GET /api/filelist?path=xxx` - 列出目录（默认懒人精灵目录）
 - `GET /api/readfile?path=xxx` - 读取文件
@@ -94,4 +98,7 @@ python devkit/download_artifact.py <artifact_id> <output_path>
   - 使用条件编译，只在 roothide/bootstrap 方案启用 root 权限
   - rootless/default 方案降级为 mobile 权限
   - 编译成功（run 24492597572）
-  - bootstrap tipa 已复制到 C:\lmp\release\public\TrollVNC_3.1.tipa
+- 2026-04-17: v3.1.3 功能更新
+  - XPC 用户空间重启（不需要 root 权限）
+  - 主界面显示设备信息（名称、系统版本、型号、IP）
+  - 编译成功（run 24553464173）
