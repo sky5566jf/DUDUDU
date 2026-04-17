@@ -887,18 +887,34 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 // 使用 XPC 与 mmaintenanced 通信进行用户空间重启（不需要 root 权限）
 - (BOOL)rebootWithXPC {
-    // 动态加载 libxpc.dylib
+    // 使用纯 C 代码避免 ARC 问题
     void *lib = dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY);
     if (!lib) {
         return NO;
     }
     
-    // 获取 xpc_connection_create_service 函数
+    // 获取 XPC 函数
     typedef void* (*xpc_connection_create_service_t)(const char *name);
+    typedef void (*xpc_connection_set_event_handler_t)(void *conn, void *handler);
+    typedef void (*xpc_connection_resume_t)(void *conn);
+    typedef void (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
+    typedef void* (*xpc_dictionary_create_t)(const void * const *keys, const void * const *values, size_t count);
+    typedef void (*xpc_dictionary_set_int64_t)(void *dict, const char *key, int64_t value);
+    
     xpc_connection_create_service_t xpc_connection_create_service = 
         (xpc_connection_create_service_t)dlsym(lib, "xpc_connection_create_service");
+    xpc_connection_set_event_handler_t xpc_connection_set_event_handler = 
+        (xpc_connection_set_event_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
+    xpc_connection_resume_t xpc_connection_resume = 
+        (xpc_connection_resume_t)dlsym(lib, "xpc_connection_resume");
+    xpc_dictionary_create_t xpc_dictionary_create = 
+        (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
+    xpc_dictionary_set_int64_t xpc_dictionary_set_int64 = 
+        (xpc_dictionary_set_int64_t)dlsym(lib, "xpc_dictionary_set_int64");
+    xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
+        (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
     
-    if (!xpc_connection_create_service) {
+    if (!xpc_connection_create_service || !xpc_dictionary_create || !xpc_dictionary_set_int64) {
         dlclose(lib);
         return NO;
     }
@@ -911,36 +927,16 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     }
     
     // 设置事件处理
-    typedef void (*xpc_event_handler_t)(void *conn, void *event);
-    typedef void (*xpc_connection_set_event_handler_t)(void *conn, void *handler);
-    typedef void (*xpc_connection_resume_t)(void *conn);
-    typedef void (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
-    typedef void* (*xpc_dictionary_create_t)(const void **keys, const void **values, size_t count);
-    typedef void* (*xpc_dictionary_get_value_t)(void *dict, const char *key);
-    typedef int (*xpc_dictionary_get_int64_t)(void *dict, const char *key);
-    
-    xpc_connection_set_event_handler_t xpc_connection_set_event_handler = 
-        (xpc_connection_set_event_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
-    xpc_connection_resume_t xpc_connection_resume = 
-        (xpc_connection_resume_t)dlsym(lib, "xpc_connection_resume");
-    xpc_dictionary_create_t xpc_dictionary_create = 
-        (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
-    xpc_dictionary_get_int64_t xpc_dictionary_get_int64 = 
-        (xpc_dictionary_get_int64_t)dlsym(lib, "xpc_dictionary_get_int64");
-    
-    // 设置空的事件处理
     xpc_connection_set_event_handler(conn, ^(xpc_object_t event) {});
     xpc_connection_resume(conn);
     
     // 构造重启命令消息 { cmd = 5 }
-    const char *keys[] = {"cmd"};
-    int64_t values[] = {5};
-    void *dict = xpc_dictionary_create(keys, (const void **)values, 1);
+    const void *keys[1] = { "cmd" };
+    const void *values[1] = { (const void *)5 };
+    void *dict = xpc_dictionary_create(keys, values, 1);
+    xpc_dictionary_set_int64(dict, "cmd", 5);
     
-    // 发送同步消息
-    xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
-        (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
-    
+    // 发送消息
     if (xpc_connection_send_message_with_reply_sync) {
         xpc_connection_send_message_with_reply_sync(conn, dict);
     }
