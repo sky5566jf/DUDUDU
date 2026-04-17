@@ -25,8 +25,10 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <notify.h>
+#import <libproc.h>
 #import <signal.h>
 #import <stdlib.h>
+#import <sys/sysctl.h>
 #import <string.h>
 
 #import "StripedTextTableViewController.h"
