@@ -30,6 +30,7 @@
 #import <stdlib.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
+#import <sys/stat.h>
 #import <string.h>
 #import <dlfcn.h>
 
@@ -976,14 +977,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         const char *args[] = {"reboot", NULL};
         posix_spawn(&pid2, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
         
-        // 方法4: system() 执行 reboot
-        system("/usr/sbin/reboot");
-        
-        // 方法5: 尝试使用 notify_post 发送系统重启通知
+        // 方法4: 尝试使用 notify_post 发送系统重启通知
         notify_post("com.apple.system.powermanagement.rebootRequested");
         notify_post("com.apple.shutdown.reboot");
         
-        // 方法6: 最后尝试 killall launchd
+        // 方法5: 最后尝试 killall launchd
         [self killall:@"launchd"];
     });
 }
