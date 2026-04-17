@@ -885,13 +885,18 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)rebootDevice {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 方法1: 使用 posix_spawn 执行 reboot (需要 root 权限)
-        pid_t pid;
-        const char *args[] = {"reboot", NULL};
-        int spawnResult = posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
+        // 尝试多种方式重启设备
+        // 方法1: 尝试直接调用 reboot (需要 root 权限)
+        pid_t pid1;
+        const char *args1[] = {"reboot", NULL};
+        int spawnResult = posix_spawn(&pid1, "/usr/sbin/reboot", NULL, NULL, (char **)args1, NULL);
         
         if (spawnResult != 0) {
-            // 方法2: 使用 notify_post
+            // 方法2: 尝试 killall -9 launchd (强制重启)
+            [self killall:@"launchd"];
+            usleep(100000); // 100ms
+            
+            // 方法3: 使用系统通知
             notify_post("com.apple.shutdown.reboot");
         }
     });
@@ -944,10 +949,14 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 - (void)disableAssistiveTouch {
     [self setAssistiveTouchEnabled:NO];
+    // 立即重启 SpringBoard 使更改生效
+    [self respringDevice];
 }
 
 - (void)enableAssistiveTouch {
     [self setAssistiveTouchEnabled:YES];
+    // 立即重启 SpringBoard 使更改生效
+    [self respringDevice];
 }
 
 @end
