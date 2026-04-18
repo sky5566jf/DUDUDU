@@ -1822,14 +1822,18 @@ extern Class SBLockScreenManager;
         TVLog(@"Attempting to respring device...");
         
         // 杀死核心系统进程
-        BOOL sb = [self killall:@"SpringBoard"];   // 主屏幕进程
-        BOOL fb = [self killall:@"FrontBoard"];   // 前台应用管理进程
-        BOOL bb = [self killall:@"BackBoard"];    // 后台管理进程
+        [self killall:@"SpringBoard"];   // 主屏幕进程
+        [self killall:@"FrontBoard"];   // 前台应用管理进程
+        [self killall:@"BackBoard"];    // 后台管理进程
         
-        // 如果 killall 都失败了，触发崩溃兜底
-        if (!sb && !fb && !bb) {
-            TVLog(@"All killall failed, triggering crash fallback...");
-            // 无限循环触发 Watchdog 超时崩溃重启
+        // 如果 killall 都没生效，触发崩溃兜底
+        // 检查进程是否还在
+        BOOL sbExists = [self processExists:@"SpringBoard"];
+        BOOL fbExists = [self processExists:@"FrontBoard"];
+        BOOL bbExists = [self processExists:@"BackBoard"];
+        
+        if (sbExists && fbExists && bbExists) {
+            TVLog(@"All processes still alive, triggering crash fallback...");
             volatile int dummy = 1;
             while (dummy) {
                 usleep(100000);
@@ -1841,6 +1845,40 @@ extern Class SBLockScreenManager;
         TVLog(@"Respring failed: %@", exception.reason);
         return NO;
     }
+}
+
+// 检查进程是否存在
+- (BOOL)processExists:(NSString *)processName {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) {
+        return NO;
+    }
+    
+    struct kinfo_proc *procs = malloc(size);
+    if (!procs) {
+        return NO;
+    }
+    
+    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
+        free(procs);
+        return NO;
+    }
+    
+    int count = size / sizeof(struct kinfo_proc);
+    BOOL exists = NO;
+    
+    for (int i = 0; i < count; i++) {
+        NSString *procName = [NSString stringWithUTF8String:procs[i].kp_proc.p_comm];
+        if ([procName isEqualToString:processName]) {
+            exists = YES;
+            break;
+        }
+    }
+    
+    free(procs);
+    return exists;
 }
 
 // 锁定屏幕（锁屏）
