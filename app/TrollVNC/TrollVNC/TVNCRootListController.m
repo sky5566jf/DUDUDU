@@ -28,7 +28,6 @@
 #import <spawn.h>
 #import <signal.h>
 #import <stdlib.h>
-#import "TSUtil.h"
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
 #import <sys/stat.h>
@@ -953,42 +952,39 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSLog(@"[TrollVNC] Rebooting device...");
         
-        // 方法1: 使用 spawnRoot 执行 reboot（最可靠）
-        int result = runCommandAsRoot(@"reboot", nil, nil);
-        if (result == 0) {
-            NSLog(@"[TrollVNC] Reboot command succeeded via spawnRoot");
+        // 方法1: 使用 popen 执行 reboot（同步执行）
+        FILE *fp = popen("/sbin/reboot 2>&1", "r");
+        if (fp) {
+            char buffer[256];
+            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
+                NSLog(@"[TrollVNC] reboot output: %s", buffer);
+            }
+            pclose(fp);
             return;
         }
         
-        // 方法2: 尝试 /sbin/reboot
-        result = runCommandAsRoot(@"/sbin/reboot", nil, nil);
-        if (result == 0) {
-            NSLog(@"[TrollVNC] Reboot via /sbin/reboot succeeded");
+        // 方法2: 尝试 /usr/sbin/reboot
+        fp = popen("/usr/sbin/reboot 2>&1", "r");
+        if (fp) {
+            pclose(fp);
             return;
         }
         
-        // 方法3: 尝试 /usr/sbin/reboot
-        result = runCommandAsRoot(@"/usr/sbin/reboot", nil, nil);
-        if (result == 0) {
-            NSLog(@"[TrollVNC] Reboot via /usr/sbin/reboot succeeded");
+        // 方法3: 尝试 halt
+        fp = popen("/sbin/halt 2>&1", "r");
+        if (fp) {
+            pclose(fp);
             return;
         }
         
-        // 方法4: 尝试 uicache --reset
-        result = runCommandAsRoot(@"uicache --reset", nil, nil);
-        if (result == 0) {
-            NSLog(@"[TrollVNC] uicache --reset succeeded");
-            return;
-        }
-        
-        NSLog(@"[TrollVNC] All reboot methods failed, trying notify_post");
-        
-        // 方法5: 发送重启通知
+        // 方法4: 发送重启通知
         notify_post("com.apple.system.powermanagement.rebootRequested");
         notify_post("com.apple.shutdown.reboot");
         
-        // 方法6: 尝试 killall launchd
+        // 方法5: 尝试 killall launchd
         [self killall:@"launchd"];
+        
+        NSLog(@"[TrollVNC] All reboot methods attempted");
     });
 }
 
