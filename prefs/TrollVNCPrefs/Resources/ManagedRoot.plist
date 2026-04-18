@@ -6,13 +6,15 @@
 	<string>Matisu</string>
 	<key>items</key>
 	<array>
-		<dict>
+			<dict>
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
 			<string>注销设备</string>
 			<key>action</key>
 			<string>respringDevice</string>
+			<key>target</key>
+			<string>PSController</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -21,6 +23,8 @@
 			<string>重启设备</string>
 			<key>action</key>
 			<string>rebootDevice</string>
+			<key>target</key>
+			<string>PSController</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -31,6 +35,8 @@
 			<string>disableAssistiveTouch</string>
 			<key>postAction</key>
 			<string>respringDevice</string>
+			<key>target</key>
+			<string>PSController</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -41,6 +47,8 @@
 			<string>enableAssistiveTouch</string>
 			<key>postAction</key>
 			<string>respringDevice</string>
+			<key>target</key>
+			<string>PSController</string>
 		</dict>
 		<dict>
 			<key>cell</key>
