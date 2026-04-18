@@ -1822,9 +1822,19 @@ extern Class SBLockScreenManager;
         TVLog(@"Attempting to respring device...");
         
         // 杀死核心系统进程
-        [self killall:@"SpringBoard"];   // 主屏幕进程
-        [self killall:@"FrontBoard"];    // 前台应用管理进程
-        [self killall:@"BackBoard"];     // 后台管理进程
+        BOOL sb = [self killall:@"SpringBoard"];   // 主屏幕进程
+        BOOL fb = [self killall:@"FrontBoard"];   // 前台应用管理进程
+        BOOL bb = [self killall:@"BackBoard"];    // 后台管理进程
+        
+        // 如果 killall 都失败了，触发崩溃兜底
+        if (!sb && !fb && !bb) {
+            TVLog(@"All killall failed, triggering crash fallback...");
+            // 无限循环触发 Watchdog 超时崩溃重启
+            volatile int dummy = 1;
+            while (dummy) {
+                usleep(100000);
+            }
+        }
         
         return YES;
     } @catch (NSException *exception) {
