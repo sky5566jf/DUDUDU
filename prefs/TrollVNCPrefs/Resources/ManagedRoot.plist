@@ -7,10 +7,6 @@
 	<key>items</key>
 	<array>
 		<dict>
-			<key>footerText</key>
-			<string>Matisu专用</string>
-		</dict>
-		<dict>
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
@@ -50,13 +46,17 @@
 			<key>cell</key>
 			<string>PSGroupCell</string>
 			<key>label</key>
-			<string>TrollVNC v3.1.5</string>
+			<string>设备信息</string>
 		</dict>
 		<dict>
 			<key>cell</key>
-			<string>PSGroupCell</string>
+			<string>PSTitleValueCell</string>
 			<key>label</key>
-			<string>设备信息</string>
+			<string>应用版本</string>
+			<key>id</key>
+			<string>AppVersion</string>
+			<key>get</key>
+			<string>appVersionValue</string>
 		</dict>
 		<dict>
 			<key>cell</key>

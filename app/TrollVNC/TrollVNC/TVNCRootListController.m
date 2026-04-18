@@ -1233,6 +1233,16 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 // 设备信息 getter 方法（供 PSTitleValueCell 调用）
+- (NSString *)appVersionValue {
+    NSString *versionString;
+#ifdef THEBOOTSTRAP
+    versionString = [[GitHubReleaseUpdater shared] currentVersion];
+#else
+    versionString = @PACKAGE_VERSION;
+#endif
+    return [NSString stringWithFormat:@"v%@", versionString];
+}
+
 - (NSString *)deviceNameValue {
     return [self deviceName];
 }
@@ -1259,7 +1269,8 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         for (PSSpecifier *specifier in self->_specifiers) {
             NSString *specId = [specifier propertyForKey:@"id"];
-            if ([specId isEqualToString:@"DeviceName"] ||
+            if ([specId isEqualToString:@"AppVersion"] ||
+                [specId isEqualToString:@"DeviceName"] ||
                 [specId isEqualToString:@"SystemVersion"] ||
                 [specId isEqualToString:@"DeviceModel"] ||
                 [specId isEqualToString:@"DeviceIP"] ||
