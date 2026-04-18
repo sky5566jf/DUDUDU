@@ -29,6 +29,11 @@
 #import <signal.h>
 #import <stdlib.h>
 #import <sys/sysctl.h>
+
+// 手动声明 persona_np 函数（TrollStore 私有 API）
+extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
+extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
+extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
 #import <sys/utsname.h>
 #import <sys/stat.h>
 #import <string.h>
@@ -991,11 +996,6 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
 // Helper: 使用 posix_spawn + persona_np 以 root 身份执行命令
 - (int)runAsRoot:(NSString *)command {
-    // 手动声明 persona_np 函数（TrollStore 私有 API）
-    extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
-    extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
-    extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
-    
     pid_t pid;
     posix_spawnattr_t attr;
     
