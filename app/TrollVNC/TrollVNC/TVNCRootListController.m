@@ -1232,26 +1232,41 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     return [NSString stringWithFormat:@"总 %.1f GB / 可用 %.1f GB", totalGB, freeGB];
 }
 
+// 设备信息 getter 方法（供 PSTitleValueCell 调用）
+- (NSString *)deviceNameValue {
+    return [self deviceName];
+}
+
+- (NSString *)systemVersionValue {
+    return [NSString stringWithFormat:@"iOS %@", [self systemVersion]];
+}
+
+- (NSString *)deviceModelValue {
+    return [self deviceModelName];
+}
+
+- (NSString *)deviceIPValue {
+    return [self localIPAddress];
+}
+
+- (NSString *)storageSpaceValue {
+    return [self storageSpaceInfo];
+}
+
 // 更新设备信息到 specifiers
 - (void)updateDeviceInfoSpecifiers {
-    for (PSSpecifier *specifier in _specifiers) {
-        NSString *specId = [specifier propertyForKey:@"id"];
-        
-        if ([specId isEqualToString:@"DeviceName"]) {
-            [specifier setProperty:[self deviceName] forKey:@"value"];
-        } else if ([specId isEqualToString:@"SystemVersion"]) {
-            [specifier setProperty:[NSString stringWithFormat:@"iOS %@", [self systemVersion]] forKey:@"value"];
-        } else if ([specId isEqualToString:@"DeviceModel"]) {
-            [specifier setProperty:[self deviceModelName] forKey:@"value"];
-        } else if ([specId isEqualToString:@"DeviceIP"]) {
-            [specifier setProperty:[self localIPAddress] forKey:@"value"];
-        } else if ([specId isEqualToString:@"StorageSpace"]) {
-            [specifier setProperty:[self storageSpaceInfo] forKey:@"value"];
-        }
-    }
-    // 刷新列表
+    // 刷新设备信息 specifiers
     dispatch_async(dispatch_get_main_queue(), ^{
-        [self reloadSpecifiers];
+        for (PSSpecifier *specifier in self->_specifiers) {
+            NSString *specId = [specifier propertyForKey:@"id"];
+            if ([specId isEqualToString:@"DeviceName"] ||
+                [specId isEqualToString:@"SystemVersion"] ||
+                [specId isEqualToString:@"DeviceModel"] ||
+                [specId isEqualToString:@"DeviceIP"] ||
+                [specId isEqualToString:@"StorageSpace"]) {
+                [self reloadSpecifier:specifier animated:NO];
+            }
+        }
     });
 }
 
