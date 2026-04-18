@@ -952,28 +952,27 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSLog(@"[TrollVNC] Rebooting device...");
         
-        // 方法1: 使用 popen 执行 reboot（同步执行）
-        FILE *fp = popen("/sbin/reboot 2>&1", "r");
-        if (fp) {
-            char buffer[256];
-            while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-                NSLog(@"[TrollVNC] reboot output: %s", buffer);
-            }
-            pclose(fp);
+        // 方法1: 使用 posix_spawn + persona_np 以 root 身份执行 reboot
+        int result = [self runAsRoot:@"reboot"];
+        NSLog(@"[TrollVNC] reboot via persona_np returned: %d", result);
+        
+        if (result == 0) {
             return;
         }
         
-        // 方法2: 尝试 /usr/sbin/reboot
-        fp = popen("/usr/sbin/reboot 2>&1", "r");
-        if (fp) {
-            pclose(fp);
+        // 方法2: 尝试 /sbin/reboot
+        result = [self runAsRoot:@"/sbin/reboot"];
+        NSLog(@"[TrollVNC] /sbin/reboot returned: %d", result);
+        
+        if (result == 0) {
             return;
         }
         
         // 方法3: 尝试 halt
-        fp = popen("/sbin/halt 2>&1", "r");
-        if (fp) {
-            pclose(fp);
+        result = [self runAsRoot:@"halt"];
+        NSLog(@"[TrollVNC] halt returned: %d", result);
+        
+        if (result == 0) {
             return;
         }
         
@@ -989,6 +988,62 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 #pragma mark - AssistiveTouch Control
+
+// Helper: 使用 posix_spawn + persona_np 以 root 身份执行命令
+- (int)runAsRoot:(NSString *)command {
+    // 手动声明 persona_np 函数（TrollStore 私有 API）
+    extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
+    extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
+    extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
+    
+    pid_t pid;
+    posix_spawnattr_t attr;
+    
+    int err = posix_spawnattr_init(&attr);
+    if (err != 0) {
+        return err;
+    }
+    
+    // 设置 persona 为 root (99 = root persona)
+    err = posix_spawnattr_set_persona_np(&attr, 99, 1);
+    if (err != 0) {
+        posix_spawnattr_destroy(&attr);
+        return err;
+    }
+    
+    // 设置 UID 和 GID 为 0 (root)
+    err = posix_spawnattr_set_persona_uid_np(&attr, 0);
+    if (err != 0) {
+        posix_spawnattr_destroy(&attr);
+        return err;
+    }
+    
+    err = posix_spawnattr_set_persona_gid_np(&attr, 0);
+    if (err != 0) {
+        posix_spawnattr_destroy(&attr);
+        return err;
+    }
+    
+    const char* shPath = "/bin/sh";
+    const char* shArg = "-c";
+    const char* shCmd = [command UTF8String];
+    const char* nullPtr = NULL;
+    
+    const char* argv[] = { shPath, shArg, shCmd, &nullPtr[0] };
+    char* envp[] = { &nullPtr[0] };
+    
+    err = posix_spawn(&pid, shPath, NULL, &attr, (char* const*)argv, envp);
+    posix_spawnattr_destroy(&attr);
+    
+    if (err != 0) {
+        return err;
+    }
+    
+    int status;
+    waitpid(pid, &status, 0);
+    
+    return WIFEXITED(status) ? WEXITSTATUS(status) : status;
+}
 
 // Helper: run shell command
 - (void)runCommand:(NSString *)command {
