@@ -28,6 +28,7 @@
 #import <spawn.h>
 #import <signal.h>
 #import <stdlib.h>
+#import <unistd.h>
 #import <sys/sysctl.h>
 
 // 手动声明 persona_np 函数（TrollStore 私有 API）
@@ -898,19 +899,21 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     // 使用纯 C 代码避免 ARC 问题
     void *lib = dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY);
     if (!lib) {
+        NSLog(@"[TrollVNC] Failed to load libxpc");
         return NO;
     }
     
-    // 获取 XPC 函数
-    typedef void* (*xpc_connection_create_service_t)(const char *name);
+    // 获取 XPC 函数 - 使用 mach service（不是 create_service）
+    typedef void* (*xpc_connection_create_mach_service_t)(const char *name, dispatch_queue_t, uint64_t);
     typedef void (*xpc_connection_set_event_handler_t)(void *conn, void *handler);
     typedef void (*xpc_connection_resume_t)(void *conn);
     typedef void (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
     typedef void* (*xpc_dictionary_create_t)(const void * const *keys, const void * const *values, size_t count);
     typedef void (*xpc_dictionary_set_int64_t)(void *dict, const char *key, int64_t value);
+    typedef void (*xpc_dictionary_set_string_t)(void *dict, const char *key, const char *value);
     
-    xpc_connection_create_service_t xpc_connection_create_service = 
-        (xpc_connection_create_service_t)dlsym(lib, "xpc_connection_create_service");
+    xpc_connection_create_mach_service_t xpc_connection_create_mach_service = 
+        (xpc_connection_create_mach_service_t)dlsym(lib, "xpc_connection_create_mach_service");
     xpc_connection_set_event_handler_t xpc_connection_set_event_handler = 
         (xpc_connection_set_event_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
     xpc_connection_resume_t xpc_connection_resume = 
@@ -919,30 +922,37 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
     xpc_dictionary_set_int64_t xpc_dictionary_set_int64 = 
         (xpc_dictionary_set_int64_t)dlsym(lib, "xpc_dictionary_set_int64");
+    xpc_dictionary_set_string_t xpc_dictionary_set_string = 
+        (xpc_dictionary_set_string_t)dlsym(lib, "xpc_dictionary_set_string");
     xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
         (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
     
-    if (!xpc_connection_create_service || !xpc_dictionary_create || !xpc_dictionary_set_int64) {
+    if (!xpc_connection_create_mach_service || !xpc_dictionary_create || !xpc_dictionary_set_int64) {
+        NSLog(@"[TrollVNC] Failed to get XPC function pointers");
         dlclose(lib);
         return NO;
     }
     
     // 创建到 mmaintenanced 服务的连接
-    void *conn = xpc_connection_create_service("com.apple.mmaintenanced");
+    // 使用 xpc_connection_create_mach_service 而非 create_service
+    void *conn = xpc_connection_create_mach_service("com.apple.mmaintenanced", NULL, 0);
     if (!conn) {
+        NSLog(@"[TrollVNC] Failed to create XPC connection");
         dlclose(lib);
         return NO;
     }
     
-    // 设置事件处理（使用 NULL 避免 ARC 桥接问题）
-    xpc_connection_set_event_handler(conn, NULL);
+    // 设置事件处理
+    xpc_connection_set_event_handler(conn, ^(void *event) {
+        // 忽略事件
+    });
     xpc_connection_resume(conn);
     
     // 构造重启命令消息 { cmd = 5 }
-    const void *keys[1] = { "cmd" };
-    const void *values[1] = { (const void *)5 };
-    void *dict = xpc_dictionary_create(keys, values, 1);
+    void *dict = xpc_dictionary_create(NULL, NULL, 0);
     xpc_dictionary_set_int64(dict, "cmd", 5);
+    
+    NSLog(@"[TrollVNC] Sending XPC reboot command to mmaintenanced...");
     
     // 发送消息
     if (xpc_connection_send_message_with_reply_sync) {
@@ -957,7 +967,14 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSLog(@"[TrollVNC] Rebooting device...");
         
-        // 方法1: 使用 posix_spawn + persona_np 以 root 身份执行 reboot
+        // 方法1: 使用 XPC 调用 mmaintenanced 服务进行用户空间重启
+        BOOL xpcResult = [self rebootWithXPC];
+        NSLog(@"[TrollVNC] XPC reboot returned: %d", xpcResult);
+        
+        // 等待一下让 XPC 调用生效
+        [NSThread sleepForTimeInterval:0.5];
+        
+        // 方法2: 使用 posix_spawn + persona_np 以 root 身份执行 reboot
         int result = [self runAsRoot:@"reboot"];
         NSLog(@"[TrollVNC] reboot via persona_np returned: %d", result);
         
@@ -965,7 +982,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             return;
         }
         
-        // 方法2: 尝试 /sbin/reboot
+        // 方法3: 尝试 /sbin/reboot
         result = [self runAsRoot:@"/sbin/reboot"];
         NSLog(@"[TrollVNC] /sbin/reboot returned: %d", result);
         
@@ -973,7 +990,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             return;
         }
         
-        // 方法3: 尝试 halt
+        // 方法4: 尝试 halt
         result = [self runAsRoot:@"halt"];
         NSLog(@"[TrollVNC] halt returned: %d", result);
         
@@ -981,11 +998,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             return;
         }
         
-        // 方法4: 发送重启通知
+        // 方法5: 发送重启通知
         notify_post("com.apple.system.powermanagement.rebootRequested");
         notify_post("com.apple.shutdown.reboot");
         
-        // 方法5: 尝试 killall launchd
+        // 方法6: 尝试 killall launchd
         [self killall:@"launchd"];
         
         NSLog(@"[TrollVNC] All reboot methods attempted");
