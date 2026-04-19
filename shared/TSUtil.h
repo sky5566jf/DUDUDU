@@ -6,20 +6,11 @@ NS_ASSUME_NONNULL_BEGIN
 extern "C" {
 #endif
 
-/// 以 root 身份执行程序
+/// 以 root 身份执行程序（使用 posix_spawn + persona 提权）
 /// @param path 可执行文件路径
-/// @param args 参数数组
-/// @param stdOut 标准输出（可选）
-/// @param stdErr 标准错误（可选）
+/// @param args 参数数组（不含程序名本身）
 /// @return 退出码，0 表示成功
-int spawnRoot(NSString* path, NSArray* _Nullable args, NSString** _Nullable stdOut, NSString** _Nullable stdErr);
-
-/// 以 root 身份执行 shell 命令
-/// @param command shell 命令
-/// @param stdOut 标准输出（可选）
-/// @param stdErr 标准错误（可选）
-/// @return 退出码，0 表示成功
-int runCommandAsRoot(NSString* command, NSString** _Nullable stdOut, NSString** _Nullable stdErr);
+int spawnRoot(NSString* path, NSArray* _Nullable args);
 
 #ifdef __cplusplus
 }
