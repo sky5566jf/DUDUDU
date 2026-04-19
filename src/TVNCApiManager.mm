@@ -1856,7 +1856,7 @@ extern Class SBLockScreenManager;
         return NO;
     }
     
-    struct kinfo_proc *procs = malloc(size);
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
     if (!procs) {
         return NO;
     }
