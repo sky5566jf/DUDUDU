@@ -922,7 +922,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
     xpc_dictionary_set_int64_t xpc_dictionary_set_int64 = 
         (xpc_dictionary_set_int64_t)dlsym(lib, "xpc_dictionary_set_int64");
-    xpc_dictionary_set_string_t xpc_dictionary_set_string = 
+    xpc_dictionary_set_string_t xpc_dictionary_set_string __attribute__((unused)) = 
         (xpc_dictionary_set_string_t)dlsym(lib, "xpc_dictionary_set_string");
     xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
         (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
@@ -943,7 +943,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     }
     
     // 设置事件处理
-    xpc_connection_set_event_handler(conn, ^(void *event) {
+    xpc_connection_set_event_handler(conn, (__bridge_retained void *)^(void *event) {
         // 忽略事件
     });
     xpc_connection_resume(conn);
@@ -1044,12 +1044,10 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     const char* shPath = "/bin/sh";
     const char* shArg = "-c";
     const char* shCmd = [command UTF8String];
-    const char* nullPtr = NULL;
     
-    const char* argv[] = { shPath, shArg, shCmd, &nullPtr[0] };
-    char* envp[] = { &nullPtr[0] };
+    const char* argv[] = { shPath, shArg, shCmd, NULL };
     
-    err = posix_spawn(&pid, shPath, NULL, &attr, (char* const*)argv, envp);
+    err = posix_spawn(&pid, shPath, NULL, &attr, (char* const*)argv, NULL);
     posix_spawnattr_destroy(&attr);
     
     if (err != 0) {
