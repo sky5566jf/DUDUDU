@@ -1678,22 +1678,16 @@
 #ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限删除
     // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
-    NSString *output = nil;
     int exitCode = 1;
     @try {
-        exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path], &output, nil);
-        if (exitCode != 0) {
-            // spawnRoot 失败，降级为 mobile 权限
-            NSError *error = nil;
-            BOOL success = [fm removeItemAtPath:path error:&error];
-            exitCode = success ? 0 : 1;
-            output = error.localizedDescription;
-        }
+        exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path]);
     } @catch (NSException *exception) {
-        // spawnRoot 崩溃，降级为 NSFileManager
+        TVLog(@"spawnRoot delete exception: %@", exception.reason);
+    }
+    if (exitCode != 0) {
+        // spawnRoot 失败，降级为 mobile 权限
         NSError *error = nil;
         [fm removeItemAtPath:path error:&error];
-        output = [NSString stringWithFormat:@"spawnRoot failed: %@, fallback: %@", exception.reason, error.localizedDescription];
     }
 #else
     // 降级为 mobile 权限删除
@@ -1709,14 +1703,24 @@
         NSDictionary *result = @{@"success": @YES, @"message": @"Deleted successfully", @"path": path};
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @NO,
-            @"error": output ?: [NSString stringWithFormat:@"Delete failed with exit code %d", exitCode],
-            @"path": path
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        // 检查文件是否还存在
+        BOOL stillExists = [fm fileExistsAtPath:path];
+        if (!stillExists) {
+            // 文件已不存在（可能通过其他方式删除了）
+            response.statusCode = 200;
+            response.contentType = @"application/json";
+            NSDictionary *result = @{@"success": @YES, @"message": @"Deleted (or already gone)", @"path": path};
+            response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        } else {
+            response.statusCode = 500;
+            response.contentType = @"application/json";
+            NSDictionary *result = @{
+                @"success": @NO,
+                @"error": [NSString stringWithFormat:@"Delete failed with exit code %d", exitCode],
+                @"path": path
+            };
+            response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        }
     }
     
     return response;
@@ -1740,51 +1744,53 @@
 #ifdef HAS_ROOT_SUPPORT
     // 使用 spawnRoot 以 root 权限创建目录
     // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
-    NSString *output = nil;
     int exitCode = 1;
     @try {
-        exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path], &output, nil);
-        if (exitCode != 0) {
-            // spawnRoot 失败，降级为 mobile 权限
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSError *error = nil;
-            BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
-            exitCode = success ? 0 : 1;
-            output = error.localizedDescription;
-        }
+        exitCode = spawnRoot(@"/bin/mkdir", @[@"-p", path]);
     } @catch (NSException *exception) {
-        // spawnRoot 崩溃，降级为 NSFileManager
+        TVLog(@"spawnRoot mkdir exception: %@", exception.reason);
+    }
+    if (exitCode != 0) {
+        // spawnRoot 失败，降级为 mobile 权限
         NSFileManager *fm = [NSFileManager defaultManager];
         NSError *error = nil;
         [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
-        output = [NSString stringWithFormat:@"spawnRoot failed: %@, fallback: %@", exception.reason, error.localizedDescription];
     }
 #else
     // 降级为 mobile 权限创建目录
     NSFileManager *fm = [NSFileManager defaultManager];
     NSError *error = nil;
-    BOOL success = [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
-    int exitCode = success ? 0 : 1;
-    NSString *output = error.localizedDescription;
+    [fm createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:&error];
+    int exitCode = (error == nil) ? 0 : 1;
 #endif
     
     if (exitCode == 0) {
-        // 设置目录权限为可读写
-        chmod([path UTF8String], 0777);
-        
         response.statusCode = 200;
         response.contentType = @"application/json";
         NSDictionary *result = @{@"success": @YES, @"message": @"Folder created successfully", @"path": path};
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *result = @{
-            @"success": @NO,
-            @"error": output ?: [NSString stringWithFormat:@"Create folder failed with exit code %d", exitCode],
-            @"path": path
-        };
-        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        // 检查目录是否已存在
+        NSFileManager *fm = [NSFileManager defaultManager];
+        BOOL exists = [fm fileExistsAtPath:path];
+        BOOL isDir = NO;
+        [fm fileExistsAtPath:path isDirectory:&isDir];
+        if (exists && isDir) {
+            // 目录已存在，视为成功
+            response.statusCode = 200;
+            response.contentType = @"application/json";
+            NSDictionary *result = @{@"success": @YES, @"message": @"Folder already exists", @"path": path};
+            response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        } else {
+            response.statusCode = 500;
+            response.contentType = @"application/json";
+            NSDictionary *result = @{
+                @"success": @NO,
+                @"error": [NSString stringWithFormat:@"Create folder failed with exit code %d", exitCode],
+                @"path": path
+            };
+            response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        }
     }
     
     return response;
