@@ -1680,7 +1680,7 @@
     // 注意：spawnRoot 内部会捕获异常，如果 persona API 不可用会自动降级
     int exitCode = 1;
     @try {
-        exitCode = spawnRoot(@"/bin/rm", @[@"-rf", path]);
+        exitCode = spawnRoot(@"/usr/bin/rm", @[@"-rf", path]);
     } @catch (NSException *exception) {
         TVLog(@"spawnRoot delete exception: %@", exception.reason);
     }
