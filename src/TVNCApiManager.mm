@@ -2107,8 +2107,8 @@ extern Class SBLockScreenManager;
 #pragma mark - 自动解锁锁屏监听
 
 - (BOOL)isDeviceLocked {
-    // 使用 SBLockScreenManager 检测锁屏状态
-    Class lockMgr = SBLockScreenManager;
+    // 使用 objc_getClass 动态获取 SBLockScreenManager（避免链接错误）
+    Class lockMgr = objc_getClass("SBLockScreenManager");
     if (!lockMgr) {
         TVLog(@"SBLockScreenManager not available");
         return NO;
