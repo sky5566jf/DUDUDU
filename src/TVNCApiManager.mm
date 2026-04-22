@@ -80,7 +80,6 @@ extern CFStringRef SBSCopyFrontmostApplicationDisplayIdentifier(void);
 
 // SBLockScreenManager 私有 API 声明 (用于自动解锁)
 extern Class _SBLockScreenManager(void);
-extern Class SBLockScreenManager;
 
 #ifdef __cplusplus
 }
@@ -2102,38 +2101,6 @@ extern Class SBLockScreenManager;
     }
     
     return result;
-}
-
-#pragma mark - 自动解锁锁屏监听
-
-- (BOOL)isDeviceLocked {
-    // 使用 objc_getClass 动态获取 SBLockScreenManager（避免链接错误）
-    Class lockMgr = objc_getClass("SBLockScreenManager");
-    if (!lockMgr) {
-        TVLog(@"SBLockScreenManager not available");
-        return NO;
-    }
-    
-    SEL isLockedSel = NSSelectorFromString(@"isLocked");
-    if (![lockMgr respondsToSelector:isLockedSel]) {
-        TVLog(@"SBLockScreenManager does not respond to isLocked");
-        return NO;
-    }
-    
-    id lockMgrInstance = [lockMgr performSelector:isLockedSel];
-    if ([lockMgrInstance respondsToSelector:isLockedSel]) {
-        NSMethodSignature *sig = [lockMgrInstance methodSignatureForSelector:isLockedSel];
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
-        [invocation setSelector:isLockedSel];
-        [invocation setTarget:lockMgrInstance];
-        [invocation invoke];
-        
-        BOOL locked = NO;
-        [invocation getReturnValue:&locked];
-        return locked;
-    }
-    
-    return NO;
 }
 
 

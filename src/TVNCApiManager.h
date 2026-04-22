@@ -239,14 +239,6 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 
-#pragma mark - 自动解锁锁屏监听
-
-/**
- * 检测当前设备是否处于锁屏状态
- * @return YES=已锁定，NO=未锁定
- */
-- (BOOL)isDeviceLocked;
-
 @end
 
 NS_ASSUME_NONNULL_END
