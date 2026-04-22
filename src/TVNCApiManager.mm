@@ -2104,6 +2104,38 @@ extern Class SBLockScreenManager;
     return result;
 }
 
+#pragma mark - 自动解锁锁屏监听
+
+- (BOOL)isDeviceLocked {
+    // 使用 SBLockScreenManager 检测锁屏状态
+    Class lockMgr = SBLockScreenManager;
+    if (!lockMgr) {
+        TVLog(@"SBLockScreenManager not available");
+        return NO;
+    }
+    
+    SEL isLockedSel = NSSelectorFromString(@"isLocked");
+    if (![lockMgr respondsToSelector:isLockedSel]) {
+        TVLog(@"SBLockScreenManager does not respond to isLocked");
+        return NO;
+    }
+    
+    id lockMgrInstance = [lockMgr performSelector:isLockedSel];
+    if ([lockMgrInstance respondsToSelector:isLockedSel]) {
+        NSMethodSignature *sig = [lockMgrInstance methodSignatureForSelector:isLockedSel];
+        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:sig];
+        [invocation setSelector:isLockedSel];
+        [invocation setTarget:lockMgrInstance];
+        [invocation invoke];
+        
+        BOOL locked = NO;
+        [invocation getReturnValue:&locked];
+        return locked;
+    }
+    
+    return NO;
+}
+
 
 #pragma mark - 文件权限 API
 
