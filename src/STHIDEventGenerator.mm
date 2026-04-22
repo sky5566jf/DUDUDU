@@ -1175,16 +1175,8 @@ static inline uint32_t hidUsageCodeForCharacter(NSString *key) {
     if ([key isEqualToString:@"PAUSE"])
         return kHIDUsage_KeyboardPause;
 
-    if ([key isEqualToString:@"PLAYPAUSE"])
-        return kHIDUsage_KeyboardPlayPause;
-    if ([key isEqualToString:@"BRIGHTUP"])
-        return kHIDUsage_KeyboardBrightnessUp;
-    if ([key isEqualToString:@"BRIGHTDOWN"])
-        return kHIDUsage_KeyboardBrightnessDown;
-    if ([key isEqualToString:@"BRIGHTUPDOWN"])
-        return kHIDUsage_KeyboardBrightnessToggle; // 某些键盘支持
-    if ([key isEqualToString:@"SHOW_HIDE_KEYBOARD"])
-        return kHIDUsage_KeyboardGUI; // Command+Ctrl+O 等效于显示键盘
+    // FIXME:
+    // FORWARD/REWIND/FORWARD2/REWIND2/EJECT/PLAYPAUSE/SPOTLIGHT/BRIGHTUP/BRIGHTDOWN/SHOW_HIDE_KEYBOARD
 
     return 0;
 }
