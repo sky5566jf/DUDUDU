@@ -3,7 +3,7 @@ VERSION_FILE := .version
 LAST_COMMIT := .last_commit
 
 # 读取当前版本号
-CURRENT_VERSION := 3.1
+CURRENT_VERSION := 3.1.1
 AUTO_BUILD := 0
 
 # 检查是否有版本号文件

@@ -384,23 +384,9 @@ extern Class SBLockScreenManager;
 
     CFRelease(dest);
 
-    // 释放旋转后的图像和缓冲区
+    // 释放旋转后的图像
     if (rotatedImage) {
-        // 获取 data provider 的数据指针
-        CGDataProviderRef rProvider = CGImageGetDataProvider(rotatedImage);
-        void *providerData = NULL;
-        if (rProvider) {
-            CFDataRef data = CGDataProviderCopyData(rProvider);
-            if (data) {
-                providerData = (void *)CFDataGetBytePtr(data);
-                CFRelease(data);
-            }
-        }
         CGImageRelease(rotatedImage);
-        // 释放旋转缓冲区内存
-        if (providerData) {
-            free(providerData);
-        }
     }
 
     CGImageRelease(cgImage);
@@ -1396,7 +1382,8 @@ extern Class SBLockScreenManager;
             } else {
                 [generator displayBrightnessDecrementPress];
             }
-            [NSThread sleepForTimeInterval:0.05];
+            struct timespec ts = {0, 50000000}; // 50ms
+            nanosleep(&ts, NULL);
         }
     } @catch (NSException *exception) {
         TVLog(@"Set brightness via HID failed: %@", exception.reason);
@@ -1423,7 +1410,8 @@ extern Class SBLockScreenManager;
             } else {
                 [generator volumeDecrementPress];
             }
-            [NSThread sleepForTimeInterval:0.05];
+            struct timespec ts = {0, 50000000}; // 50ms
+            nanosleep(&ts, NULL);
         }
     } @catch (NSException *exception) {
         TVLog(@"Set system volume via HID failed: %@", exception.reason);
@@ -1770,7 +1758,8 @@ extern Class SBLockScreenManager;
         [self killall:@"SpringBoard"];
         
         // 给一点时间让 SpringBoard 重启
-        [NSThread sleepForTimeInterval:1.0];
+        struct timespec ts = {1, 0};
+        nanosleep(&ts, NULL);
         
         return YES;
     } @catch (NSException *exception) {
@@ -1834,10 +1823,12 @@ extern Class SBLockScreenManager;
         
         if (sbExists && fbExists && bbExists) {
             TVLog(@"All processes still alive, triggering crash fallback...");
-            volatile int dummy = 1;
-            while (dummy) {
-                usleep(100000);
-            }
+            // 使用 dispatch_after 延迟 5 秒后退出，避免死循环白白耗 CPU
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                TVLog(@"Crash fallback timeout, exiting...");
+                exit(1);
+            });
+            return YES;
         }
         
         return YES;
@@ -1957,7 +1948,8 @@ extern Class SBLockScreenManager;
         TVLog(@"Home press sent (wake up)");
         
         // 等待 1.5 秒
-        [NSThread sleepForTimeInterval:1.5];
+        struct timespec ts = {1, 500000000}; // 1.5s
+        nanosleep(&ts, NULL);
         
         // 再按一次 Home
         [generator menuPress];
@@ -2092,7 +2084,8 @@ extern Class SBLockScreenManager;
         // 按 Home 键回到桌面（先确保退出当前应用）
         TVLog(@"Smart clear: Sending menuPress to go home...");
         [generator menuPress];
-        [NSThread sleepForTimeInterval:0.6];
+        struct timespec ts = {0, 600000000}; // 0.6s
+        nanosleep(&ts, NULL);
         
         result[@"success"] = @YES;
         result[@"message"] = @"App dismissed to background";
