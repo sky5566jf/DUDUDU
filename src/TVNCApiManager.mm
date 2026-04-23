@@ -42,6 +42,9 @@
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
 #import <libproc.h>     // 用于 proc_pidpath
+#ifdef HAS_ROOT_SUPPORT
+#import "TSUtil.h"  // 用于 spawnRoot
+#endif
 
 // IOSurface 头文件路径处理
 #if __has_include(<IOSurface/IOSurface.h>)
@@ -1734,33 +1737,38 @@ extern Class _SBLockScreenManager(void);
 - (BOOL)rebootDevice {
     @try {
         TVLog(@"Attempting to reboot device...");
-        
-        // 方法1: 使用 notify_post 通知系统重启
+
+#ifdef HAS_ROOT_SUPPORT
+        // 方法1（首选）：用 spawnRoot 以 root persona 执行 /sbin/reboot
+        // 这是巨魔安装应用能真正重启设备的正确方式（参考 RebootTools 项目）
+        TVLog(@"Trying spawnRoot(\"/sbin/reboot\")...");
+        int exitCode = spawnRoot(@"/sbin/reboot", nil);
+        TVLog(@"spawnRoot(reboot) exitCode: %d", exitCode);
+        if (exitCode == 0) {
+            return YES;
+        }
+
+        // 方法2（备选）：/usr/sbin/reboot
+        TVLog(@"Trying spawnRoot(\"/usr/sbin/reboot\")...");
+        exitCode = spawnRoot(@"/usr/sbin/reboot", nil);
+        TVLog(@"spawnRoot(/usr/sbin/reboot) exitCode: %d", exitCode);
+        if (exitCode == 0) {
+            return YES;
+        }
+#endif
+
+        // 方法3（fallback）：notify_post
         int ret = notify_post("com.apple.shutdown.reboot");
         TVLog(@"notify_post(com.apple.shutdown.reboot) returned: %d", ret);
         if (ret == NOTIFY_STATUS_OK) {
             return YES;
         }
-        
-        // 方法2: 使用 posix_spawn 执行 reboot
-        TVLog(@"Trying posix_spawn(\"reboot\")...");
-        pid_t pid;
-        const char *args[] = {"reboot", NULL};
-        int spawnResult = posix_spawn(&pid, "/usr/sbin/reboot", NULL, NULL, (char **)args, NULL);
-        TVLog(@"posix_spawn returned: %d", spawnResult);
-        if (spawnResult == 0) {
-            return YES;
-        }
-        
-        // 方法3: 通过终止 SpringBoard 触发重启（fallback）
-        TVLog(@"Trying to terminate SpringBoard...");
+
+        // 方法4（最后兜底）：杀 SpringBoard（只会 respring，不是真重启）
+        TVLog(@"Fallback: killing SpringBoard (respring only)...");
         [self killall:@"SpringBoard"];
-        
-        // 给一点时间让 SpringBoard 重启
-        struct timespec ts = {1, 0};
-        nanosleep(&ts, NULL);
-        
         return YES;
+
     } @catch (NSException *exception) {
         TVLog(@"Reboot failed: %@", exception.reason);
         return NO;
