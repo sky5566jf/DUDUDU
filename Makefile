@@ -3,7 +3,7 @@ VERSION_FILE := .version
 LAST_COMMIT := .last_commit
 
 # 读取当前版本号
-CURRENT_VERSION := 3.1.4
+CURRENT_VERSION := 3.1.5
 AUTO_BUILD := 0
 
 # 检查是否有版本号文件
@@ -50,9 +50,9 @@ IPHONE_SIMULATOR_ROOT := $(shell devkit/sim-root.sh)
 else
 ARCHS := arm64
 ifeq ($(THEOS_PACKAGE_SCHEME),)
-TARGET := iphone:clang:16.5:14.0
+TARGET := iphone:clang:16.5:13.0
 else
-TARGET := iphone:clang:16.5:15.0
+TARGET := iphone:clang:16.5:13.0
 endif
 endif
 
