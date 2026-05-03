@@ -69,9 +69,11 @@ python devkit/download_artifact.py <artifact_id> <output_path>
 - 每次编译后用 `gh run download` 或 Python 脚本下载到该目录
 
 ## 编译习惯
-- **每次编译前必须手动更新版本号**：`Makefile` 第 6 行 `CURRENT_VERSION := 3.1`，如 3.1 → 3.1.1
-- **等用户说"推送编译"再触发 GitHub Actions 编译**
-- 不要每次提交后自动触发编译
+- **每次编译前必须手动更新版本号**：`Makefile` 第 6 行 `CURRENT_VERSION := x.x.x`
+- **推送后自动监控编译**：推送后获取 run ID，每 30 秒轮询 status，completed 后自动下载产物到 `C:\lmp\ipa\`
+  - 详见技能 `trollvnc-build-monitor`
+- 用 `devkit/download_artifact.py` + artifact ID 下载（绕过 Azure Blob 网络问题）
+- 产物目录永远是 `C:\lmp\ipa\`（不是 `C:\lmp\release\public\`）
 
 ## 文件管理 API
 - `GET /api/filelist?path=xxx` - 列出目录（默认懒人精灵目录）

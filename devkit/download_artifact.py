@@ -32,10 +32,42 @@ def download_artifact(artifact_id, output_path):
             print(f"Downloading from Azure Blob...")
             with urllib.request.urlopen(blob_url) as r:
                 data = r.read()
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            with open(output_path, "wb") as f:
-                f.write(data)
-            print(f"Saved {len(data)} bytes to {output_path}")
+            # 检查是否是嵌套 zip（artifact 可能包了两层）
+            import io, zipfile
+            data_io = io.BytesIO(data)
+            try:
+                with zipfile.ZipFile(data_io) as zf:
+                    names = zf.namelist()
+                    # 如果 zip 里只有一个文件且以 .tipa/.zip 结尾，需要解包
+                    if len(names) == 1 and (names[0].endswith('.tipa') or names[0].endswith('.zip')):
+                        inner_data = zf.read(names[0])
+                        inner_io = io.BytesIO(inner_data)
+                        try:
+                            with zipfile.ZipFile(inner_io) as zf2:
+                                # 内层是正常 zip（含 Payload/）→ 这才是真正的 tipa
+                                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                                with open(output_path, "wb") as f:
+                                    f.write(inner_data)
+                                print(f"Extracted inner archive: {len(inner_data)} bytes to {output_path}")
+                                return True
+                        except zipfile.BadZipFile:
+                            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                            with open(output_path, "wb") as f:
+                                f.write(inner_data)
+                            print(f"Saved (inner non-zip): {len(inner_data)} bytes to {output_path}")
+                            return True
+                    else:
+                        os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                        with open(output_path, "wb") as f:
+                            f.write(data)
+                        print(f"Saved {len(data)} bytes to {output_path}")
+                        return True
+            except zipfile.BadZipFile:
+                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                with open(output_path, "wb") as f:
+                    f.write(data)
+                print(f"Saved {len(data)} bytes to {output_path}")
+                return True
             return True
         else:
             print(f"Error: {e.code} {e.reason}")
