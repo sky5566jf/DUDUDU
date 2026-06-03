@@ -25,24 +25,15 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <notify.h>
-#import <spawn.h>
 #import <signal.h>
+#import <spawn.h>
 #import <stdlib.h>
-#import <unistd.h>
-#import <sys/sysctl.h>
-
-// 手动声明 persona_np 函数（TrollStore 私有 API）
-extern int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
-extern int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
-extern int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
-#import <sys/utsname.h>
-#import <sys/stat.h>
 #import <string.h>
-#import <dlfcn.h>
+#import <sys/sysctl.h>
+#import <sys/utsname.h>
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
-// Note: TVNCApiManager is in a different target, so we implement respring/reboot directly
 #import "TVNCRootListController.h"
 #import "TVNCUtil.h"
 #import "ZTSelfSignedCertificate.h"
@@ -132,6 +123,35 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     }
     freeifaddrs(ifaList);
     return ipv4 ?: ipv6; // prefer IPv4
+}
+
+NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
+    if (!host)
+        return YES;
+
+    NSString *trimmed = [host stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (trimmed.length == 0)
+        return YES; // Empty means bind any interface
+
+    const char *cstr = trimmed.UTF8String;
+    if (!cstr || cstr[0] == '\0')
+        return YES;
+
+    struct in_addr v4;
+    if (inet_pton(AF_INET, cstr, &v4) == 1)
+        return YES;
+
+    // Allow optional IPv6 scope suffix (e.g. fe80::1%en0)
+    char addrBuf[INET6_ADDRSTRLEN + 1] = {0};
+    const char *pct = strchr(cstr, '%');
+    size_t copyLen = pct ? (size_t)(pct - cstr) : strlen(cstr);
+    if (copyLen >= sizeof(addrBuf))
+        copyLen = sizeof(addrBuf) - 1;
+    memcpy(addrBuf, cstr, copyLen);
+    addrBuf[copyLen] = '\0';
+
+    struct in6_addr v6;
+    return inet_pton(AF_INET6, addrBuf, &v6) == 1;
 }
 
 @interface TVNCRootListController ()
@@ -319,7 +339,6 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 
     [self updateFirstGroupAndReload:YES];
     [self updateDeviceInfoSpecifiers];
-    [self reloadSpecifiers];
 }
 
 - (void)showClients {
@@ -338,12 +357,7 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             packageScheme = @"legacy";
         }
 
-        NSString *versionString;
-#ifdef THEBOOTSTRAP
-        versionString = [[GitHubReleaseUpdater shared] currentVersion];
-#else
-        versionString = @PACKAGE_VERSION;
-#endif
+        NSString *versionString = @PACKAGE_VERSION;
 
         NSString *footerText = [NSString
             stringWithFormat:NSLocalizedStringFromTableInBundle(@"TrollVNC (%@) v%@", @"Localizable", self.bundle, nil),
@@ -424,9 +438,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     // Validate ports before restarting service, using -readPreferenceValue: to get live edits
     int port = 5901;
     int httpPort = 0;
+    NSString *bindHost = @"";
 
     PSSpecifier *portSpec = nil;
     PSSpecifier *httpPortSpec = nil;
+    PSSpecifier *bindHostSpec = nil;
     for (PSSpecifier *sp in _specifiers) {
         NSString *key = [sp propertyForKey:@"key"];
         if (!key)
@@ -435,7 +451,9 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
             portSpec = sp;
         else if (!httpPortSpec && [key isEqualToString:@"HttpPort"])
             httpPortSpec = sp;
-        if (portSpec && httpPortSpec)
+        else if (!bindHostSpec && [key isEqualToString:@"BindHost"])
+            bindHostSpec = sp;
+        if (portSpec && httpPortSpec && bindHostSpec)
             break;
     }
 
@@ -453,12 +471,33 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
         httpPort = [(NSString *)httpPortVal intValue];
     }
 
+    id bindHostVal = bindHostSpec ? [self readPreferenceValue:bindHostSpec] : nil;
+    if ([bindHostVal isKindOfClass:[NSString class]]) {
+        bindHost = (NSString *)bindHostVal;
+    }
+
     BOOL portInvalid = (port < 1024 || port > 65535);
     BOOL httpInvalid = (httpPort != 0 && (httpPort < 1024 || httpPort > 65535));
     if (portInvalid || httpInvalid) {
         NSString *t = NSLocalizedStringFromTableInBundle(@"Invalid Port", @"Localizable", self.bundle, nil);
         NSString *msg = NSLocalizedStringFromTableInBundle(
             @"TCP/HTTP ports must be 1024..65535 (HTTP can be 0 to disable). The server will fallback to defaults.",
+            @"Localizable", self.bundle, nil);
+        NSString *ok = NSLocalizedStringFromTableInBundle(@"OK", @"Localizable", self.bundle, nil);
+
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:t
+                                                                       message:msg
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:ok style:UIAlertActionStyleCancel handler:nil]];
+
+        [self presentViewController:alert animated:YES completion:nil];
+        return; // do not restart now
+    }
+
+    if (!TVNCIsValidBindHostLiteral(bindHost)) {
+        NSString *t = NSLocalizedStringFromTableInBundle(@"Invalid Bind Address", @"Localizable", self.bundle, nil);
+        NSString *msg = NSLocalizedStringFromTableInBundle(
+            @"Bind address must be a valid IPv4/IPv6 literal, or empty to listen on all interfaces.",
             @"Localizable", self.bundle, nil);
         NSString *ok = NSLocalizedStringFromTableInBundle(@"OK", @"Localizable", self.bundle, nil);
 
@@ -521,7 +560,11 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (void)viewLogs {
+#if TARGET_IPHONE_SIMULATOR
+    NSString *logsPath = [NSHomeDirectory() stringByAppendingPathComponent:@"tmp/trollvnc-stderr.log"];
+#else
     NSString *logsPath = [self.jbrootPath stringByAppendingPathComponent:@"tmp/trollvnc-stderr.log"];
+#endif
 
     StripedTextTableViewController *logsVC = [[StripedTextTableViewController alloc] initWithPath:logsPath];
     logsVC.primaryColor = self.primaryColor;
@@ -556,13 +599,21 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (NSString *)cacertPath {
+#if TARGET_IPHONE_SIMULATOR
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/com.82flex.trollvnc.ca-cert.pem"];
+#else
     return [self.jbrootPath
         stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.82flex.trollvnc.ca-cert.pem"];
+#endif
 }
 
 - (NSString *)cakeyPath {
+#if TARGET_IPHONE_SIMULATOR
+    return [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/com.82flex.trollvnc.ca-key.pem"];
+#else
     return [self.jbrootPath
         stringByAppendingPathComponent:@"var/mobile/Library/Preferences/com.82flex.trollvnc.ca-key.pem"];
+#endif
 }
 
 - (void)exportCertificate {
@@ -772,15 +823,169 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     }
 }
 
+#pragma mark - Logout / Restart Device Actions
+
+- (void)respringDevice:(PSSpecifier *)specifier {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"确认注销"
+                                                                   message:@"确定要注销设备吗？这将关闭所有应用并返回锁屏界面。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertAction *cancel  = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil];
+    UIAlertAction *confirm = [UIAlertAction actionWithTitle:@"确认注销"
+                                                     style:UIAlertActionStyleDestructive
+                                                   handler:^(UIAlertAction *a) {
+        [self _reallyLogoutDevice];
+    }];
+    [alert addAction:cancel];
+    [alert addAction:confirm];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)_reallyLogoutDevice {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSLog(@"[MatisuXCS] Logging out device...");
+        int result = [self runAsRoot:@"sbreload"];
+        NSLog(@"[MatisuXCS] sbreload returned: %d", result);
+        if (result == 0) return;
+        [self _killall:@"SpringBoard"];
+        notify_post("com.apple.springboard.rebootRequested");
+        NSLog(@"[MatisuXCS] All logout methods attempted");
+    });
+}
+
+- (void)restartDevice:(PSSpecifier *)specifier {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"确认重启"
+                                                                   message:@"确定要重启设备吗？所有未保存的数据将丢失。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertAction *cancel  = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil];
+    UIAlertAction *confirm = [UIAlertAction actionWithTitle:@"确认重启"
+                                                     style:UIAlertActionStyleDestructive
+                                                   handler:^(UIAlertAction *a) {
+        [self _reallyRestartDevice];
+    }];
+    [alert addAction:cancel];
+    [alert addAction:confirm];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)_reallyRestartDevice {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSLog(@"[MatisuXCS] Rebooting device...");
+
+        // 方法1: FBSSystemService reboot (需要 com.apple.frontboard.shutdown 权限)
+        @try {
+            Class FBSSystemServiceClass = NSClassFromString(@"FBSSystemService");
+            if (FBSSystemServiceClass) {
+                id fbsService = [FBSSystemServiceClass performSelector:@selector(sharedService)];
+                if (fbsService && [fbsService respondsToSelector:@selector(reboot)]) {
+                    NSLog(@"[MatisuXCS] Trying FBSSystemService reboot...");
+                    [fbsService performSelector:@selector(reboot)];
+                    [NSThread sleepForTimeInterval:3.0];
+                    NSLog(@"[MatisuXCS] FBSSystemService reboot did not terminate in 3s, trying fallbacks...");
+                }
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[MatisuXCS] FBSSystemService exception: %@", e);
+        }
+
+        // 方法2: XPC 调用 mmaintenanced
+        BOOL xpcResult = [self rebootWithXPC];
+        NSLog(@"[MatisuXCS] XPC reboot returned: %d", xpcResult);
+        [NSThread sleepForTimeInterval:1.0];
+
+        // 方法3: posix_spawn /sbin/reboot (绝对路径)
+        int result = [self runAsRoot:@"/sbin/reboot"];
+        NSLog(@"[MatisuXCS] /sbin/reboot via persona_np returned: %d", result);
+        if (result == 0) {
+            [NSThread sleepForTimeInterval:3.0];
+        }
+
+        // 方法4: notify_post 触发重启
+        notify_post("com.apple.system.powermanagement.rebootRequested");
+        notify_post("com.apple.shutdown.reboot");
+        NSLog(@"[MatisuXCS] All reboot methods attempted");
+    });
+}
+
+#pragma mark - Killall Helper
+
+- (void)_killall:(NSString *)processName {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return;
+    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) { free(procs); return; }
+    size_t count = size / sizeof(struct kinfo_proc);
+    for (size_t i = 0; i < count; i++) {
+        char buf[MAXCOMLEN + 1];
+        strncpy(buf, procs[i].kp_proc.p_comm, MAXCOMLEN);
+        buf[MAXCOMLEN] = '\0';
+        if (strcmp(buf, processName.UTF8String) == 0) {
+            kill(procs[i].kp_proc.p_pid, SIGKILL);
+        }
+    }
+    free(procs);
+}
+
+#pragma mark - Reboot via XPC
+
+- (BOOL)rebootWithXPC {
+    void *lib = dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY);
+    if (!lib) return NO;
+    typedef void* (*xpc_conn_create_t)(const char *, dispatch_queue_t, uint64_t);
+    typedef void  (*xpc_conn_set_handler_t)(void *, void *);
+    typedef void  (*xpc_conn_resume_t)(void *);
+    typedef void* (*xpc_dict_create_t)(const void * const *, const void * const *, size_t);
+    typedef void  (*xpc_dict_set_i64_t)(void *, const char *, int64_t);
+    typedef void  (*xpc_conn_send_t)(void *, void *);
+    xpc_conn_create_t   fn_create   = (xpc_conn_create_t)  dlsym(lib, "xpc_connection_create_mach_service");
+    xpc_conn_set_handler_t fn_hdl   = (xpc_conn_set_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
+    xpc_conn_resume_t   fn_resume   = (xpc_conn_resume_t)   dlsym(lib, "xpc_connection_resume");
+    xpc_dict_create_t   fn_dict     = (xpc_dict_create_t)   dlsym(lib, "xpc_dictionary_create");
+    xpc_dict_set_i64_t  fn_set_i64  = (xpc_dict_set_i64_t)  dlsym(lib, "xpc_dictionary_set_int64");
+    xpc_conn_send_t     fn_send     = (xpc_conn_send_t)     dlsym(lib, "xpc_connection_send_message_with_reply_sync");
+    if (!fn_create || !fn_dict || !fn_set_i64) { dlclose(lib); return NO; }
+    void *conn = fn_create("com.apple.mmaintenanced", NULL, 0);
+    if (!conn) { dlclose(lib); return NO; }
+    fn_hdl(conn, (__bridge_retained void *)^(void *e) {});
+    fn_resume(conn);
+    void *dict = fn_dict(NULL, NULL, 0);
+    fn_set_i64(dict, "cmd", 5);
+    if (fn_send) fn_send(conn, dict);
+    dlclose(lib);
+    return YES;
+}
+
+#pragma mark - Run Command As Root via posix_spawn + persona_np
+
+- (int)runAsRoot:(NSString *)command {
+    pid_t pid;
+    posix_spawnattr_t attr;
+    int err = posix_spawnattr_init(&attr);
+    if (err != 0) return err;
+    typedef int (*set_persona_np_t)(posix_spawnattr_t *, uint32_t, uint32_t);
+    typedef int (*set_uid_np_t)(posix_spawnattr_t *, uid_t);
+    typedef int (*set_gid_np_t)(posix_spawnattr_t *, gid_t);
+    set_persona_np_t fn_persona = (set_persona_np_t)dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_np");
+    set_uid_np_t     fn_uid     = (set_uid_np_t)    dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_uid_np");
+    set_gid_np_t     fn_gid     = (set_gid_np_t)    dlsym(RTLD_DEFAULT, "posix_spawnattr_set_persona_gid_np");
+    if (fn_persona) { err = fn_persona(&attr, 99, 1); if (err) { posix_spawnattr_destroy(&attr); return err; } }
+    if (fn_uid)     { err = fn_uid(&attr, 0);         if (err) { posix_spawnattr_destroy(&attr); return err; } }
+    if (fn_gid)     { err = fn_gid(&attr, 0);         if (err) { posix_spawnattr_destroy(&attr); return err; } }
+    const char *cmdPath = command.UTF8String;
+    const char *argv[] = { cmdPath, NULL };
+    char *envp[] = { NULL };
+    err = posix_spawn(&pid, cmdPath, NULL, &attr, (char *const *)argv, envp);
+    posix_spawnattr_destroy(&attr);
+    return err;
+}
+
 #pragma mark - UITableViewDataSource & UITableViewDelegate
 
 - (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if ([self hasManagedConfiguration]) {
-        return [super tableView:tableView cellForRowAtIndexPath:indexPath];
-    }
-
     PSSpecifier *specifier = [self specifierAtIndexPath:indexPath];
     NSString *key = [specifier propertyForKey:@"cell"];
+
     if ([key isEqualToString:@"PSButtonCell"]) {
         UITableViewCell *cell = [super tableView:tableView cellForRowAtIndexPath:indexPath];
 
@@ -810,31 +1015,91 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
 }
 
 - (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
-    if (section == 0 && ![self hasManagedConfiguration]) {
-#ifdef THEBOOTSTRAP
-        do {
-            GitHubReleaseUpdater *updater = [GitHubReleaseUpdater shared];
-            if (![updater hasNewerVersionInCache]) {
-                break;
-            }
-
-            GHReleaseInfo *releaseInfo = [updater cachedLatestRelease];
-            if (!releaseInfo) {
-                break;
-            }
-
-            return [NSString stringWithFormat:NSLocalizedStringFromTableInBundle(
-                                                  @"A new version %@ is available! You’re currently using v%@. "
-                                                  @"Download the latest version from Havoc Marketplace.",
-                                                  @"Localizable", self.bundle, nil),
-                                              releaseInfo.tagName, [[GitHubReleaseUpdater shared] currentVersion]];
-        } while (0);
-#endif
-    }
     return [super tableView:tableView titleForFooterInSection:section];
 }
 
 #pragma mark - Helper Methods
+
+#pragma mark - Device Info Getters
+
+- (NSString *)appVersionValue {
+    return [NSString stringWithFormat:@"v%@", @PACKAGE_VERSION];
+}
+
+- (NSString *)deviceNameValue {
+    NSString *name = [[UIDevice currentDevice] name];
+    if (!name || name.length == 0) name = [[NSProcessInfo processInfo] hostName];
+    if (!name || name.length == 0) name = @"iPhone";
+    return name;
+}
+
+- (NSString *)systemVersionValue {
+    return [NSString stringWithFormat:@"iOS %@", [[UIDevice currentDevice] systemVersion]];
+}
+
+- (NSString *)deviceModelValue {
+    struct utsname systemInfo;
+    uname(&systemInfo);
+    NSString *identifier = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
+    NSDictionary *modelMap = @{
+        @"iPhone7,1": @"iPhone 6 Plus", @"iPhone7,2": @"iPhone 6",
+        @"iPhone8,1": @"iPhone 6s", @"iPhone8,2": @"iPhone 6s Plus",
+        @"iPhone8,4": @"iPhone SE (1st)", @"iPhone9,1": @"iPhone 7",
+        @"iPhone9,2": @"iPhone 7 Plus", @"iPhone9,3": @"iPhone 7",
+        @"iPhone9,4": @"iPhone 7 Plus", @"iPhone10,1": @"iPhone 8",
+        @"iPhone10,2": @"iPhone 8 Plus", @"iPhone10,3": @"iPhone X",
+        @"iPhone10,4": @"iPhone 8", @"iPhone10,5": @"iPhone 8 Plus",
+        @"iPhone10,6": @"iPhone X", @"iPhone11,2": @"iPhone XS",
+        @"iPhone11,4": @"iPhone XS Max", @"iPhone11,6": @"iPhone XS Max",
+        @"iPhone11,8": @"iPhone XR", @"iPhone12,1": @"iPhone 11",
+        @"iPhone12,3": @"iPhone 11 Pro", @"iPhone12,5": @"iPhone 11 Pro Max",
+        @"iPhone12,8": @"iPhone SE (2nd)", @"iPhone13,1": @"iPhone 12 mini",
+        @"iPhone13,2": @"iPhone 12", @"iPhone13,3": @"iPhone 12 Pro",
+        @"iPhone13,4": @"iPhone 12 Pro Max", @"iPhone14,2": @"iPhone 13 Pro",
+        @"iPhone14,3": @"iPhone 13 Pro Max", @"iPhone14,4": @"iPhone 13 mini",
+        @"iPhone14,5": @"iPhone 13", @"iPhone14,6": @"iPhone SE (3rd)",
+        @"iPhone14,7": @"iPhone 14", @"iPhone14,8": @"iPhone 14 Plus",
+        @"iPhone15,2": @"iPhone 14 Pro", @"iPhone15,3": @"iPhone 14 Pro Max",
+        @"iPhone15,4": @"iPhone 15", @"iPhone15,5": @"iPhone 15 Plus",
+        @"iPhone16,1": @"iPhone 15 Pro", @"iPhone16,2": @"iPhone 15 Pro Max",
+        @"iPhone17,1": @"iPhone 16 Pro", @"iPhone17,2": @"iPhone 16 Pro Max",
+        @"iPhone17,3": @"iPhone 16", @"iPhone17,4": @"iPhone 16 Plus",
+    };
+    return modelMap[identifier] ?: identifier;
+}
+
+- (NSString *)deviceIPValue {
+    NSString *ip = TVNCGetEn0IPAddress();
+    return ip ?: @"不可用";
+}
+
+- (NSString *)storageSpaceValue {
+    NSString *storagePath = @"/var/mobile";
+    if (access(storagePath.UTF8String, F_OK) != 0) storagePath = NSHomeDirectory();
+    NSDictionary *fsAttrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:storagePath error:nil];
+    if (!fsAttrs) return @"无法获取";
+    double totalGB = [fsAttrs[NSFileSystemSize] unsignedLongLongValue] / (1024.0 * 1024.0 * 1024.0);
+    double freeGB  = [fsAttrs[NSFileSystemFreeSize] unsignedLongLongValue] / (1024.0 * 1024.0 * 1024.0);
+    return [NSString stringWithFormat:@"总 %.1f GB / 可用 %.1f GB", totalGB, freeGB];
+}
+
+- (void)updateDeviceInfoSpecifiers {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        static NSSet *deviceInfoIds = nil;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            deviceInfoIds = [NSSet setWithObjects:
+                @"AppVersion", @"DeviceName", @"SystemVersion",
+                @"DeviceModel", @"DeviceIP", @"StorageSpace", nil];
+        });
+        for (PSSpecifier *specifier in self->_specifiers) {
+            NSString *specId = [specifier propertyForKey:@"id"];
+            if ([deviceInfoIds containsObject:specId]) {
+                [self reloadSpecifier:specifier animated:NO];
+            }
+        }
+    });
+}
 
 - (UILabel *)findLabelInView:(UIView *)view {
     for (UIView *subview in view.subviews) {
@@ -849,508 +1114,127 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     return nil;
 }
 
-#pragma mark - Respring & Reboot
-
-// Helper: kill all processes with the given name
-- (void)killall:(NSString *)processName {
-    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
-    size_t size = 0;
-    
-    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
-    
-    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
-    if (!procs) return;
-    
-    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
-        free(procs);
-        return;
-    }
-    
-    size_t count = size / sizeof(struct kinfo_proc);
-    
-    for (size_t i = 0; i < count; i++) {
-        struct kinfo_proc *p = &procs[i];
-        pid_t pid = p->kp_proc.p_pid;
-        
-        // 获取进程名称 (ki_name 可能为空，改用 ki_comm)
-        char nameBuffer[MAXCOMLEN + 1];
-        strncpy(nameBuffer, p->kp_proc.p_comm, MAXCOMLEN);
-        nameBuffer[MAXCOMLEN] = '\0';
-        NSString *procName = [NSString stringWithUTF8String:nameBuffer];
-        
-        if ([procName isEqualToString:processName]) {
-            kill(pid, SIGTERM);
-        }
-    }
-    
-    free(procs);
-}
-
-- (void)respringDevice {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        [self killall:@"SpringBoard"];
-        [self killall:@"FrontBoard"];
-        [self killall:@"BackBoard"];
-    });
-}
-
-// 使用 XPC 与 mmaintenanced 通信进行用户空间重启（不需要 root 权限）
-- (BOOL)rebootWithXPC {
-    // 使用纯 C 代码避免 ARC 问题
-    void *lib = dlopen("/usr/lib/system/libxpc.dylib", RTLD_LAZY);
-    if (!lib) {
-        NSLog(@"[TrollVNC] Failed to load libxpc");
-        return NO;
-    }
-    
-    // 获取 XPC 函数 - 使用 mach service（不是 create_service）
-    typedef void* (*xpc_connection_create_mach_service_t)(const char *name, dispatch_queue_t, uint64_t);
-    typedef void (*xpc_connection_set_event_handler_t)(void *conn, void *handler);
-    typedef void (*xpc_connection_resume_t)(void *conn);
-    typedef void (*xpc_connection_send_message_with_reply_sync_t)(void *conn, void *msg);
-    typedef void* (*xpc_dictionary_create_t)(const void * const *keys, const void * const *values, size_t count);
-    typedef void (*xpc_dictionary_set_int64_t)(void *dict, const char *key, int64_t value);
-    typedef void (*xpc_dictionary_set_string_t)(void *dict, const char *key, const char *value);
-    
-    xpc_connection_create_mach_service_t xpc_connection_create_mach_service = 
-        (xpc_connection_create_mach_service_t)dlsym(lib, "xpc_connection_create_mach_service");
-    xpc_connection_set_event_handler_t xpc_connection_set_event_handler = 
-        (xpc_connection_set_event_handler_t)dlsym(lib, "xpc_connection_set_event_handler");
-    xpc_connection_resume_t xpc_connection_resume = 
-        (xpc_connection_resume_t)dlsym(lib, "xpc_connection_resume");
-    xpc_dictionary_create_t xpc_dictionary_create = 
-        (xpc_dictionary_create_t)dlsym(lib, "xpc_dictionary_create");
-    xpc_dictionary_set_int64_t xpc_dictionary_set_int64 = 
-        (xpc_dictionary_set_int64_t)dlsym(lib, "xpc_dictionary_set_int64");
-    xpc_dictionary_set_string_t xpc_dictionary_set_string __attribute__((unused)) = 
-        (xpc_dictionary_set_string_t)dlsym(lib, "xpc_dictionary_set_string");
-    xpc_connection_send_message_with_reply_sync_t xpc_connection_send_message_with_reply_sync = 
-        (xpc_connection_send_message_with_reply_sync_t)dlsym(lib, "xpc_connection_send_message_with_reply_sync");
-    
-    if (!xpc_connection_create_mach_service || !xpc_dictionary_create || !xpc_dictionary_set_int64) {
-        NSLog(@"[TrollVNC] Failed to get XPC function pointers");
-        dlclose(lib);
-        return NO;
-    }
-    
-    // 创建到 mmaintenanced 服务的连接
-    // 使用 xpc_connection_create_mach_service 而非 create_service
-    void *conn = xpc_connection_create_mach_service("com.apple.mmaintenanced", NULL, 0);
-    if (!conn) {
-        NSLog(@"[TrollVNC] Failed to create XPC connection");
-        dlclose(lib);
-        return NO;
-    }
-    
-    // 设置事件处理
-    xpc_connection_set_event_handler(conn, (__bridge_retained void *)^(void *event) {
-        // 忽略事件
-    });
-    xpc_connection_resume(conn);
-    
-    // 构造重启命令消息 { cmd = 5 }
-    void *dict = xpc_dictionary_create(NULL, NULL, 0);
-    xpc_dictionary_set_int64(dict, "cmd", 5);
-    
-    NSLog(@"[TrollVNC] Sending XPC reboot command to mmaintenanced...");
-    
-    // 发送消息
-    if (xpc_connection_send_message_with_reply_sync) {
-        xpc_connection_send_message_with_reply_sync(conn, dict);
-    }
-    
-    dlclose(lib);
-    return YES;
-}
-
-- (void)rebootDevice {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSLog(@"[TrollVNC] Rebooting device...");
-        
-        // 方法1: 使用 XPC 调用 mmaintenanced 服务进行用户空间重启
-        BOOL xpcResult = [self rebootWithXPC];
-        NSLog(@"[TrollVNC] XPC reboot returned: %d", xpcResult);
-        
-        // 等待一下让 XPC 调用生效
-        [NSThread sleepForTimeInterval:0.5];
-        
-        // 方法2: 使用 posix_spawn + persona_np 以 root 身份执行 reboot
-        int result = [self runAsRoot:@"reboot"];
-        NSLog(@"[TrollVNC] reboot via persona_np returned: %d", result);
-        
-        if (result == 0) {
-            return;
-        }
-        
-        // 方法3: 尝试 /sbin/reboot
-        result = [self runAsRoot:@"/sbin/reboot"];
-        NSLog(@"[TrollVNC] /sbin/reboot returned: %d", result);
-        
-        if (result == 0) {
-            return;
-        }
-        
-        // 方法4: 尝试 halt
-        result = [self runAsRoot:@"halt"];
-        NSLog(@"[TrollVNC] halt returned: %d", result);
-        
-        if (result == 0) {
-            return;
-        }
-        
-        // 方法5: 发送重启通知
-        notify_post("com.apple.system.powermanagement.rebootRequested");
-        notify_post("com.apple.shutdown.reboot");
-        
-        // 方法6: 尝试 killall launchd
-        [self killall:@"launchd"];
-        
-        NSLog(@"[TrollVNC] All reboot methods attempted");
-    });
-}
-
-#pragma mark - AssistiveTouch Control
-
-// Helper: 使用 posix_spawn + persona_np 以 root 身份执行命令
-- (int)runAsRoot:(NSString *)command {
-    pid_t pid;
-    posix_spawnattr_t attr;
-    
-    int err = posix_spawnattr_init(&attr);
-    if (err != 0) {
-        return err;
-    }
-    
-    // 设置 persona 为 root (99 = root persona)
-    err = posix_spawnattr_set_persona_np(&attr, 99, 1);
-    if (err != 0) {
-        posix_spawnattr_destroy(&attr);
-        return err;
-    }
-    
-    // 设置 UID 和 GID 为 0 (root)
-    err = posix_spawnattr_set_persona_uid_np(&attr, 0);
-    if (err != 0) {
-        posix_spawnattr_destroy(&attr);
-        return err;
-    }
-    
-    err = posix_spawnattr_set_persona_gid_np(&attr, 0);
-    if (err != 0) {
-        posix_spawnattr_destroy(&attr);
-        return err;
-    }
-    
-    const char* shPath = "/bin/sh";
-    const char* shArg = "-c";
-    const char* shCmd = [command UTF8String];
-    
-    const char* argv[] = { shPath, shArg, shCmd, NULL };
-    
-    err = posix_spawn(&pid, shPath, NULL, &attr, (char* const*)argv, NULL);
-    posix_spawnattr_destroy(&attr);
-    
-    if (err != 0) {
-        return err;
-    }
-    
-    int status;
-    waitpid(pid, &status, 0);
-    
-    return WIFEXITED(status) ? WEXITSTATUS(status) : status;
-}
-
-// Helper: run shell command
-- (void)runCommand:(NSString *)command {
-    pid_t pid;
-    const char *args[] = {"sh", "-c", [command UTF8String], NULL};
-    posix_spawn(&pid, "/bin/sh", NULL, NULL, (char **)args, NULL);
-}
-
-- (void)setAssistiveTouchEnabled:(BOOL)enabled {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // 使用 defaults 命令设置值（同步执行）
-        NSString *enabledStr = enabled ? @"TRUE" : @"FALSE";
-        
-        // 设置 AssistiveTouchEnabled（启用状态）
-        NSString *cmd1 = [NSString stringWithFormat:
-            @"defaults write com.apple.Accessibility AssistiveTouchEnabled -bool %@", enabledStr];
-        
-        // 设置 AssistiveTouchForceDisabled（强制禁用，true=彻底禁用）
-        NSString *cmd2 = [NSString stringWithFormat:
-            @"defaults write com.apple.Accessibility AssistiveTouchForceDisabled -bool %@",
-            enabled ? @"FALSE" : @"TRUE"];
-        
-        // 同步执行命令
-        FILE *fp1 = popen([cmd1 UTF8String], "r");
-        if (fp1) pclose(fp1);
-        
-        FILE *fp2 = popen([cmd2 UTF8String], "r");
-        if (fp2) pclose(fp2);
-        
-        // 同步方式写 plist
-        NSString *accessibilityPlist = @"/var/mobile/Library/Preferences/com.apple.Accessibility.plist";
-        NSMutableDictionary *plist = [NSMutableDictionary dictionary];
-        NSDictionary *existingPlist = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
-        if (existingPlist) {
-            [plist addEntriesFromDictionary:existingPlist];
-        }
-        plist[@"AssistiveTouchEnabled"] = @(enabled);
-        plist[@"AssistiveTouchForceDisabled"] = @(!enabled);
-        [plist writeToFile:accessibilityPlist atomically:YES];
-        chmod([accessibilityPlist UTF8String], 0644);
-        
-        // 验证
-        NSDictionary *verify = [NSDictionary dictionaryWithContentsOfFile:accessibilityPlist];
-        NSLog(@"[TrollVNC] AssistiveTouch %@: Enabled=%@, ForceDisabled=%@",
-              enabled ? @"enable" : @"disable",
-              verify[@"AssistiveTouchEnabled"], verify[@"AssistiveTouchForceDisabled"]);
-        
-        // 通知 SpringBoard
-        notify_post("com.apple.springboard.preferenceschanged");
-        
-        // 强制重启 SpringBoard
-        [self runCommand:@"killall -9 SpringBoard"];
-    });
-}
-
-- (void)disableAssistiveTouch {
-    [self setAssistiveTouchEnabled:NO];
-    [self respringDevice];
-}
-
-- (void)enableAssistiveTouch {
-    [self setAssistiveTouchEnabled:YES];
-    [self respringDevice];
-}
-
-#pragma mark - Device Info
-
-// 获取设备名称
-- (NSString *)deviceName {
-    NSString *name = [[UIDevice currentDevice] name];
-    if (!name || name.length == 0) {
-        name = [[NSProcessInfo processInfo] hostName];
-    }
-    if (!name || name.length == 0) {
-        name = @"iPhone";
-    }
-    return name;
-}
-
-// 获取系统版本
-- (NSString *)systemVersion {
-    return [[UIDevice currentDevice] systemVersion];
-}
-
-// 获取设备型号（友好名称）
-- (NSString *)deviceModelName {
-    struct utsname systemInfo;
-    uname(&systemInfo);
-    NSString *identifier = [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
-    return [self friendlyModelName:identifier];
-}
-
-// 获取局域网IP
-- (NSString *)localIPAddress {
-    NSString *ip = TVNCGetEn0IPAddress();
-    return ip ?: @"不可用";
-}
-
-// 将设备标识符转换为友好名称
-- (NSString *)friendlyModelName:(NSString *)identifier {
-    NSDictionary *modelMap = @{
-        // iPhone
-        @"iPhone1,1": @"iPhone",
-        @"iPhone1,2": @"iPhone 3G",
-        @"iPhone2,1": @"iPhone 3GS",
-        @"iPhone3,1": @"iPhone 4",
-        @"iPhone3,2": @"iPhone 4",
-        @"iPhone3,3": @"iPhone 4",
-        @"iPhone4,1": @"iPhone 4S",
-        @"iPhone5,1": @"iPhone 5",
-        @"iPhone5,2": @"iPhone 5",
-        @"iPhone5,3": @"iPhone 5c",
-        @"iPhone5,4": @"iPhone 5c",
-        @"iPhone6,1": @"iPhone 5s",
-        @"iPhone6,2": @"iPhone 5s",
-        @"iPhone6,3": @"iPhone 5s",
-        @"iPhone6,4": @"iPhone 5s",
-        @"iPhone7,1": @"iPhone 6 Plus",
-        @"iPhone7,2": @"iPhone 6",
-        @"iPhone8,1": @"iPhone 6s",
-        @"iPhone8,2": @"iPhone 6s Plus",
-        @"iPhone8,3": @"iPhone SE (1st)",
-        @"iPhone8,4": @"iPhone SE (1st)",
-        @"iPhone9,1": @"iPhone 7",
-        @"iPhone9,2": @"iPhone 7 Plus",
-        @"iPhone9,3": @"iPhone 7",
-        @"iPhone9,4": @"iPhone 7 Plus",
-        @"iPhone10,1": @"iPhone 8",
-        @"iPhone10,2": @"iPhone 8 Plus",
-        @"iPhone10,3": @"iPhone X",
-        @"iPhone10,4": @"iPhone 8",
-        @"iPhone10,5": @"iPhone 8 Plus",
-        @"iPhone10,6": @"iPhone X",
-        @"iPhone11,2": @"iPhone XS",
-        @"iPhone11,4": @"iPhone XS Max",
-        @"iPhone11,6": @"iPhone XS Max",
-        @"iPhone11,8": @"iPhone XR",
-        @"iPhone12,1": @"iPhone 11",
-        @"iPhone12,3": @"iPhone 11 Pro",
-        @"iPhone12,5": @"iPhone 11 Pro Max",
-        @"iPhone12,8": @"iPhone SE (2nd)",
-        @"iPhone13,1": @"iPhone 12 mini",
-        @"iPhone13,2": @"iPhone 12",
-        @"iPhone13,3": @"iPhone 12 Pro",
-        @"iPhone13,4": @"iPhone 12 Pro Max",
-        @"iPhone14,2": @"iPhone 13 Pro",
-        @"iPhone14,3": @"iPhone 13 Pro Max",
-        @"iPhone14,4": @"iPhone 13 mini",
-        @"iPhone14,5": @"iPhone 13",
-        @"iPhone14,6": @"iPhone SE (3rd)",
-        @"iPhone14,7": @"iPhone 14",
-        @"iPhone14,8": @"iPhone 14 Plus",
-        @"iPhone15,2": @"iPhone 14 Pro",
-        @"iPhone15,3": @"iPhone 14 Pro Max",
-        @"iPhone15,4": @"iPhone 15",
-        @"iPhone15,5": @"iPhone 15 Plus",
-        @"iPhone16,1": @"iPhone 15 Pro",
-        @"iPhone16,2": @"iPhone 15 Pro Max",
-        @"iPhone17,1": @"iPhone 16 Pro",
-        @"iPhone17,2": @"iPhone 16 Pro Max",
-        @"iPhone17,3": @"iPhone 16",
-        @"iPhone17,4": @"iPhone 16",
-        @"iPhone17,5": @"iPhone 16 Plus",
-        // iPad
-        @"iPad1,1": @"iPad",
-        @"iPad2,1": @"iPad 2",
-        @"iPad2,2": @"iPad 2",
-        @"iPad2,3": @"iPad 2",
-        @"iPad2,4": @"iPad 2",
-        @"iPad3,1": @"iPad (3rd)",
-        @"iPad3,2": @"iPad (3rd)",
-        @"iPad3,3": @"iPad (3rd)",
-        @"iPad3,4": @"iPad (4th)",
-        @"iPad3,5": @"iPad (4th)",
-        @"iPad3,6": @"iPad (4th)",
-        @"iPad4,1": @"iPad Air",
-        @"iPad4,2": @"iPad Air",
-        @"iPad4,3": @"iPad Air",
-        @"iPad5,3": @"iPad Air 2",
-        @"iPad5,4": @"iPad Air 2",
-        @"iPad6,3": @"iPad Pro 9.7",
-        @"iPad6,4": @"iPad Pro 9.7",
-        @"iPad6,7": @"iPad Pro 12.9",
-        @"iPad6,8": @"iPad Pro 12.9",
-        @"iPad6,11": @"iPad (5th)",
-        @"iPad6,12": @"iPad (5th)",
-        @"iPad7,1": @"iPad Pro 12.9 (2nd)",
-        @"iPad7,2": @"iPad Pro 12.9 (2nd)",
-        @"iPad7,3": @"iPad Pro 10.5",
-        @"iPad7,4": @"iPad Pro 10.5",
-        @"iPad7,5": @"iPad (6th)",
-        @"iPad7,6": @"iPad (6th)",
-        @"iPad7,11": @"iPad (7th)",
-        @"iPad7,12": @"iPad (7th)",
-        @"iPad8,1": @"iPad Pro 11",
-        @"iPad8,2": @"iPad Pro 11",
-        @"iPad8,3": @"iPad Pro 11",
-        @"iPad8,4": @"iPad Pro 11",
-        @"iPad8,5": @"iPad Pro 12.9 (3rd)",
-        @"iPad8,6": @"iPad Pro 12.9 (3rd)",
-        @"iPad8,7": @"iPad Pro 12.9 (3rd)",
-        @"iPad8,8": @"iPad Pro 12.9 (3rd)",
-        @"iPad11,1": @"iPad mini (5th)",
-        @"iPad11,2": @"iPad mini (5th)",
-        @"iPad11,3": @"iPad Air (3rd)",
-        @"iPad11,4": @"iPad Air (3rd)",
-        @"iPad13,1": @"iPad Air (4th)",
-        @"iPad13,2": @"iPad Air (4th)",
-        @"iPad13,4": @"iPad Pro 11 (3rd)",
-        @"iPad13,5": @"iPad Pro 11 (3rd)",
-        @"iPad13,6": @"iPad Pro 11 (3rd)",
-        @"iPad13,7": @"iPad Pro 11 (3rd)",
-        @"iPad13,8": @"iPad Pro 12.9 (5th)",
-        @"iPad13,9": @"iPad Pro 12.9 (5th)",
-        @"iPad13,10": @"iPad Pro 12.9 (5th)",
-        @"iPad13,11": @"iPad Pro 12.9 (5th)",
-        @"iPad13,16": @"iPad Air (5th)",
-        @"iPad13,17": @"iPad Air (5th)",
-        @"iPad13,18": @"iPad (10th)",
-        @"iPad13,19": @"iPad (10th)",
-        @"iPad14,1": @"iPad mini (6th)",
-        @"iPad14,2": @"iPad mini (6th)",
-    };
-    
-    return modelMap[identifier] ?: identifier ?: @"Unknown";
-}
-
-// 获取存储空间信息
-- (NSString *)storageSpaceInfo {
-    NSError *error = nil;
-    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:NSHomeDirectory() error:&error];
-    if (error) return @"未知";
-    
-    // 总空间（字节转 GB）
-    unsigned long long totalSpace = [[attrs objectForKey:NSFileSystemSize] unsignedLongLongValue];
-    // 可用空间
-    unsigned long long freeSpace = [[attrs objectForKey:NSFileSystemFreeSize] unsignedLongLongValue];
-    
-    // 保留两位小数
-    double totalGB = totalSpace / (1024.0 * 1024.0 * 1024.0);
-    double freeGB = freeSpace / (1024.0 * 1024.0 * 1024.0);
-    
-    return [NSString stringWithFormat:@"总 %.1f GB / 可用 %.1f GB", totalGB, freeGB];
-}
-
-// 设备信息 getter 方法（供 PSTitleValueCell 调用）
-- (NSString *)appVersionValue {
-    NSString *versionString;
 #ifdef THEBOOTSTRAP
-    versionString = [[GitHubReleaseUpdater shared] currentVersion];
-#else
-    versionString = @PACKAGE_VERSION;
+#pragma mark - TrollStore Auto-Update (ver.txt based)
+
+- (void)checkForUpdates {
+    __weak typeof(self) weakSelf = self;
+
+    // Show a loading indicator
+    UIAlertController *loadingAlert = [UIAlertController
+        alertControllerWithTitle:@"检查更新"
+                         message:@"正在检查..."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [self presentViewController:loadingAlert animated:YES completion:nil];
+
+    [[TVNCVersionChecker shared] checkNowWithCompletion:^(TVNCUpdateInfo *info, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [loadingAlert dismissViewControllerAnimated:YES completion:^{
+                if (error || !info) {
+                    UIAlertController *alert = [UIAlertController
+                        alertControllerWithTitle:@"检查更新"
+                                         message:@"检查失败，请检查网络连接后重试。"
+                                  preferredStyle:UIAlertControllerStyleAlert];
+                    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:nil]];
+                    [weakSelf presentViewController:alert animated:YES completion:nil];
+                    return;
+                }
+
+                if (!info.isNewer) {
+                    UIAlertController *alert = [UIAlertController
+                        alertControllerWithTitle:@"检查更新"
+                                         message:[NSString stringWithFormat:@"当前已是最新版本 v%@。", info.currentVersion]
+                                  preferredStyle:UIAlertControllerStyleAlert];
+                    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                              style:UIAlertActionStyleCancel
+                                                            handler:nil]];
+                    [weakSelf presentViewController:alert animated:YES completion:nil];
+                    return;
+                }
+
+                // New version available — show install prompt
+                [weakSelf _showUpdateAlertForVersion:info.latestVersion currentVersion:info.currentVersion];
+            }];
+        });
+    }];
+}
+
+- (void)_showUpdateAlertForVersion:(NSString *)latestVersion currentVersion:(NSString *)currentVersion {
+    NSString *message = [NSString stringWithFormat:@"发现新版本 v%@（当前 v%@）\n", latestVersion, currentVersion];
+
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"TrollVNC 更新可用"
+                         message:message
+                  preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"跳过"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    // TrollStore one-click install
+    NSString *encodedURL = [kTipaDownloadURL stringByAddingPercentEncodingWithAllowedCharacters:
+                            [NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *scheme = [NSString stringWithFormat:@"apple-magnifier://install?url=%@", encodedURL];
+    NSURL *installURL = [NSURL URLWithString:scheme];
+
+    if (installURL && [[UIApplication sharedApplication] canOpenURL:installURL]) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"一键安装"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction *action) {
+                                                    [[UIApplication sharedApplication] openURL:installURL
+                                                                                      options:@{}
+                                                                            completionHandler:^(BOOL success) {
+                                                                                if (!success) {
+                                                                                    [self _showInstallFallbackAlert];
+                                                                                }
+                                                                            }];
+                                                }]];
+    } else {
+        // TrollStore not available, offer manual download
+        [alert addAction:[UIAlertAction actionWithTitle:@"手动下载"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(UIAlertAction *action) {
+                                                    NSURL *url = [NSURL URLWithString:kTipaDownloadURL];
+                                                    if (url) {
+                                                        [[UIApplication sharedApplication] openURL:url
+                                                                                          options:@{}
+                                                                                completionHandler:nil];
+                                                    }
+                                                }]];
+    }
+
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)_showInstallFallbackAlert {
+    NSString *message = @"无法通过 TrollStore 自动安装，请手动下载安装。\n\n"
+                        @"1. 在浏览器中下载 .tipa 文件\n"
+                        @"2. 通过 TrollStore 安装";
+
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"自动安装不可用"
+                         message:message
+                  preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"下载 tipa"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *action) {
+                                                NSURL *url = [NSURL URLWithString:kTipaDownloadURL];
+                                                if (url) {
+                                                    [[UIApplication sharedApplication] openURL:url
+                                                                                      options:@{}
+                                                                            completionHandler:nil];
+                                                }
+                                            }]];
+
+    [alert addAction:[UIAlertAction actionWithTitle:@"确定"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+
+    [self presentViewController:alert animated:YES completion:nil];
+}
 #endif
-    return [NSString stringWithFormat:@"v%@", versionString];
-}
-
-- (NSString *)deviceNameValue {
-    return [self deviceName];
-}
-
-- (NSString *)systemVersionValue {
-    return [NSString stringWithFormat:@"iOS %@", [self systemVersion]];
-}
-
-- (NSString *)deviceModelValue {
-    return [self deviceModelName];
-}
-
-- (NSString *)deviceIPValue {
-    return [self localIPAddress];
-}
-
-- (NSString *)storageSpaceValue {
-    return [self storageSpaceInfo];
-}
-
-// 更新设备信息到 specifiers
-- (void)updateDeviceInfoSpecifiers {
-    // 刷新设备信息 specifiers
-    dispatch_async(dispatch_get_main_queue(), ^{
-        for (PSSpecifier *specifier in self->_specifiers) {
-            NSString *specId = [specifier propertyForKey:@"id"];
-            if ([specId isEqualToString:@"AppVersion"] ||
-                [specId isEqualToString:@"DeviceName"] ||
-                [specId isEqualToString:@"SystemVersion"] ||
-                [specId isEqualToString:@"DeviceModel"] ||
-                [specId isEqualToString:@"DeviceIP"] ||
-                [specId isEqualToString:@"StorageSpace"]) {
-                [self reloadSpecifier:specifier animated:NO];
-            }
-        }
-    });
-}
 
 @end

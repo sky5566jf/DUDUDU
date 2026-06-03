@@ -19,74 +19,35 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-@class DpkgVersion;
+/// ver.txt URL — contains the latest version number (e.g., "3.3")
+FOUNDATION_EXPORT NSString *const kVerTxtURL;
+/// tipa download URL for TrollStore auto-install
+FOUNDATION_EXPORT NSString *const kTipaDownloadURL;
 
-/// Lightweight model for a GitHub release we care about.
-@interface GHReleaseInfo : NSObject <NSCopying, NSSecureCoding>
-@property(class, nonatomic, readonly) BOOL supportsSecureCoding;
-@property(nonatomic, copy) NSString *tagName;               // original tag_name from GitHub (e.g., "v1.2.3")
-@property(nonatomic, copy) NSString *versionString;         // normalized for DpkgVersion compare (e.g., "1.2.3")
-@property(nonatomic, copy, nullable) NSString *name;        // release name/title
-@property(nonatomic, copy, nullable) NSString *body;        // release notes (markdown)
-@property(nonatomic, copy, nullable) NSString *htmlURL;     // html_url
-@property(nonatomic, copy, nullable) NSString *publishedAt; // ISO date string
-@property(nonatomic, assign) BOOL prerelease;
-@property(nonatomic, assign) BOOL isNewerThanCurrent;
+/// Simple version check result from ver.txt
+@interface TVNCUpdateInfo : NSObject
+@property(nonatomic, copy) NSString *latestVersion;  // version string from ver.txt (e.g., "3.3")
+@property(nonatomic, copy) NSString *currentVersion; // current app version
+@property(nonatomic, assign) BOOL isNewer;           // YES if latestVersion > currentVersion
 @end
 
-/// Strategy configuration for background update checks.
-@interface GHUpdateStrategy : NSObject <NSCopying, NSSecureCoding>
-@property(class, nonatomic, readonly) BOOL supportsSecureCoding;
-@property(nonatomic, copy) NSString *repoFullName;                // e.g., "owner/repo"
-@property(nonatomic, assign) NSTimeInterval minimumCheckInterval; // default 6 hours
-@property(nonatomic, assign) NSInteger maxRetryCount;             // default 3
-@property(nonatomic, assign) NSTimeInterval minRetryInterval;     // default 60s
-@property(nonatomic, assign) BOOL includePrereleases;             // default NO
-@property(nonatomic, copy, nullable) NSString *githubToken;       // optional PAT for higher rate limit
-@end
+typedef void (^TVNCUpdateCheckCompletion)(TVNCUpdateInfo *_Nullable info, NSError *_Nullable error);
 
-typedef void (^GHUpdateCheckCompletion)(GHReleaseInfo *_Nullable latest, NSError *_Nullable error, BOOL fromCache);
-
-/// A thread-safe singleton that checks GitHub Releases for updates and caches results.
-@interface GitHubReleaseUpdater : NSObject
+/// Lightweight updater: reads ver.txt from a fixed URL, compares version numbers.
+/// No background checking — only manual trigger via checkForUpdates.
+@interface TVNCVersionChecker : NSObject
 
 @property(nonatomic, copy, readonly) NSString *currentVersion;
 
 + (instancetype)shared;
 - (instancetype)init NS_UNAVAILABLE;
 
-// Configure and start background checking. Current version required for comparison.
-- (void)configureWithStrategy:(GHUpdateStrategy *)strategy;
-- (void)configureWithStrategy:(GHUpdateStrategy *)strategy currentVersion:(NSString *)currentVersion;
+/// Set current version (called once at launch)
+- (void)setCurrentVersion:(NSString *)version;
 
-// Starts periodic checks. Safe to call multiple times.
-- (void)start;
-
-// Stops periodic checks and cancels in-flight request.
-- (void)stop;
-
-// Force a check now (respects pause/skip but ignores minimumCheckInterval).
-- (void)checkNowWithCompletion:(nullable GHUpdateCheckCompletion)completion;
-
-// Pause background checks until a future date or for a duration.
-- (void)pauseUntil:(NSDate *)date;
-- (void)pauseFor:(NSTimeInterval)interval;
-
-// Skip a version (suppress notifications until a strictly greater one appears).
-- (void)skipVersion:(NSString *)versionString;
-- (void)clearSkippedVersion;
-
-// Access cached latest release (may be stale). Returns nil if no cache.
-- (nullable GHReleaseInfo *)cachedLatestRelease;
-
-// Returns YES if there’s a newer version than current, using cache only.
-- (BOOL)hasNewerVersionInCache;
+/// Check for update now (network request to ver.txt URL)
+- (void)checkNowWithCompletion:(nullable TVNCUpdateCheckCompletion)completion;
 
 @end
-
-/// Posted when a newer release is detected after a network check.
-FOUNDATION_EXPORT NSString *const GitHubReleaseUpdaterDidFindUpdateNotification;
-/// Public error domain for GitHubReleaseUpdater
-FOUNDATION_EXPORT NSString *const GitHubReleaseUpdaterErrorDomain;
 
 NS_ASSUME_NONNULL_END
