@@ -58,6 +58,16 @@
     int _serverSocket;
     BOOL _running;
     dispatch_queue_t _serverQueue;
+
+    // 电脑中继模式 (Relay Mode) — 与 src/TVNCHttpServer.mm 同步
+    BOOL _relayModeEnabled;
+    BOOL _relayConnected;
+    int _relaySocket;
+    NSString *_relayIP;
+    NSUInteger _relayPort;
+    NSString *_relayRole;
+    BOOL _isInjectingTouchEvent;
+    dispatch_queue_t _relayQueue;
 }
 @end
 
@@ -105,6 +115,16 @@
         _serverSocket = -1;
         _running = NO;
         _serverQueue = dispatch_queue_create("com.trollvnc.httpserver", DISPATCH_QUEUE_SERIAL);
+
+        // 中继模式初始化（与 src/TVNCHttpServer.mm 同步）
+        _relayModeEnabled = NO;
+        _relayConnected = NO;
+        _relaySocket = -1;
+        _relayIP = nil;
+        _relayPort = 8183;
+        _relayRole = nil;
+        _isInjectingTouchEvent = NO;
+        _relayQueue = dispatch_queue_create("com.trollvnc.relay", DISPATCH_QUEUE_SERIAL);
     }
     return self;
 }
@@ -282,6 +302,8 @@
         return [self handleDeleteFile:query];
     } else if ([path isEqualToString:@"/api/createfolder"]) {
         return [self handleCreateFolder:query];
+    } else if ([path isEqualToString:@"/api/alert"]) {
+        return [self handleAlert:query];
     } else if ([path isEqualToString:@"/"]) {
         // 返回简单的 API 文档
         return [self handleRoot];
@@ -1841,6 +1863,81 @@
     response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
     
     return response;
+}
+
+#pragma mark - 电脑中继模式 (Relay Mode) — 与 src/TVNCHttpServer.mm 同步
+
+- (BOOL)isRelayConnected {
+    return _relayConnected;
+}
+
+// 连接到电脑中继服务器（WS Client）
+- (BOOL)connectToRelay:(NSString *)relayIP port:(NSUInteger)port role:(NSString *)role {
+    if (_relayConnected) [self disconnectFromRelay];
+
+    _relaySocket = socket(AF_INET, SOCK_STREAM, 0);
+    if (_relaySocket < 0) return NO;
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    if (inet_pton(AF_INET, [relayIP UTF8String], &addr.sin_addr) <= 0) { close(_relaySocket); _relaySocket = -1; return NO; }
+
+    if (connect(_relaySocket, (struct sockaddr *)&addr, sizeof(addr)) < 0) { close(_relaySocket); _relaySocket = -1; return NO; }
+
+    // WebSocket handshake
+    NSString *wsKey = @"dGhlIHNhbXBsZSBub25jZQ==";
+    NSString *pathWithRole = [NSString stringWithFormat:@"/?role=%@&deviceId=%@", role,
+                              [UIDevice currentDevice].identifierForVendor.UUIDString ?: @"unknown"];
+    NSString *handshake = [NSString stringWithFormat:
+        @"GET %@ HTTP/1.1\r\nHost: %@:%lu\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        @"Sec-WebSocket-Key: %@\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        pathWithRole, relayIP, (unsigned long)port, wsKey];
+    send(_relaySocket, [handshake UTF8String], [handshake lengthOfBytesUsingEncoding:NSUTF8StringEncoding], 0);
+
+    // Read response
+    NSMutableData *resp = [NSMutableData data];
+    uint8_t buf[4096]; struct timeval tv = {5, 0};
+    setsockopt(_relaySocket, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    while (resp.length < 64*1024) { ssize_t n = recv(_relaySocket, buf, sizeof(buf), 0); if (n <= 0) break; [resp appendBytes:buf length:n]; }
+    NSString *rstr = [[NSString alloc] initWithData:resp encoding:NSUTF8StringEncoding];
+    if (!rstr || ![rstr hasPrefix:@"HTTP/1.1 101"]) { close(_relaySocket); _relaySocket = -1; return NO; }
+
+    _relayModeEnabled = YES; _relayConnected = YES; _relayIP = relayIP; _relayPort = port; _relayRole = role;
+    dispatch_async(_relayQueue, ^{ [self receiveRelayEvents]; });
+    TVLog(@"Relay: Connected to computer %@:%lu as %@", relayIP, (unsigned long)port, role);
+    return YES;
+}
+
+- (void)disconnectFromRelay {
+    if (!_relayConnected && !_relayModeEnabled) return;
+    _relayConnected = NO; _relayModeEnabled = NO;
+    if (_relaySocket >= 0) { close(_relaySocket); _relaySocket = -1; }
+}
+
+- (void)reportRealTouchToRelay:(NSString *)action nx:(double)nx ny:(double)ny {
+    if (!_relayConnected || ![_relayRole isEqualToString:@"master"]) return;
+    NSDictionary *evt = @{@"type":@"touch", @"action":action, @"x":@(nx), @"y":@(ny), @"source":@"real_touch"};
+    NSData *d = [NSJSONSerialization dataWithJSONObject:evt options:0 error:nil];
+    if (!d) return;
+    wsSendTextFrame(_relaySocket, [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding]);
+}
+
+- (void)receiveRelayEvents {
+    struct timeval tv = {300, 0};
+    setsockopt(_relaySocket, SO_RCVTIMEO, &tv, sizeof(tv));
+    while (_relayConnected) {
+        NSString *msg = wsReadFrame(_relaySocket);
+        if (!msg || [msg isEqualToString:@"__WS_CLOSE__"]) break;
+        NSData *jd = [msg dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *e = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
+        if (!e) continue;
+        // 从控接收事件后执行（需要 HID 注入支持）
+        self.isInjectingTouchEvent = YES; self.isInjectingTouchEvent = NO;
+    }
+    _relayConnected = NO;
+    if (_relaySocket >= 0) { close(_relaySocket); _relaySocket = -1; }
 }
 
 @end
