@@ -111,8 +111,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// @param ny 归一化 Y 坐标 (0~1)
 - (void)reportRealTouchToRelay:(NSString *)action nx:(double)nx ny:(double)ny;
 
-/// 中继 WebSocket 连接 (struct lws *, 只读，内部使用)
-@property (nonatomic, assign) void *relaySocket;
+/// 中继 WebSocket 连接 (Unix socket FD, 只读，内部使用)
+@property (nonatomic, assign) int relaySocket;
 
 @end
 
