@@ -73,6 +73,8 @@
 
 @implementation TVNCHttpServer
 
+@synthesize relaySocket = _relaySocket;
+
 // 辅助函数：使用 popen 执行命令并获取输出
 - (NSString *)executeCommand:(NSString *)command {
     FILE *fp = popen([command UTF8String], "r");
