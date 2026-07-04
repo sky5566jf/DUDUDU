@@ -39,7 +39,6 @@
 #import "ZTSelfSignedCertificate.h"
 
 #ifdef THEBOOTSTRAP
-#import "GitHubReleaseUpdater.h"
 #endif
 
 NS_INLINE NSString *GetDefaultRouteInterface(void) {
@@ -1089,8 +1088,8 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
             deviceInfoIds = [NSSet setWithObjects:
-                @"AppVersion", @"DeviceName", @"SystemVersion",
-                @"DeviceModel", @"DeviceIP", @"StorageSpace", nil];
+                @"DeviceName", @"SystemVersion",
+                @"DeviceModel", @"StorageSpace", nil];
         });
         for (PSSpecifier *specifier in self->_specifiers) {
             NSString *specId = [specifier propertyForKey:@"id"];
@@ -1113,128 +1112,5 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     }
     return nil;
 }
-
-#ifdef THEBOOTSTRAP
-#pragma mark - TrollStore Auto-Update (ver.txt based)
-
-- (void)checkForUpdates {
-    __weak typeof(self) weakSelf = self;
-
-    // Show a loading indicator
-    UIAlertController *loadingAlert = [UIAlertController
-        alertControllerWithTitle:@"检查更新"
-                         message:@"正在检查..."
-                  preferredStyle:UIAlertControllerStyleAlert];
-    [self presentViewController:loadingAlert animated:YES completion:nil];
-
-    [[TVNCVersionChecker shared] checkNowWithCompletion:^(TVNCUpdateInfo *info, NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [loadingAlert dismissViewControllerAnimated:YES completion:^{
-                if (error || !info) {
-                    UIAlertController *alert = [UIAlertController
-                        alertControllerWithTitle:@"检查更新"
-                                         message:@"检查失败，请检查网络连接后重试。"
-                                  preferredStyle:UIAlertControllerStyleAlert];
-                    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                              style:UIAlertActionStyleCancel
-                                                            handler:nil]];
-                    [weakSelf presentViewController:alert animated:YES completion:nil];
-                    return;
-                }
-
-                if (!info.isNewer) {
-                    UIAlertController *alert = [UIAlertController
-                        alertControllerWithTitle:@"检查更新"
-                                         message:[NSString stringWithFormat:@"当前已是最新版本 v%@。", info.currentVersion]
-                                  preferredStyle:UIAlertControllerStyleAlert];
-                    [alert addAction:[UIAlertAction actionWithTitle:@"OK"
-                                                              style:UIAlertActionStyleCancel
-                                                            handler:nil]];
-                    [weakSelf presentViewController:alert animated:YES completion:nil];
-                    return;
-                }
-
-                // New version available — show install prompt
-                [weakSelf _showUpdateAlertForVersion:info.latestVersion currentVersion:info.currentVersion];
-            }];
-        });
-    }];
-}
-
-- (void)_showUpdateAlertForVersion:(NSString *)latestVersion currentVersion:(NSString *)currentVersion {
-    NSString *message = [NSString stringWithFormat:@"发现新版本 v%@（当前 v%@）\n", latestVersion, currentVersion];
-
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:@"TrollVNC 更新可用"
-                         message:message
-                  preferredStyle:UIAlertControllerStyleAlert];
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"跳过"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-
-    // TrollStore one-click install
-    NSString *encodedURL = [kTipaDownloadURL stringByAddingPercentEncodingWithAllowedCharacters:
-                            [NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *scheme = [NSString stringWithFormat:@"apple-magnifier://install?url=%@", encodedURL];
-    NSURL *installURL = [NSURL URLWithString:scheme];
-
-    if (installURL && [[UIApplication sharedApplication] canOpenURL:installURL]) {
-        [alert addAction:[UIAlertAction actionWithTitle:@"一键安装"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction *action) {
-                                                    [[UIApplication sharedApplication] openURL:installURL
-                                                                                      options:@{}
-                                                                            completionHandler:^(BOOL success) {
-                                                                                if (!success) {
-                                                                                    [self _showInstallFallbackAlert];
-                                                                                }
-                                                                            }];
-                                                }]];
-    } else {
-        // TrollStore not available, offer manual download
-        [alert addAction:[UIAlertAction actionWithTitle:@"手动下载"
-                                                  style:UIAlertActionStyleDefault
-                                                handler:^(UIAlertAction *action) {
-                                                    NSURL *url = [NSURL URLWithString:kTipaDownloadURL];
-                                                    if (url) {
-                                                        [[UIApplication sharedApplication] openURL:url
-                                                                                          options:@{}
-                                                                                completionHandler:nil];
-                                                    }
-                                                }]];
-    }
-
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-- (void)_showInstallFallbackAlert {
-    NSString *message = @"无法通过 TrollStore 自动安装，请手动下载安装。\n\n"
-                        @"1. 在浏览器中下载 .tipa 文件\n"
-                        @"2. 通过 TrollStore 安装";
-
-    UIAlertController *alert = [UIAlertController
-        alertControllerWithTitle:@"自动安装不可用"
-                         message:message
-                  preferredStyle:UIAlertControllerStyleAlert];
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"下载 tipa"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *action) {
-                                                NSURL *url = [NSURL URLWithString:kTipaDownloadURL];
-                                                if (url) {
-                                                    [[UIApplication sharedApplication] openURL:url
-                                                                                      options:@{}
-                                                                            completionHandler:nil];
-                                                }
-                                            }]];
-
-    [alert addAction:[UIAlertAction actionWithTitle:@"确定"
-                                              style:UIAlertActionStyleCancel
-                                            handler:nil]];
-
-    [self presentViewController:alert animated:YES completion:nil];
-}
-#endif
 
 @end

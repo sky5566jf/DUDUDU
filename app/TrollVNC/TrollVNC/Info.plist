@@ -6,6 +6,11 @@
 	<string>MatisuVNC</string>
 	<key>CFBundleName</key>
 	<string>MatisuVNC</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_rfb._tcp</string>

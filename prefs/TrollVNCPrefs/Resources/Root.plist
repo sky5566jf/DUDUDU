@@ -899,14 +899,6 @@
 			<key>cell</key>
 			<string>PSButtonCell</string>
 			<key>label</key>
-			<string>检查更新</string>
-			<key>action</key>
-			<string>checkForUpdates</string>
-		</dict>
-		<dict>
-			<key>cell</key>
-			<string>PSButtonCell</string>
-			<key>label</key>
 			<string>View Source Code</string>
 			<key>action</key>
 			<string>source</string>

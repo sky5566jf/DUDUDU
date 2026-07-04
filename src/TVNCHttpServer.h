@@ -114,6 +114,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// 中继 WebSocket 连接 (Unix socket FD, 只读，内部使用)
 @property (nonatomic, assign) int relaySocket;
 
+/// 通过中继 WebSocket 发送文本消息（内部使用，供 ptrAddEvent 调用）
+- (void)sendRelayMessage:(NSString *)text;
+
 @end
 
 NS_ASSUME_NONNULL_END

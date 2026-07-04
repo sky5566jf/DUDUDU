@@ -18,7 +18,7 @@
 #import "GitHubReleaseUpdater.h"
 
 // ver.txt URL — contains the latest version number (e.g., "3.3")
-NSString *const kVerTxtURL = @"http://106.15.63.124:8888/down/JQGFiCZUcB42";
+NSString *const kVerTxtURL = @"https://raw.githubusercontent.com/sky5566jf/TrollVNC-main/release/ver.txt";
 // tipa download URL for TrollStore auto-install
 NSString *const kTipaDownloadURL = @"http://106.15.63.124:8888/down/jccM2Fl6Sn1l.tipa";
 
@@ -142,9 +142,16 @@ NSString *const kTipaDownloadURL = @"http://106.15.63.124:8888/down/jccM2Fl6Sn1l
         NSString *latestVersion = [content stringByTrimmingCharactersInSet:
                                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
-        if (latestVersion.length == 0) {
+        // Validate: must match X.Y format (e.g. "3.4")
+        NSRegularExpression *verRe = [NSRegularExpression
+            regularExpressionWithPattern:@"^\\d+(\\.\\d+)?$"
+                                 options:0 error:nil];
+        NSTextCheckingResult *match = [verRe firstMatchInString:latestVersion
+                                                         options:0 range:NSMakeRange(0, latestVersion.length)];
+        if (!match) {
             NSError *err = [NSError errorWithDomain:@"TVNCVersionChecker" code:500
-                                           userInfo:@{NSLocalizedDescriptionKey: @"Empty ver.txt response"}];
+                                           userInfo:@{NSLocalizedDescriptionKey:
+                                                       [NSString stringWithFormat:@"ver.txt 返回格式错误: %@", latestVersion]}];
             if (completion) completion(nil, err);
             return;
         }
