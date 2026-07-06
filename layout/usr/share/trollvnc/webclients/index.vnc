@@ -26,10 +26,7 @@ fire up an instance of the <a href="https://novnc.com/">noVNC</a> HTML5 viewer.
 	   if(host.charAt(host.length-1) != "]")
 	      host = host + "]";
 	}
-	// Use window.location.port (HTTP port) for WebSocket connection,
-	// not $PORT (VNC TCP port 5901). The built-in HTTP server supports
-	// WebSocket Upgrade on the same port as HTTP pages.
-	open("novnc/vnc.html?autoconnect=true&host=" + host + "&encrypt=" + (do_encrypt ? "1" : "0"));
+	open("novnc/vnc.html?autoconnect=true&host=" + host + "&port=$PORT&encrypt=" + (do_encrypt ? "1" : "0"));
     }
     -->
 </script>
