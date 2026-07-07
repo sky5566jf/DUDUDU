@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.29
+export PACKAGE_VERSION := 3.30
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -78,9 +78,14 @@ endif
 # Back to v3.27 state: source 3 underscores, no alias. iOS 13.4+ works normally.
 # iOS 13.3.x dyld crash remains unfixed (needs different approach).
 
-# roothide scheme needs -lroothide for the roothide API
+# roothide scheme needs -lroothide for the roothide API.
+# BUT bootstrap.sh also sets THEOS_PACKAGE_SCHEME=roothide (uses roothide toolchain for
+# entitlement stripping). Bootstrap builds must NOT link -lroothide (no jbroot on device).
+# Only the actual roothide (non-bootstrap) scheme needs this.
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+ifneq ($(THEBOOTSTRAP),1)
 trollvncserver_LDFLAGS += -lroothide
+endif
 endif
 
 trollvncserver_FRAMEWORKS += Accelerate
