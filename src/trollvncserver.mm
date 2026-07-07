@@ -74,22 +74,24 @@
 // The real function checks if fd < FD_SETSIZE and calls abort() if not.
 // We replicate this behavior for safety.
 //
-// CRITICAL: Use 2 underscores in source (__darwin_check_fd_set_overflow).
-// v3.28: Switching from 3 underscores back to 2 underscores.
+// CRITICAL: Use 3 underscores in source (___darwin_check_fd_set_overflow).
+// v3.29: Reverted to v3.27 state. v3.28's linker alias broke noVNC on iOS 13.4+.
 //
 // Mach-O symbol name mapping:
-//   Source:  __darwin_check_fd_set_overflow (2 underscores)
-//   Mach-O:  ___darwin_check_fd_set_overflow  (3 underscores) ← matches libvncserver.a's lazy ref
+//   Source:  ___darwin_check_fd_set_overflow (3 underscores)
+//   Mach-O:  ____darwin_check_fd_set_overflow (4 underscores) ← does NOT match libvncserver.a's lazy ref
 //
-// - On iOS < 13.4: libSystem lacks this symbol → our weak implementation is used
-// - On iOS 13.4+: libSystem has a strong symbol → system implementation takes precedence
+// - On iOS 13.4+: libSystem has a strong 3-underscore symbol → system handles FD_SET correctly
+//   (our 4-underscore weak symbol is never called, no conflict)
+// - On iOS < 13.4: libSystem lacks this symbol → dyld lazy binding fails (UNFIXED in v3.29)
 //
-// v3.18 used 3 underscores and worked on iOS 13 because... (TBD: check if v3.18
-// had different libvncserver.a or linker flags).
-// v3.19 changed to 2 underscores → worked on iOS 13 but broke noVNC on iOS 15 (TBD root cause).
-// v3.20-v3.26: 2 underscores → iOS 13 crash (SIGABRT, rfbInitSockets), iOS 15 noVNC broken.
-// v3.27: 3 underscores → iOS 15 noVNC works but iOS 13 dyld crash (symbol name mismatch).
-// v3.28: 2 underscores → target: fix iOS 13 by matching lazy ref, then debug iOS 15.
+// Version history:
+// v3.18: 3 underscores → worked on iOS 13 (TBD: different libvncserver.a?)
+// v3.19: 2 underscores → iOS 13 OK but broke noVNC on iOS 15
+// v3.20-v3.26: 2 underscores → iOS 13 crash, iOS 15 noVNC broken
+// v3.27: 3 underscores → iOS 15 noVNC works, iOS 13.3.x dyld crash
+// v3.28: 3 underscores + linker alias → broke noVNC on iOS 13.4+ (alias conflict)
+// v3.29: 3 underscores, no alias → same as v3.27 (iOS 13.4+ works, 13.3.x unfixed)
 //
 // Do NOT change the underscore count without extensive testing.
 // ---------------------------------------------------------------------------

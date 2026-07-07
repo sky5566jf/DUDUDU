@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.28
+export PACKAGE_VERSION := 3.29
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -74,14 +74,11 @@ trollvncserver_LIBRARIES += vncserver
 trollvncserver_LIBRARIES += z
 endif
 
-# v3.28: Linker alias to bridge the weak symbol name gap on iOS < 13.4.
-# Source uses 3 underscores (___darwin_check_fd_set_overflow) → Mach-O 4 underscores.
-# libvncserver.a lazy-references 3 underscores (___darwin_check_fd_set_overflow).
-# This alias makes the 3-underscore lazy ref resolve to our 4-underscore weak symbol.
-# On iOS 13.4+: libSystem provides a strong 3-underscore symbol that takes precedence.
-trollvncserver_LDFLAGS += -Wl,-alias,____darwin_check_fd_set_overflow,___darwin_check_fd_set_overflow
+# v3.29: Reverted v3.28 linker alias (-Wl,-alias,...) which broke noVNC on iOS 13.4+.
+# Back to v3.27 state: source 3 underscores, no alias. iOS 13.4+ works normally.
+# iOS 13.3.x dyld crash remains unfixed (needs different approach).
 
-# v3.28: roothide scheme needs -lroothide for the roothide API
+# roothide scheme needs -lroothide for the roothide API
 ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
 trollvncserver_LDFLAGS += -lroothide
 endif
