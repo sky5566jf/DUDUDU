@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   xmlns="http://www.w3.org/2000/svg"
+   width="16"
+   height="16"
+   viewBox="0 0 16 16"
+   id="svg2"
+   version="1.1">
+  <rect
+     style="fill:#494949;fill-opacity:1;stroke:none;rx:3;ry:3"
+     width="16"
+     height="16"
+     x="0"
+     y="0"
+     rx="3"
+     ry="3" />
+  <rect
+     style="fill:#313131;fill-opacity:1;stroke:none"
+     d="M 3,0 C 1.189,0 0,1.189 0,3 L 0,13 C 0,14.811 1.189,16 3,16 L 6,16 C 11.837,16 16,10.713 16,5 C 16,4.333 16,3.667 16,3 C 16,1.189 14.811,0 13,0 L 3,0 Z" />
+  <text
+     style="font-style:normal;font-weight:bold;font-size:5px;font-family:Arial;fill:#008000;fill-opacity:1"
+     x="2"
+     y="8">M</text>
+  <text
+     style="font-style:normal;font-weight:bold;font-size:5px;font-family:Arial;fill:#ffff00;fill-opacity:1"
+     x="2"
+     y="13">M</text>
+</svg>

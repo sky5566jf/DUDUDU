@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrollVNC 安装 API 测试</title>
+    <style>
+        :root {
+            --primary: #007AFF;
+            --success: #34C759;
+            --danger: #FF3B30;
+            --warning: #FF9500;
+            --bg-dark: #1a1a1a;
+            --bg-panel: #2d2d2d;
+            --bg-input: #3d3d3d;
+            --text: #fff;
+            --text-muted: #8e8e93;
+            --border: #444;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin:0 auto; }
+        h1 { text-align:center; color: var(--primary); margin-bottom: 30px; font-size: 24px; }
+        .panel { background: var(--bg-panel); padding: 20px; border-radius: 12px; margin-bottom: 20px; }
+        h2 { color: var(--primary); margin-bottom: 15px; font-size: 16px; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+        .connection-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:15px; }
+        input, button, select {
+            padding: 10px 15px; border:1px solid var(--border); border-radius:8px;
+            background: var(--bg-input); color: var(--text); font-size:14px;
+        }
+        input:focus { outline:none; border-color:var(--primary); }
+        input[type="text"] { flex:1; min-width:180px; }
+        button { background:var(--primary); color:#fff; border:none; cursor:pointer; font-weight:500; transition:0.2s; }
+        button:hover { opacity:0.85; }
+        button.danger { background:var(--danger); }
+        button.success { background:var(--success); }
+        .status-badge { padding:6px 12px; border-radius:20px; font-size:13px; }
+        .status-badge.connected { background:var(--success); }
+        .status-badge.disconnected { background:var(--text-muted); }
+        .file-upload {
+            border:2px dashed var(--border); border-radius:8px; padding:25px;
+            text-align:center; cursor:pointer; transition: border-color 0.2s;
+        }
+        .file-upload:hover { border-color:var(--primary); }
+        .file-upload input { display:none; }
+        .response-box {
+            background:var(--bg-dark); border:1px solid var(--border);
+            border-radius:8px; padding:12px; margin-top:12px;
+            max-height:250px; overflow-y:auto; font-family:monospace; font-size:12px;
+            white-space:pre-wrap; word-break:break-all;
+        }
+        .log-entry { margin-bottom:4px; }
+        .log-entry.success { color:var(--success); }
+        .log-entry.error { color:var(--danger); }
+        .log-entry.info { color:var(--primary); }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 TrollVNC 安装 API 测试</h1>
+
+        <!-- 连接设置 -->
+        <div class="panel">
+            <h2>🔗 连接设置</h2>
+            <div class="connection-bar">
+                <input type="text" id="ip" placeholder="设备 IP (如: 192.168.1.100)">
+                <input type="number" id="port" value="8182" min="1" max="65535" style="width:90px;">
+                <button onclick="connect()">连接</button>
+                <span id="status" class="status-badge disconnected">未连接</span>
+            </div>
+        </div>
+
+        <!-- 巨魔 URL 安装 -->
+        <div class="panel">
+            <h2>🌀 巨魔 URL 安装（远程 .tipa 安装）</h2>
+            <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">
+                输入 .tipa 文件的下载地址，TrollVNC 会调用 TrollStore 直接安装。
+            </p>
+            <div class="connection-bar">
+                <input type="text" id="tipaUrl" placeholder="https://example.com/app.tipa" style="flex:1;">
+                <button onclick="installFromUrl()" class="success">开始安装</button>
+            </div>
+            <div id="urlResult" class="response-box" style="display:none;"></div>
+        </div>
+
+        <!-- DEB 安装 -->
+        <div class="panel">
+            <h2>📦 越狱插件 DEB 安装</h2>
+            <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">
+                上传 .deb 文件安装，安装完成后自动刷新图标缓存并注销设备。
+            </p>
+
+            <!-- 方式1：本地路径 -->
+            <div style="margin-bottom:18px; padding-bottom:15px; border-bottom:1px solid var(--border);">
+                <h3 style="font-size:14px; margin-bottom:8px; color:var(--text-muted);">方式一：已存在的 deb 文件路径</h3>
+                <div class="connection-bar">
+                    <input type="text" id="debPath" placeholder="/var/mobile/Media/Downloads/app.deb" style="flex:1;">
+                    <button onclick="installDebByPath()" class="success">安装（本地路径）</button>
+                </div>
+            </div>
+
+            <!-- 方式2：上传文件 -->
+            <div>
+                <h3 style="font-size:14px; margin-bottom:8px; color:var(--text-muted);">方式二：上传 deb 文件</h3>
+                <div class="file-upload" onclick="document.getElementById('debFile').click()">
+                    <div style="font-size:28px; margin-bottom:8px;">📤</div>
+                    <div>点击选择 .deb 文件</div>
+                    <div id="debFileName" style="margin-top:5px; font-size:12px; color:var(--text-muted);"></div>
+                    <input type="file" id="debFile" accept=".deb" onchange="onDebSelected(this)">
+                </div>
+                <div style="margin-top:10px;">
+                    <button onclick="installDebByUpload()" class="success">上传并安装</button>
+                </div>
+            </div>
+
+            <div id="debResult" class="response-box" style="display:none;"></div>
+        </div>
+
+        <!-- 日志 -->
+        <div class="panel">
+            <h2>📋 日志</h2>
+            <div id="log" class="response-box" style="max-height:300px;"></div>
+        </div>
+    </div>
+
+    <script>
+        let baseUrl = '';
+        let selectedDebFile = null;
+
+        function log(msg, type='info') {
+            const el = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.appendChild(entry);
+            el.scrollTop = el.scrollHeight;
+        }
+
+        function showResult(elId, data, ok) {
+            const el = document.getElementById(elId);
+            el.style.display = 'block';
+            el.textContent = JSON.stringify(data, null, 2);
+            el.style.color = ok ? 'var(--success)' : 'var(--danger)';
+        }
+
+        function getBaseUrl() {
+            const ip = document.getElementById('ip').value.trim();
+            const port = document.getElementById('port').value;
+            if (!ip) { alert('请输入设备 IP'); return null; }
+            return `http://${ip}:${port}`;
+        }
+
+        async function connect() {
+            baseUrl = getBaseUrl();
+            if (!baseUrl) return;
+            log('正在连接...', 'info');
+            try {
+                const res = await fetch(`${baseUrl}/api/device`);
+                if (res.ok) {
+                    const data = await res.json();
+                    log(`连接成功: ${data.deviceName || 'Unknown'} iOS ${data.systemVersion || '???'}`, 'success');
+                    document.getElementById('status').textContent = '已连接';
+                    document.getElementById('status').className = 'status-badge connected';
+                } else throw new Error(`HTTP ${res.status}`);
+            } catch (err) {
+                log(`连接失败: ${err.message}`, 'error');
+                alert('连接失败：' + err.message);
+            }
+        }
+
+        // ---- 巨魔 URL 安装 ----
+        async function installFromUrl() {
+            const url = document.getElementById('tipaUrl').value.trim();
+            if (!url) { alert('请输入 .tipa 下载地址'); return; }
+            if (!baseUrl) { alert('请先连接设备'); return; }
+
+            log(`请求巨魔 URL 安装: ${url}`, 'info');
+            try {
+                const res = await fetch(`${baseUrl}/api/install/url?url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+                log(`URL 安装结果: ${JSON.stringify(data)}`, data.success ? 'success' : 'error');
+                showResult('urlResult', data, data.success);
+                if (data.success) {
+                    alert('已触发 TrollStore 安装，请在设备上确认！');
+                }
+            } catch (err) {
+                log(`请求失败: ${err.message}`, 'error');
+            }
+        }
+
+        // ---- DEB 安装（本地路径）----
+        async function installDebByPath() {
+            const path = document.getElementById('debPath').value.trim();
+            if (!path) { alert('请输入 deb 文件路径'); return; }
+            if (!baseUrl) { alert('请先连接设备'); return; }
+
+            log(`请求 deb 安装（本地路径）: ${path}`, 'info');
+            try {
+                const res = await fetch(`${baseUrl}/api/install/deb?path=${encodeURIComponent(path)}`);
+                const data = await res.json();
+                log(`DEB 安装结果: ${JSON.stringify(data)}`, data.success ? 'success' : 'error');
+                showResult('debResult', data, data.success);
+            } catch (err) {
+                log(`请求失败: ${err.message}`, 'error');
+            }
+        }
+
+        // ---- DEB 安装（上传文件）----
+        function onDebSelected(input) {
+            if (input.files.length > 0) {
+                selectedDebFile = input.files[0];
+                document.getElementById('debFileName').textContent = selectedDebFile.name + ` (${(selectedDebFile.size/1024).toFixed(1)} KB)`;
+                log(`已选择文件: ${selectedDebFile.name}`, 'info');
+            }
+        }
+
+        async function installDebByUpload() {
+            if (!selectedDebFile) { alert('请先选择 .deb 文件'); return; }
+            if (!baseUrl) { alert('请先连接设备'); return; }
+
+            log(`上传并安装 deb: ${selectedDebFile.name} (${(selectedDebFile.size/1024).toFixed(1)} KB)`, 'info');
+
+            try {
+                // 直接以二进制 body 上传
+                const res = await fetch(`${baseUrl}/api/install/deb`, {
+                    method: 'POST',
+                    body: selectedDebFile,
+                    headers: { 'Content-Type': 'application/octet-stream' }
+                });
+                const data = await res.json();
+                log(`DEB 上传安装结果: ${JSON.stringify(data)}`, data.success ? 'success' : 'error');
+                showResult('debResult', data, data.success);
+                if (data.success) {
+                    log('安装成功！设备将在 2 秒后自动注销...', 'info');
+                }
+            } catch (err) {
+                log(`上传失败: ${err.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>

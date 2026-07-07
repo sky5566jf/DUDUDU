@@ -1,0 +1,1683 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<title>TrollVNC 电脑群控管理台</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f0f2f5; min-height: 100vh; }
+
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; vertical-align: middle; }
+  .dot-green { background: #52c41a; box-shadow: 0 0 6px #52c41a; }
+  .dot-gray { background: #555; }
+  .dot-red { background: #ff4d4f; }
+  .dot-yellow { background: #faad14; }
+  .dot-blue { background: #667eea; box-shadow: 0 0 6px #667eea; }
+
+  /* === 布局 === */
+  .layout { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+  /* === 顶部工具栏 === */
+  .topbar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 20px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3); flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .topbar .title { color: white; font-size: 16px; font-weight: 700; letter-spacing: 0.5px; }
+  .topbar .title span { color: #667eea; }
+
+  /* 中继配置区 */
+  .relay-config {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; background: rgba(255,255,255,0.08); border-radius: 8px;
+    border: 1px solid rgba(102,126,234,0.3);
+  }
+  .relay-config label { color: #888; font-size: 11px; white-space: nowrap; }
+  .relay-config input {
+    background: #0d1117; color: #667eea; border: 1px solid #333; border-radius: 4px;
+    padding: 3px 8px; font-size: 13px; font-family: monospace; width: 140px;
+    outline: none; transition: border-color 0.2s;
+  }
+  .relay-config input:focus { border-color: #667eea; box-shadow: 0 0 0 2px rgba(102,126,234,0.2); }
+  .relay-config .conn-status { font-size: 11px; color: #888; min-width: 60px; text-align: center; }
+  .relay-config .conn-status.connected { color: #52c41a; }
+  .relay-config .conn-status.disconnected { color: #ff4d4f; }
+
+  .topbar .spacer { flex: 1; }
+  .topbar .info { font-size: 12px; color: #888; }
+
+  /* === 按钮 === */
+  .btn {
+    padding: 6px 14px; border: none; border-radius: 6px;
+    font-size: 12px; cursor: pointer; font-weight: 500;
+    transition: all 0.2s; white-space: nowrap;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: #667eea; color: white; }
+  .btn-primary:hover { background: #5568d3; }
+  .btn-success { background: #52c41a; color: white; }
+  .btn-success:hover { background: #46ad16; }
+  .btn-danger { background: #ff4d4f; color: white; }
+  .btn-danger:hover { background: #e03e3e; }
+  .btn-warning { background: #faad14; color: white; }
+  .btn-warning:hover { background: #d9920d; }
+  .btn-default { background: rgba(255,255,255,0.1); color: #ccc; border: 1px solid rgba(255,255,255,0.15); }
+  .btn-default:hover { border-color: #667eea; color: #667eea; background: rgba(102,126,234,0.1); }
+  .btn-sm { padding: 4px 10px; font-size: 11px; }
+  .btn-xs { padding: 2px 7px; font-size: 10px; }
+
+  /* === 主内容区 === */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
+
+  .screens-header {
+    background: white; border-bottom: 1px solid #e8e8e8;
+    padding: 10px 20px; display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .screens-header h2 { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+  .screens-header .info { font-size: 12px; color: #888; flex: 1; }
+
+  /* === 网格布局 === */
+  .screens-grid {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(280px * var(--grid-scale, 1)), 1fr));
+    gap: calc(16px * var(--grid-scale, 1)); align-content: start;
+  }
+
+  /* === 设备卡片 === */
+  .screen-card {
+    background: white; border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    overflow: hidden; display: flex; flex-direction: column;
+    transition: box-shadow 0.2s, transform 0.15s;
+  }
+  .screen-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+
+  /* 弹出独立窗口状态 */
+  .screen-card.popped-out .screen-view { display: none; }
+  .screen-card.popped-out .popped-overlay { display: flex; }
+  .popped-overlay {
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    padding: 30px 20px; background: #f5f7ff; color: #667eea; gap: 10px;
+    min-height: 120px; cursor: pointer; border-radius: 0 0 12px 12px;
+  }
+  .popped-overlay .ico { font-size: 32px; }
+  .popped-overlay p { font-size: 13px; font-weight: 500; }
+  .popped-overlay small { font-size: 11px; color: #999; }
+
+  /* 卡片标题栏（含操作按钮） */
+  .screen-title {
+    padding: 8px 12px; display: flex; align-items: center; gap: 6px;
+    background: #fafafa; border-bottom: 1px solid #f0f0f0;
+    flex-wrap: wrap;
+  }
+  .screen-title .name { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+  .screen-title .ip-label { font-size: 11px; color: #888; font-family: monospace; }
+  .screen-title .latency { font-size: 11px; color: #888; font-family: monospace; }
+  .screen-title .role-tag {
+    font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .role-tag-master { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+  .role-tag-slave { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; }
+  .card-actions {
+    display: flex; gap: 4px; margin-left: auto;
+  }
+  .card-btn {
+    padding: 2px 7px; border: 1px solid #d9d9d9; border-radius: 4px;
+    background: white; font-size: 10px; cursor: pointer; white-space: nowrap;
+    transition: all 0.15s; line-height: 1.5; color: #555;
+  }
+  .card-btn:hover { border-color: #667eea; color: #667eea; background: #f5f7ff; }
+  .card-btn:active { transform: scale(0.93); }
+  .card-btn.card-btn-primary { border-color: #667eea; color: #667eea; }
+  .card-btn.card-btn-primary:hover { background: #667eea; color: white; }
+  .card-btn.card-btn-danger { border-color: #ff4d4f; color: #ff4d4f; }
+  .card-btn.card-btn-danger:hover { background: #ff4d4f; color: white; }
+  .card-btn.card-btn-success { border-color: #52c41a; color: #52c41a; }
+  .card-btn.card-btn-success:hover { background: #52c41a; color: white; }
+  .card-btn.card-btn-active-success { background: #52c41a; color: white; border-color: #52c41a; }
+  .card-btn.card-btn-active-danger { background: #ff4d4f; color: white; border-color: #ff4d4f; }
+
+  /* 中继状态标签 */
+  .relay-status-badge {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 500; white-space: nowrap;
+  }
+  .relay-offline { background: #f5f5f5; color: #999; border: 1px solid #d9d9d9; }
+  .relay-online { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+  .relay-error { background: #fff2f0; color: #ff4d4f; border: 1px solid #ffa39e; }
+
+  /* 固定横屏比例容器 */
+  .screen-view {
+    position: relative; background: #111;
+    overflow: hidden; cursor: default;
+    aspect-ratio: 16 / 9;
+    contain: content;
+  }
+  .screen-view img {
+    width: 100%; height: 100%; display: block;
+    object-fit: cover;
+    touch-action: none; user-select: none;
+    -webkit-user-select: none; pointer-events: none;
+    will-change: transform;
+  }
+  /* 主控卡片可操控 */
+  .screen-view.master-view { cursor: crosshair; }
+  .screen-view.master-view img { pointer-events: all; }
+  .screen-view .offline-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.75); display: flex; align-items: center;
+    justify-content: center; flex-direction: column; gap: 8px;
+    color: #666; font-size: 13px;
+  }
+  .screen-view .offline-overlay .ico { font-size: 32px; opacity: 0.5; }
+
+  /* 全局触控层（覆盖在主控画面上，用于电脑端操控广播） */
+  .touch-overlay {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 10; cursor: crosshair;
+    display: none;
+  }
+  .touch-overlay.active { display: block; }
+
+  /* === 状态提示 === */
+  .toast {
+    position: fixed; top: 72px; right: 24px; z-index: 9999;
+    background: #1a1a2e; color: white; padding: 10px 20px;
+    border-radius: 8px; font-size: 13px; font-weight: 500;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+    transition: opacity 0.3s, transform 0.3s;
+    pointer-events: none;
+    transform: translateY(-8px); opacity: 0;
+  }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .toast.toast-ok { background: #52c41a; }
+  .toast.toast-err { background: #ff4d4f; }
+  .toast.toast-warn { background: #faad14; color: #1a1a2e; }
+
+  /* === 画质设置面板 === */
+  .quality-panel {
+    position: absolute; top: 100%; right: 0; z-index: 200;
+    background: white; border: 1px solid #e8e8e8; border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15); padding: 14px 18px;
+    width: 340px; display: none;
+  }
+  .quality-panel.open { display: block; }
+  .quality-panel h4 { font-size: 13px; font-weight: 700; color: #1a1a2e; margin-bottom: 12px; }
+  .quality-panel .q-section { margin-bottom: 14px; }
+  .quality-panel .q-section-title {
+    font-size: 11px; font-weight: 600; color: #667eea;
+    margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #f0f0f0;
+  }
+  .quality-panel .q-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .quality-panel .q-label { font-size: 11px; color: #555; width: 32px; flex-shrink: 0; }
+  .quality-panel .q-slider { flex: 1; height: 3px; accent-color: #667eea; cursor: pointer; }
+  .quality-panel .q-val {
+    font-size: 11px; color: #1a1a2e; font-family: monospace;
+    width: 40px; text-align: right; flex-shrink: 0;
+  }
+  .quality-panel .q-ms-input {
+    width: 65px; border: 1px solid #d9d9d9; border-radius: 4px;
+    font-size: 11px; padding: 2px 5px; text-align: center;
+  }
+  .quality-panel .q-presets {
+    display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px;
+  }
+  .quality-panel .q-preset-btn {
+    padding: 4px 12px; border: 1px solid #d9d9d9; border-radius: 5px;
+    background: white; font-size: 11px; cursor: pointer; transition: all 0.15s;
+  }
+  .quality-panel .q-preset-btn:hover { border-color: #667eea; color: #667eea; background: #f5f7ff; }
+  .quality-panel .q-apply-btn {
+    width: 100%; margin-top: 12px; padding: 8px; border: none;
+    background: #667eea; color: white; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .quality-panel .q-apply-btn:hover { background: #5568d3; }
+  .screens-header-right { position: relative; }
+
+  /* === 缩放控件 === */
+  .zoom-ctrl {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: #555; white-space: nowrap;
+  }
+  .zoom-ctrl input[type=range] { width: 90px; cursor: pointer; }
+  .zoom-ctrl span { font-size: 12px; min-width: 38px; text-align: right; }
+
+  /* === 批量操作栏 === */
+  .batch-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 16px; background: #fffbe6; border-bottom: 1px solid #ffe58f;
+    font-size: 12px; flex-wrap: wrap;
+  }
+  .batch-bar .batch-info { color: #ad8b00; font-weight: 500; }
+  .batch-bar .spacer { flex: 1; }
+
+  /* === 空状态 === */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: #bbb; gap: 12px; grid-column: 1 / -1;
+  }
+  .empty-state .ico { font-size: 48px; }
+  .empty-state p { font-size: 15px; }
+  .empty-state small { font-size: 12px; color: #ccc; }
+
+  /* === 日志面板（可折叠）=== */
+  .log-panel {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: #1a1a2e; color: #aaa; font-size: 11px; font-family: monospace;
+    max-height: 160px; overflow-y: auto;
+    border-top: 2px solid #667eea;
+    transition: max-height 0.3s, opacity 0.3s;
+    z-index: 9000;
+    display: none; opacity: 0;
+  }
+  .log-panel.open { display: block; opacity: 1; max-height: 200px; }
+  .log-panel .log-line { padding: 2px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  .log-line.log-err { color: #ff7875; }
+  .log-line.log-ok { color: #73d13d; }
+  .log-line.log-warn { color: #ffc069; }
+  .log-line.log-touch { color: #69c0ff; }
+  .log-toggle-btn {
+    position: fixed; bottom: 0; right: 20px; z-index: 9001;
+    padding: 4px 14px; border-radius: 8px 8px 0 0;
+    background: #1a1a2e; color: #667eea; border: 2px solid #667eea; border-bottom: none;
+    font-size: 11px; cursor: pointer; font-weight: 600;
+  }
+  .log-toggle-btn:hover { background: #667eea; color: white; }
+
+  /* === 加载动画 === */
+  @keyframes pulse { 0%,100% {opacity:1;} 50% {opacity:0.4;} }
+  .loading-dot { animation: pulse 1.2s infinite; }
+
+  /* === 响应式 === */
+  @media (max-width: 800px) {
+    .screens-grid {
+      grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--grid-scale, 1)), 1fr)) !important;
+    }
+    .relay-config { display: none; } /* 小屏幕隐藏中继配置 */
+    .topbar { padding: 8px 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <!-- 顶部工具栏 -->
+  <div class="topbar">
+    <div class="title">TrollVNC <span>电脑群控</span></div>
+
+    <!-- 中继服务器配置 -->
+    <div class="relay-config" id="relayConfigBox">
+      <label>🖥️ 中继IP:</label>
+      <input type="text" id="relayIpInput" placeholder="本机(自动)" value="" />
+      <button class="btn btn-xs btn-primary" onclick="connectRelayWS()">连接中继</button>
+      <button class="btn btn-xs btn-default" onclick="disconnectRelayWS()">断开</button>
+      <span class="conn-status disconnected" id="wsConnStatus">未连接</span>
+    </div>
+
+    <div class="spacer"></div>
+
+    <!-- 批量操作 -->
+    <button class="btn btn-sm btn-success" onclick="connectAllRelay()" title="让所有设备连接中继服务器">🔗 一键全连中继</button>
+    <button class="btn btn-sm btn-danger" onclick="disconnectAllRelay()" title="断开所有设备的中继连接">✕ 一键全断中继</button>
+    <button class="btn btn-sm btn-default" onclick="pingAll()" title="检测所有设备在线状态">📡 检测设备</button>
+
+    <div class="info" id="topInfo"></div>
+  </div>
+
+  <!-- 批量操作结果栏 -->
+  <div class="batch-bar" id="batchBar" style="display:none;">
+    <span class="batch-info" id="batchInfo"></span>
+    <div class="spacer"></div>
+    <button class="btn btn-xs btn-default" onclick="document.getElementById('batchBar').style.display='none'">关闭</button>
+  </div>
+
+  <!-- 投屏区 -->
+  <div class="main">
+    <div class="screens-header">
+      <h2>🖥️ 实时投屏（中继模式）</h2>
+      <span class="info" id="screensInfo">自动从 qkurl.txt 读取设备 · 截图经中继服务器代理</span>
+      <div class="zoom-ctrl" title="缩放设备卡片">
+        <span>🔍</span>
+        <input type="range" id="gridZoom" min="0.4" max="1.4" step="0.05" value="1"
+          oninput="updateGridZoom(this.value)">
+        <span id="gridZoomVal">100%</span>
+      </div>
+      <button class="btn btn-default btn-sm" onclick="toggleLayout()">切换布局</button>
+      <button class="btn btn-default btn-sm" onclick="refreshDevices()" title="重新加载 qkurl.txt">🔄 刷新列表</button>
+      <div class="screens-header-right">
+        <button class="btn btn-default btn-sm" onclick="toggleQualityPanel()" id="qualityPanelBtn">⚙️ 画质</button>
+        <div class="quality-panel" id="qualityPanel">
+          <h4>📷 截图画质参数</h4>
+
+          <div class="q-section">
+            <div class="q-section-title">主控画面（缩略图）</div>
+            <div class="q-row">
+              <span class="q-label">质量</span>
+              <input type="range" class="q-slider" id="mq_quality" min="0.1" max="1.0" step="0.05" value="0.5"
+                oninput="document.getElementById('mq_quality_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="mq_quality_val">0.50</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">缩放</span>
+              <input type="range" class="q-slider" id="mq_scale" min="0.1" max="1.0" step="0.05" value="0.3"
+                oninput="document.getElementById('mq_scale_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="mq_scale_val">0.30</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">间隔</span>
+              <input type="number" class="q-ms-input" id="mq_interval" value="500" min="100" max="10000" step="100"> ms
+            </div>
+          </div>
+
+          <div class="q-section">
+            <div class="q-section-title">从控画面（缩略图）</div>
+            <div class="q-row">
+              <span class="q-label">质量</span>
+              <input type="range" class="q-slider" id="sq_quality" min="0.1" max="1.0" step="0.05" value="0.3"
+                oninput="document.getElementById('sq_quality_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="sq_quality_val">0.30</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">缩放</span>
+              <input type="range" class="q-slider" id="sq_scale" min="0.1" max="1.0" step="0.05" value="0.15"
+                oninput="document.getElementById('sq_scale_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="sq_scale_val">0.15</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">间隔</span>
+              <input type="number" class="q-ms-input" id="sq_interval" value="2000" min="100" max="30000" step="500"> ms
+            </div>
+          </div>
+
+          <div class="q-section">
+            <div class="q-section-title">弹窗窗口（流畅模式）</div>
+            <div class="q-row">
+              <span class="q-label">质量</span>
+              <input type="range" class="q-slider" id="pq_quality" min="0.1" max="1.0" step="0.05" value="0.85"
+                oninput="document.getElementById('pq_quality_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="pq_quality_val">0.85</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">缩放</span>
+              <input type="range" class="q-slider" id="pq_scale" min="0.1" max="1.0" step="0.05" value="0.6"
+                oninput="document.getElementById('pq_scale_val').textContent=parseFloat(this.value).toFixed(2)">
+              <span class="q-val" id="pq_scale_val">0.60</span>
+            </div>
+            <div class="q-row">
+              <span class="q-label">间隔</span>
+              <input type="number" class="q-ms-input" id="pq_interval" value="80" min="30" max="2000" step="10"> ms
+            </div>
+          </div>
+
+          <div class="q-presets">
+            <button class="q-preset-btn" onclick="applyQualityPreset('lan')">📶 局域网（推荐）</button>
+            <button class="q-preset-btn" onclick="applyQualityPreset('wifi')">📱 普通WiFi</button>
+            <button class="q-preset-btn" onclick="applyQualityPreset('weak')">📉 弱网节流</button>
+            <button class="q-preset-btn" onclick="applyQualityPreset('perf')">🚀 高质流畅</button>
+          </div>
+          <button class="q-apply-btn" onclick="applyQualitySettings()">✅ 应用并重启投屏</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="screens-grid" id="screensGrid">
+      <div class="empty-state">
+        <div class="ico">📱</div>
+        <p>暂无设备画面</p>
+        <small>请确保同目录下有 qkurl.txt 并包含设备信息<br>格式：IP----名称----平台----设备号----系统版本----别名</small>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast 提示 -->
+<div class="toast" id="toast"></div>
+
+<!-- 日志面板 -->
+<div class="log-panel" id="logPanel"></div>
+<button class="log-toggle-btn" id="logToggleBtn" onclick="toggleLogPanel()">📋 日志 (0)</button>
+
+
+<script>
+// ==================== 数据层 ====================
+var devices = [];           // [{id, name, ip, platform, deviceId, systemVersion, alias, role, online, relayConnected}]
+var activeTimers = {};       // 截图定时器
+var relayWs = null;          // 浏览器到中继服务器的 WS 连接
+var relayIp = '';            // 中继服务器 IP
+var wsStatus = 'disconnected'; // disconnected | connecting | connected
+var layoutMode = 'grid';
+var frameCounters = {};
+var lastFpsTick = {};
+var touchActive = false;
+var popWindows = {};         // 弹出窗口引用
+var popCheckIntervals = {};  // 监听弹出窗口关闭
+var qkurlRefreshTimer = null;
+
+// ==================== 日志系统（必须在 init 之前定义）====================
+var logTypes = { info: '🔵', ok: '✅', err: '❌', warn: '⚠️', touch: '👆' };
+var logThrottle = 0;
+function log(msg, type) {
+  type = type || 'info';
+  if (type === 'touch') {
+    var now = Date.now();
+    if (now - logThrottle < 500) return;
+    logThrottle = now;
+  }
+  var t = new Date().toLocaleTimeString('zh-CN', {hour12: false});
+  var prefix = logTypes[type] || '';
+  console.log('[' + t + '] ' + prefix + ' ' + msg);
+
+  var panel = document.getElementById('logPanel');
+  if (panel) {
+    var div = document.createElement('div');
+    div.className = 'log-line' + (type === 'err' ? ' log-err' : '') + (type === 'ok' ? ' log-ok' : '') + (type === 'warn' ? ' log-warn' : '') + (type === 'touch' ? ' log-touch' : '');
+    div.textContent = '[' + t + '] ' + msg;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+    while (panel.children.length > 200) panel.removeChild(panel.firstChild);
+  }
+  updateLogToggleCount();
+}
+
+function toggleLogPanel() {
+  var p = document.getElementById('logPanel');
+  if (!p) return;
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+
+function clearLog() {
+  var p = document.getElementById('logPanel');
+  if (p) { p.innerHTML = ''; }
+  updateLogToggleCount();
+}
+
+function updateLogToggleCount() {
+  var btn = document.getElementById('logToggleBtn');
+  if (!btn) return;
+  var p = document.getElementById('logPanel');
+  if (!p) return;
+  btn.textContent = (p.children.length > 0 ? '📋 (' + p.children.length + ')' : '📋');
+}
+
+// ==================== 截图画质全局参数 ====================
+var screenParams = {
+  master:  { quality: 0.5,  scale: 0.3,  interval: 500  },
+  slave:   { quality: 0.3,  scale: 0.15, interval: 2000 },
+  popout:  { quality: 0.85, scale: 0.6,  interval: 80   }
+};
+
+// 画质预设
+var qualityPresets = {
+  lan:  { master: {quality:0.7, scale:0.5, interval:300},  slave: {quality:0.5, scale:0.3, interval:1000}, popout: {quality:0.92, scale:0.75, interval:50}  },
+  wifi: { master: {quality:0.5, scale:0.3, interval:500},  slave: {quality:0.3, scale:0.15,interval:2000}, popout: {quality:0.85, scale:0.6, interval:80}   },
+  weak: { master: {quality:0.3, scale:0.2, interval:1500}, slave: {quality:0.2, scale:0.1, interval:5000}, popout: {quality:0.6,  scale:0.4, interval:150}  },
+  perf: { master: {quality:0.8, scale:0.6, interval:200},  slave: {quality:0.6, scale:0.4, interval:800},  popout: {quality:0.95, scale:0.85,interval:45}   }
+};
+
+// ==================== 初始化：检测中继 IP ====================
+(function init() {
+  // 尝试从 localStorage 恢复中继 IP
+  var savedRelayIp = localStorage.getItem('tvnc_relay_ip');
+  if (savedRelayIp) {
+    document.getElementById('relayIpInput').value = savedRelayIp;
+    relayIp = savedRelayIp;
+  } else {
+    // 默认本机：中继服务器和网页服务在同一台电脑上
+    relayIp = window.location.hostname || 'localhost';
+    document.getElementById('relayIpInput').value = relayIp;
+    localStorage.setItem('tvnc_relay_ip', relayIp);
+  }
+
+  // 恢复缩放设置
+  var savedZoom = localStorage.getItem('tvnc_grid_zoom');
+  if (savedZoom) {
+    document.getElementById('gridZoom').value = savedZoom;
+    updateGridZoom(savedZoom);
+  }
+
+  loadDevicesFromQkurl();
+  qkurlRefreshTimer = setInterval(loadDevicesFromQkurl, 30000);
+
+  // 自动连接中继（如果已有保存的 IP）
+  if (relayIp) {
+    setTimeout(function() { connectRelayWS(); }, 100);
+  }
+
+  log('TrollVNC 电脑群控管理台 v3.7 (中继模式) 就绪', 'ok');
+})();
+
+// ==================== qkurl.txt 设备列表加载 ====================
+function loadDevicesFromQkurl() {
+  fetch('qkurl.txt?t=' + Date.now(), {signal: AbortSignal.timeout(10000)})
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.arrayBuffer();
+    })
+    .then(function(buf) {
+      var text = new TextDecoder('utf-8').decode(buf);
+      parseQkurl(text);
+    })
+    .catch(function(e) {
+      log('qkurl.txt 加载失败: ' + e.message, 'err');
+    });
+}
+
+function refreshDevices() {
+  log('手动刷新设备列表...', 'info');
+  loadDevicesFromQkurl();
+  toast('正在刷新设备列表...', 'warn');
+}
+
+function parseQkurl(text) {
+  var lines = text.split('\n');
+  var newDevices = [];
+  var idCounter = 1;
+
+  lines.forEach(function(line) {
+    line = line.trim();
+    if (!line || line.startsWith('#')) return;
+    var parts = line.split('----');
+    if (parts.length < 1 || !parts[0]) return;
+
+    var ip = parts[0].trim();
+    var name = (parts[1] || '').trim() || ('设备 ' + idCounter);
+    var platform = (parts[2] || '').trim() || 'iOS';
+    var deviceId = (parts[3] || '').trim() || '';
+    var systemVersion = (parts[4] || '').trim() || '';
+    var alias = (parts[5] || '').trim() || '';
+
+    var existing = devices.find(function(d) { return d.ip === ip; });
+    if (existing) {
+      existing.name = name;
+      existing.platform = platform;
+      existing.deviceId = deviceId;
+      existing.systemVersion = systemVersion;
+      existing.alias = alias;
+      newDevices.push(existing);
+    } else {
+      newDevices.push({
+        id: 'dev_' + Date.now() + '_' + idCounter,
+        name: name,
+        ip: ip,
+        platform: platform,
+        deviceId: deviceId,
+        systemVersion: systemVersion,
+        alias: alias,
+        role: newDevices.length === 0 ? 'master' : 'slave',
+        online: null,
+        relayConnected: false
+      });
+    }
+    idCounter++;
+  });
+
+  // 保留已有主控角色
+  var oldMaster = devices.find(function(d) { return d.role === 'master'; });
+  if (oldMaster) {
+    var newMasterMatch = newDevices.find(function(d) { return d.ip === oldMaster.ip; });
+    if (newMasterMatch) {
+      newDevices.forEach(function(d) { d.role = d.id === newMasterMatch.id ? 'master' : 'slave'; });
+    }
+  }
+
+  devices = newDevices;
+  log('从 qkurl.txt 加载 ' + devices.length + ' 台设备', 'ok');
+  renderScreens();
+  updateTopInfo();
+  // 不再这里启动截图，等中继 WS 连接成功后再启动（connectRelayWS 的 onopen 里会调用）
+}
+
+// ==================== Toast 提示 ====================
+var toastTimer;
+function toast(msg, type) {
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (type === 'ok' ? ' toast-ok' : type === 'err' ? ' toast-err' : type === 'warn' ? ' toast-warn' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { el.className = 'toast'; }, 2800);
+}
+
+// ==================== 缩放控制 ====================
+function updateGridZoom(val) {
+  var scale = parseFloat(val);
+  document.getElementById('screensGrid').style.setProperty('--grid-scale', scale);
+  document.getElementById('gridZoomVal').textContent = Math.round(scale * 100) + '%';
+  localStorage.setItem('tvnc_grid_zoom', val);
+}
+
+// ==================== 工具函数 ====================
+function getMasterDevice() {
+  return devices.find(function(d) { return d.role === 'master'; });
+}
+function getSlaveDevices() {
+  return devices.filter(function(d) { return d.role === 'slave'; });
+}
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function updateTopInfo() {
+  var info = document.getElementById('topInfo');
+  var masterDev = getMasterDevice();
+  var onlineCount = devices.filter(function(d) { return d.online; }).length;
+  var relayConnCount = devices.filter(function(d) { return d.relayConnected; }).length;
+  info.textContent = devices.length + '台 · 在线:' + onlineCount + ' · 中继:' + relayConnCount + ' · 主控:' + (masterDev ? masterDev.name : '-');
+}
+
+// ==================== 渲染设备卡片 ====================
+function renderScreens() {
+  var grid = document.getElementById('screensGrid');
+  var info = document.getElementById('screensInfo');
+
+  var activeDevices = devices.filter(function(d) { return d.role !== 'none'; });
+  if (activeDevices.length === 0) {
+    grid.innerHTML = '<div class="empty-state"><div class="ico">📱</div><p>暂无设备</p><small>请在同目录创建 qkurl.txt，每行一台设备：<br><code>IP----名称----平台----设备号----系统版本----别名</code></small></div>';
+    info.textContent = '等待 qkurl.txt 加载设备';
+    return;
+  }
+
+  var masterDev = getMasterDevice();
+  info.textContent = activeDevices.length + ' 台设备 · 中继: ' + (relayIp || '未设置') + ' · ' +
+    (wsStatus === 'connected' ? 'WS已连' : 'WS未连');
+
+  var html = '';
+  activeDevices.forEach(function(dev) {
+    var isMaster = dev.role === 'master';
+    var isPopped = !!popWindows[dev.id];
+    var displayName = dev.alias || dev.name;
+
+    // 中继状态徽章
+    var relayBadgeCls = dev.relayConnected ? 'relay-online' : 'relay-offline';
+    var relayBadgeText = dev.relayConnected ? '已中继' : '未中继';
+
+    html += '<div class="screen-card' + (isPopped ? ' popped-out' : '') + '" id="card_' + dev.id + '" ondblclick="popOutDevice(\'' + dev.id + '\')" title="双击弹出独立窗口">' +
+      '<div class="screen-title">' +
+        '<span class="dot ' + (dev.online ? 'dot-green' : 'dot-gray') + '"></span>' +
+        '<span class="name" title="' + escHtml(displayName) + '">' + escHtml(displayName) + '</span>' +
+        '<span class="ip-label">' + escHtml(dev.ip) + '</span>' +
+        '<span class="role-tag ' + (isMaster ? 'role-tag-master' : 'role-tag-slave') + '">' + (isMaster ? '主控' : '从控') + '</span>' +
+        '<span class="relay-status-badge ' + relayBadgeCls + '" id="relayBadge_' + dev.id + '">' + relayBadgeText + '</span>' +
+        '<span class="latency" id="lat_' + dev.id + '"></span>' +
+        '<div class="card-actions">' +
+          (isMaster ?
+            '<button class="card-btn card-btn-danger" onclick="setRole(\'' + dev.id + '\',\'slave\')" title="取消主控">取消主控</button>' :
+            '<button class="card-btn card-btn-primary" onclick="setRole(\'' + dev.id + '\',\'master\')" title="设为主控">设为主控</button>'
+          ) +
+          (!dev.relayConnected ?
+            '<button class="card-btn card-btn-success" onclick="connectDeviceRelay(\'' + dev.id + '\')" title="连接中继服务器">连中继</button>' :
+            '<button class="card-btn card-btn-danger" onclick="disconnectDeviceRelay(\'' + dev.id + '\')" title="断开中继">断中继</button>'
+          ) +
+          '<button class="card-btn" onclick="sendHomeToDev(\'' + dev.id + '\')" title="Home键">🏠</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="screen-view' + (isMaster ? ' master-view' : '') + '" id="view_' + dev.id + '">' +
+        '<img id="img_' + dev.id + '" src="" alt="' + escHtml(dev.name) + '" style="display:none">' +
+        '<div class="touch-overlay" id="touchOverlay_' + dev.id + '"></div>' +
+        '<div class="offline-overlay" id="overlay_' + dev.id + '" style="display:flex">' +
+          '<div class="ico">📵</div>' +
+          '<div>' + escHtml(dev.name) + ' 暂无画面</div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="popped-overlay" id="popped_' + dev.id + '" style="' + (isPopped ? 'display:flex' : 'display:none') + '" onclick="bringBackDevice(\'' + dev.id + '\')">' +
+        '<div class="ico">📺</div>' +
+        '<p>' + escHtml(dev.name) + ' 已弹出独立窗口</p>' +
+        '<small>双击其他设备也可弹出 · 点击此处返回</small>' +
+      '</div>' +
+    '</div>';
+  });
+
+  grid.innerHTML = html;
+
+  // 绑定全局触控事件（主控画面）
+  bindGlobalTouchEvents();
+}
+
+// ==================== 绑定全局触摸/鼠标事件（用于电脑端操控所有设备）====================
+function bindGlobalTouchEvents() {
+  // 移除旧的监听器（简单方式：不记录引用，直接靠 DOM 重建）
+}
+
+// ==================== 中继 WebSocket 管理（浏览器 → 中继服务器）====================
+function connectRelayWS() {
+  var inputEl = document.getElementById('relayIpInput');
+  relayIp = (inputEl.value || '').trim();
+  if (!relayIp) {
+    toast('请输入中继服务器 IP', 'err'); return;
+  }
+  // 验证 IP / 主机名格式（允许 IP 或 localhost / 主机名）
+  if (!/^[\w.:-]+$/.test(relayIp)) {
+    toast('IP/主机名格式不正确', 'err'); return;
+  }
+  localStorage.setItem('tvnc_relay_ip', relayIp);
+
+  if (relayWs) { try { relayWs.close(); } catch(e) {} relayWs = null; }
+  wsStatus = 'connecting';
+  updateWsStatusUI();
+
+  var url = 'ws://' + relayIp + ':8183?role=browser';
+  log('连接中继 WS: ' + url, 'info');
+
+  try {
+    relayWs = new WebSocket(url);
+  } catch(e) {
+    log('WebSocket 创建失败: ' + e.message, 'err');
+    wsStatus = 'disconnected'; updateWsStatusUI();
+    return;
+  }
+
+  relayWs.onopen = function() {
+    wsStatus = 'connected';
+    log('已连接到中继服务器 ' + relayIp + ':8183', 'ok');
+    updateWsStatusUI();
+    toast('已连接中继服务器 (' + relayIp + ')', 'ok');
+
+    // 启动截图（走中继代理）
+    startScreensOnly();
+  };
+
+  relayWs.onmessage = function(e) {
+    try {
+      var data = JSON.parse(e.data);
+      if (data.type === 'welcome') {
+        log('中继欢迎消息: role=' + data.role, 'ok');
+      }
+      // 收到从控加入通知等可以在这里处理
+    } catch(ex) {}
+  };
+
+  relayWs.onerror = function() {
+    log('中继 WS 错误（检查中继服务器是否运行）', 'err');
+    wsStatus = 'disconnected'; updateWsStatusUI();
+  };
+
+  relayWs.onclose = function() {
+    wsStatus = 'disconnected';
+    log('中继 WS 已断开', 'warn');
+    updateWsStatusUI();
+  };
+}
+
+function disconnectRelayWS() {
+  if (relayWs) { try { relayWs.close(); } catch(e) {} relayWs = null; }
+  wsStatus = 'disconnected';
+  updateWsStatusUI();
+  toast('已断开中继连接', 'warn');
+}
+
+function updateWsStatusUI() {
+  var el = document.getElementById('wsConnStatus');
+  if (!el) return;
+  el.textContent = wsStatus === 'connected' ? '已连接' : wsStatus === 'connecting' ? '连接中...' : '未连接';
+  el.className = 'conn-status ' + (wsStatus === 'connected' ? 'connected' : wsStatus === 'connecting' ? '' : 'disconnected');
+  renderScreens(); // 更新信息栏显示
+}
+
+// ==================== 截图轮询（经中继 HTTP 代理）====================
+function getScreenshotBaseUrl(dev) {
+  // 走中继服务器代理：http://{relayIp}:9527/api/screenshot?ip={devIp}&...
+  var params = dev.role === 'master' ? screenParams.master : screenParams.slave;
+  return 'http://' + relayIp + ':9527/api/screenshot?ip=' + encodeURIComponent(dev.ip)
+    + '&format=jpeg&quality=' + params.quality + '&scale=' + params.scale + '&rotation=90&_t=';
+}
+
+function startScreenRefresh(dev, minInterval) {
+  stopScreenRefresh(dev.id);
+  frameCounters[dev.id] = 0;
+  lastFpsTick[dev.id] = Date.now();
+
+  var baseUrl = getScreenshotBaseUrl(dev);
+  var params = dev.role === 'master' ? screenParams.master : screenParams.slave;
+  var minMs = (minInterval !== undefined) ? minInterval : params.interval;
+  var fetching = false;
+  var lastFetchTime = 0;
+
+  function fetchFrame() {
+    if (fetching) return;
+    var now = Date.now();
+    if (now - lastFetchTime < minMs) {
+      activeTimers[dev.id] = setTimeout(fetchFrame, minMs - (now - lastFetchTime));
+      return;
+    }
+    fetching = true;
+    lastFetchTime = now;
+    var t0 = now;
+    var tempImg = new Image();
+
+    tempImg.onload = function() {
+      var img = document.getElementById('img_' + dev.id);
+      var overlay = document.getElementById('overlay_' + dev.id);
+      if (!img) { fetching = false; return; }
+      img.src = tempImg.src;
+      img.style.display = 'block';
+      if (overlay) overlay.style.display = 'none';
+      dev.online = true;
+      dev._screenErrLogged = false; // 重置错误标志
+      updateDeviceOnlineStatus(dev);
+
+      // 首次成功时记录日志
+      if (!dev._screenOkLogged) { log('✓ ' + dev.name + ' 截图正常 (' + (Date.now() - t0) + 'ms)', 'ok'); dev._screenOkLogged = true; }
+
+      var latency = Date.now() - t0;
+      var latEl = document.getElementById('lat_' + dev.id);
+      if (latEl) latEl.textContent = latency + 'ms';
+
+      frameCounters[dev.id]++;
+      var fpsNow = Date.now();
+      if (fpsNow - (lastFpsTick[dev.id] || fpsNow) >= 1000) {
+        frameCounters[dev.id] = 0;
+        lastFpsTick[dev.id] = fpsNow;
+      }
+
+      fetching = false;
+      activeTimers[dev.id] = setTimeout(fetchFrame, Math.max(0, minMs - (Date.now() - lastFetchTime)));
+    };
+
+    tempImg.onerror = function() {
+      var img = document.getElementById('img_' + dev.id);
+      var overlay = document.getElementById('overlay_' + dev.id);
+      if (img) img.style.display = 'none';
+      if (overlay) overlay.style.display = 'flex';
+      dev.online = false;
+      // 只记录首次错误，避免刷屏
+      if (!dev._screenErrLogged) { log('✗ ' + dev.name + ' 截图失败 (检查中继服务器是否运行 / 手机是否在线)', 'err'); dev._screenErrLogged = true; }
+      fetching = false;
+      activeTimers[dev.id] = setTimeout(fetchFrame, 2000);
+    };
+
+    tempImg.src = baseUrl + Date.now();
+  }
+
+  fetchFrame();
+}
+
+function stopScreenRefresh(devId) {
+  if (activeTimers[devId]) {
+    clearTimeout(activeTimers[devId]);
+    delete activeTimers[devId];
+  }
+}
+
+function updateDeviceOnlineStatus(dev) {
+  var dot = document.querySelector('#card_' + dev.id + ' .dot');
+  if (dot) dot.className = 'dot ' + (dev.online ? 'dot-green' : 'dot-gray');
+  updateTopInfo();
+}
+
+function startScreensOnly() {
+  // 对所有已加载设备启动截图（不再限制 role !== 'none'）
+  devices.forEach(function(dev) {
+    startScreenRefresh(dev);
+  });
+}
+
+// ==================== 触摸事件（经中继 WS 广播）====================
+var touchDown = false;
+var lastTouchNX = 0, lastTouchNY = 0;
+var lastMoveTime = 0;
+var pendingMove = null;
+var moveFlushTimer = null;
+var MOVE_THROTTLE = 16;
+
+function getNormPos(e, el) {
+  var rect = el.getBoundingClientRect();
+  var cx, cy;
+  if (e.touches && e.touches.length > 0) {
+    cx = e.touches[0].clientX; cy = e.touches[0].clientY;
+  } else if (e.changedTouches && e.changedTouches.length > 0) {
+    cx = e.changedTouches[0].clientX; cy = e.changedTouches[0].clientY;
+  } else {
+    cx = e.clientX; cy = e.clientY;
+  }
+  var nx = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+  var ny = Math.max(0, Math.min(1, (cy - rect.top) / rect.height));
+  return { x: nx, y: ny };
+}
+
+function sendTouchEvent(action, nx, ny) {
+  if (!relayWs || relayWs.readyState !== 1) {
+    // WS 未连接时提示
+    return;
+  }
+  lastTouchNX = nx; lastTouchNY = ny;
+  // rotation=90 变换
+  var rx = 1 - ny;
+  var ry = nx;
+  var now = Date.now();
+  if (action === 'move') {
+    if (now - lastMoveTime < MOVE_THROTTLE) {
+      pendingMove = { x: rx, y: ry };
+      return;
+    }
+    lastMoveTime = now;
+    pendingMove = null;
+  }
+  relayWs.send(JSON.stringify({type: 'touch', action: action, x: +rx.toFixed(4), y: +ry.toFixed(4)}));
+  if (action !== 'move') {
+    log('Touch ' + action + ' (' + nx.toFixed(3) + ',' + ny.toFixed(3) + ') → 广播所有手机', 'touch');
+  }
+}
+
+function flushPendingMove() {
+  if (pendingMove && relayWs && relayWs.readyState === 1) {
+    relayWs.send(JSON.stringify({type: 'touch', action: 'move', x: +pendingMove.x.toFixed(4), y: +pendingMove.y.toFixed(4)}));
+    pendingMove = null;
+  }
+  if (moveFlushTimer) { clearTimeout(moveFlushTimer); moveFlushTimer = null; }
+}
+
+function ensureMoveFlush() {
+  if (pendingMove && !moveFlushTimer) {
+    moveFlushTimer = setTimeout(function() { moveFlushTimer = null; flushPendingMove(); }, MOVE_THROTTLE);
+  }
+}
+
+// 绑定主控卡片的触摸/鼠标事件
+function bindGlobalTouchEvents() {
+  var masterDev = getMasterDevice();
+  if (!masterDev) return;
+
+  var viewEl = document.getElementById('view_' + masterDev.id);
+  var imgEl = document.getElementById('img_' + masterDev.id);
+
+  if (viewEl && imgEl) {
+    // 清理旧监听（每次 re-render 后重新绑定）
+    var newView = viewEl.cloneNode(true);
+    viewEl.parentNode.replaceChild(newView, viewEl);
+
+    viewEl = document.getElementById('view_' + masterDev.id);
+    imgEl = document.getElementById('img_' + masterDev.id);
+
+    // 鼠标
+    viewEl.addEventListener('mousedown', function(e) {
+      e.preventDefault(); touchDown = true;
+      var p = getNormPos(e, viewEl);
+      sendTouchEvent('down', p.x, p.y);
+    });
+    imgEl.addEventListener('mousemove', function(e) {
+      if (!touchDown) return;
+      var p = getNormPos(e, viewEl);
+      sendTouchEvent('move', p.x, p.y);
+      ensureMoveFlush();
+    });
+    document.addEventListener('mouseup', function(e) {
+      if (!touchDown) return;
+      touchDown = false;
+      flushPendingMove();
+      var p = getNormPos(e, viewEl);
+      sendTouchEvent('up', p.x, p.y);
+    });
+
+    // 触摸
+    viewEl.addEventListener('touchstart', function(e) {
+      e.preventDefault(); touchDown = true;
+      var p = getNormPos(e, viewEl);
+      sendTouchEvent('down', p.x, p.y);
+    }, {passive: false});
+    viewEl.addEventListener('touchmove', function(e) {
+      e.preventDefault();
+      var p = getNormPos(e, viewEl);
+      sendTouchEvent('move', p.x, p.y);
+      ensureMoveFlush();
+    }, {passive: false});
+    viewEl.addEventListener('touchend', function(e) {
+      e.preventDefault(); touchDown = false;
+      flushPendingMove();
+      sendTouchEvent('up', lastTouchNX, lastTouchNY);
+    }, {passive: false});
+  }
+}
+
+// ==================== Home 键 ====================
+function sendHomeToDev(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+  // 通过中继 WS 发送（会广播给所有手机）
+  if (relayWs && relayWs.readyState === 1) {
+    relayWs.send(JSON.stringify({type: 'key', action: 'home_down'}));
+    setTimeout(function() {
+      if (relayWs && relayWs.readyState === 1)
+        relayWs.send(JSON.stringify({type: 'key', action: 'home_up'}));
+    }, 50);
+    log('🏠 ' + dev.name + ' Home 键（中继广播）', 'ok');
+  } else {
+    // fallback：直接调手机 HTTP API
+    fetch('http://' + dev.ip + ':8182/api/home', { method: 'POST', signal: AbortSignal.timeout(3000) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        log('🏠 ' + dev.name + ' Home 键: ' + (d.success ? '成功' : d.error), d.success ? 'ok' : 'err');
+      })
+      .catch(function(e) { log('🏠 Home 键失败: ' + e.message, 'err'); });
+  }
+}
+
+function sendHome(devId) { sendHomeToDev(devId); }
+
+function sendDoubleHome(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+  if (relayWs && relayWs.readyState === 1) {
+    relayWs.send(JSON.stringify({type: 'key', action: 'home_down'}));
+    setTimeout(function() { if (relayWs && relayWs.readyState === 1) relayWs.send(JSON.stringify({type: 'key', action: 'home_up'})); }, 50);
+    setTimeout(function() { if (relayWs && relayWs.readyState === 1) relayWs.send(JSON.stringify({type: 'key', action: 'home_down'})); }, 100);
+    setTimeout(function() { if (relayWs && relayWs.readyState === 1) relayWs.send(JSON.stringify({type: 'key', action: 'home_up'})); }, 150);
+    log('🏠² ' + dev.name + ' 双击 Home（中继广播）', 'ok');
+  } else {
+    fetch('http://' + dev.ip + ':8182/api/taskmanager', { method: 'POST', signal: AbortSignal.timeout(3000) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { log('🏠² ' + dev.name + ': ' + (d.success?'成功':d.error), d.success?'ok':'err'); })
+      .catch(function(e) { log('双击 Home 失败: ' + e.message, 'err'); });
+  }
+}
+
+// ==================== 设备角色管理 ====================
+function setRole(id, role) {
+  var dev = devices.find(function(d) { return d.id === id; });
+  if (!dev) return;
+  if (role === 'master') {
+    devices.forEach(function(d) { if (d.id !== id && d.role === 'master') d.role = 'slave'; });
+  }
+  dev.role = role;
+  log('设备 ' + dev.name + ' 角色改为: ' + role, 'info');
+  renderScreens();
+  restartScreensForRoleChange();
+}
+
+function restartScreensForRoleChange() {
+  // 重启所有截图（角色变化后画质参数可能不同）
+  Object.keys(activeTimers).forEach(function(id) { clearTimeout(activeTimers[id]); });
+  activeTimers = {};
+  startScreensOnly();
+}
+
+// ==================== 中继连接管理（单台设备）====================
+function connectDeviceRelay(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+  if (!relayIp) { toast('请先设置中继服务器 IP', 'err'); return; }
+
+  log('连接中继: ' + dev.name + '(' + dev.ip + ') → ' + relayIp, 'info');
+  var roleParam = dev.role === 'master' ? 'master' : 'slave';
+
+  fetch('http://' + dev.ip + ':8182/api/group/relay/start?relayIp=' + encodeURIComponent(relayIp) + '&role=' + roleParam, {
+    method: 'POST',
+    signal: AbortSignal.timeout(8000),
+    headers: {'Content-Type': 'application/json'}
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) throw new Error(data.error);
+      dev.relayConnected = true;
+      log('✓ ' + dev.name + ' 已连接中继 (role=' + roleParam + ')', 'ok');
+      updateRelayBadge(dev);
+      toast(dev.name + ' 已连接中继', 'ok');
+    })
+    .catch(function(e) {
+      log('✗ ' + dev.name + ' 连接中继失败: ' + e.message, 'err');
+      toast(dev.name + ' 连接中继失败: ' + e.message, 'err');
+    });
+}
+
+function disconnectDeviceRelay(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+
+  log('断开中继: ' + dev.name, 'warn');
+  fetch('http://' + dev.ip + ':8182/api/group/relay/stop', {
+    method: 'POST',
+    signal: AbortSignal.timeout(5000),
+    headers: {'Content-Type': 'application/json'}
+  })
+    .then(function(r) { return r.json(); })
+    .then(function() {
+      dev.relayConnected = false;
+      log('✓ ' + dev.name + ' 已断开中继', 'ok');
+      updateRelayBadge(dev);
+      toast(dev.name + ' 已断开中继', 'warn');
+    })
+    .catch(function(e) {
+      log('✗ 断开中继失败: ' + e.message, 'err');
+    });
+}
+
+function updateRelayBadge(dev) {
+  var badge = document.getElementById('relayBadge_' + dev.id);
+  if (!badge) return;
+  badge.className = 'relay-status-badge ' + (dev.relayConnected ? 'relay-online' : 'relay-offline');
+  badge.textContent = dev.relayConnected ? '已中继' : '未中继';
+  updateTopInfo();
+}
+
+// ==================== 批量中继操作 ====================
+function connectAllRelay() {
+  if (!relayIp) { toast('请先设置中继服务器 IP', 'err'); return; }
+  var targetDevices = devices.filter(function(d) { return !d.relayConnected; });
+  if (targetDevices.length === 0) { toast('所有设备都已连接中继', 'info'); return; }
+
+  showBatchBar('正在连接 ' + targetDevices.length + ' 台设备到中继服务器...');
+  var done = 0, fail = 0;
+
+  targetDevices.forEach(function(dev, idx) {
+    var roleParam = dev.role === 'master' ? 'master' : 'slave';
+    setTimeout(function() {
+      fetch('http://' + dev.ip + ':8182/api/group/relay/start?relayIp=' + encodeURIComponent(relayIp) + '&role=' + roleParam, {
+        method: 'POST',
+        signal: AbortSignal.timeout(8000),
+        headers: {'Content-Type': 'application/json'}
+      })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          if (data.error) throw new Error(data.error);
+          dev.relayConnected = true; done++;
+          updateRelayBadge(dev);
+        })
+        .catch(function() { fail++; })
+        .finally(function() {
+          if (done + fail === targetDevices.length) {
+            hideBatchBar('完成! 成功 ' + done + ' 台, 失败 ' + fail + ' 台');
+            renderScreens();
+          }
+        });
+    }, idx * 200); // 错开请求避免并发过大
+  });
+}
+
+function disconnectAllRelay() {
+  var targetDevices = devices.filter(function(d) { return d.relayConnected; });
+  if (targetDevices.length === 0) { toast('没有需要断开的设备', 'info'); return; }
+
+  showBatchBar('正在断开 ' + targetDevices.length + ' 台设备的中继连接...');
+  var done = 0, fail = 0;
+
+  targetDevices.forEach(function(dev, idx) {
+    setTimeout(function() {
+      fetch('http://' + dev.ip + ':8182/api/group/relay/stop', {
+        method: 'POST',
+        signal: AbortSignal.timeout(5000),
+        headers: {'Content-Type': 'application/json'}
+      })
+        .then(function() { dev.relayConnected = false; done++; updateRelayBadge(dev); })
+        .catch(function() { fail++; })
+        .finally(function() {
+          if (done + fail === targetDevices.length) {
+            hideBatchBar('完成! 成功 ' + done + ' 台, 失败 ' + fail + ' 台');
+            renderScreens();
+          }
+        });
+    }, idx * 100);
+  });
+}
+
+function showBatchBar(msg) {
+  var bar = document.getElementById('batchBar');
+  var info = document.getElementById('batchInfo');
+  bar.style.display = 'flex';
+  info.textContent = msg;
+}
+function hideBatchBar(msg) {
+  var bar = document.getElementById('batchBar');
+  var info = document.getElementById('batchInfo');
+  info.textContent = msg;
+  setTimeout(function() { bar.style.display = 'none'; }, 3000);
+}
+
+// ==================== 设备在线检测 ====================
+function pingAll() {
+  log('开始检测所有设备在线状态...', 'info');
+  var count = devices.length;
+  var checked = 0;
+  var onlineNum = 0;
+
+  devices.forEach(function(dev) {
+    // 通过中继检测或直连检测
+    var checkUrl = 'http://' + dev.ip + ':8182/api/status';
+    var t0 = Date.now();
+    fetch(checkUrl, {method: 'GET', signal: AbortSignal.timeout(3000)})
+      .then(function(r) { return r.json(); })
+      .then(function() {
+        dev.online = true; onlineNum++;
+        log(dev.name + ' (' + dev.ip + ') 在线 ✓ ' + (Date.now()-t0) + 'ms', 'ok');
+        updateDeviceOnlineStatus(dev);
+      })
+      .catch(function() {
+        dev.online = false;
+        log(dev.name + ' (' + dev.ip + ') 离线 ✗', 'warn');
+        updateDeviceOnlineStatus(dev);
+      })
+      .finally(function() {
+        checked++;
+        if (checked === count) {
+          toast('检测完毕: ' + onlineNum + '/' + count + ' 台在线', onlineNum === count ? 'ok' : 'warn');
+        }
+      });
+  });
+}
+
+// ==================== 布局切换 ====================
+function toggleLayout() {
+  var grid = document.getElementById('screensGrid');
+  if (layoutMode === 'grid') {
+    layoutMode = 'row';
+    grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(240px, 1fr))';
+  } else {
+    layoutMode = 'grid';
+    grid.style.gridTemplateColumns = '';
+  }
+}
+
+// ==================== 弹出独立窗口 ====================
+function popOutDevice(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+
+  // 已弹出 → 聚焦
+  if (popWindows[devId] && !popWindows[devId].closed) {
+    try { popWindows[devId].focus(); } catch(e) {}
+    return;
+  }
+
+  stopScreenRefresh(devId);
+  var popHtml = generatePopOutHtml(dev);
+  var blob = new Blob([popHtml], {type: 'text/html'});
+  var popUrl = URL.createObjectURL(blob);
+
+  popWindows[devId] = window.open(popUrl, 'TrollVNC_' + dev.ip.replace(/\./g,'_'),
+    'width=720,height=480,resizable=yes,scrollbars=no');
+  URL.revokeObjectURL(popUrl);
+
+  if (!popWindows[devId]) {
+    toast('弹出窗口被浏览器拦截，请允许弹出窗口', 'err');
+    startScreenRefresh(dev);
+    return;
+  }
+
+  var card = document.getElementById('card_' + devId);
+  if (card) card.classList.add('popped-out');
+  var overlay = document.getElementById('popped_' + devId);
+  if (overlay) overlay.style.display = 'flex';
+
+  // 监听弹窗关闭
+  if (popCheckIntervals[devId]) clearInterval(popCheckIntervals[devId]);
+  popCheckIntervals[devId] = setInterval(function() {
+    if (!popWindows[devId] || popWindows[devId].closed) {
+      clearInterval(popCheckIntervals[devId]);
+      delete popCheckIntervals[devId];
+      delete popWindows[devId];
+      bringBackDevice(devId);
+    }
+  }, 500);
+
+  log('📺 ' + dev.name + ' 已弹出独立窗口', 'ok');
+  toast(dev.name + ' 已弹出独立窗口', 'ok');
+}
+
+function bringBackDevice(devId) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+
+  if (popWindows[devId] && !popWindows[devId].closed) {
+    try { popWindows[devId].close(); } catch(e) {}
+  }
+  delete popWindows[devId];
+  if (popCheckIntervals[devId]) { clearInterval(popCheckIntervals[devId]); delete popCheckIntervals[devId]; }
+
+  var card = document.getElementById('card_' + devId);
+  if (card) card.classList.remove('popped-out');
+  var overlay = document.getElementById('popped_' + devId);
+  if (overlay) overlay.style.display = 'none';
+
+  startScreenRefresh(dev);
+  log('📺 ' + dev.name + ' 已返回主界面', 'info');
+}
+
+// 弹窗回调：主控状态变更
+function onPopOutMasterChanged(devId, isMaster) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+  if (isMaster) {
+    devices.forEach(function(d) { if (d.id !== devId && d.role === 'master') d.role = 'slave'; });
+    dev.role = 'master';
+  } else {
+    dev.role = 'slave';
+  }
+  renderScreens();
+  startScreensOnly();
+  log('弹窗 ' + dev.name + ' ' + (isMaster ? '启用' : '关闭') + '主控', isMaster ? 'ok' : 'warn');
+}
+
+// ==================== 生成弹窗 HTML（中继模式版）====================
+function generatePopOutHtml(dev) {
+  var name = escHtml(dev.name);
+  var ip = dev.ip;
+  var devId = dev.id;
+  var isMaster = dev.role === 'master';
+  var h = [];
+  h.push('<!DOCTYPE html>');
+  h.push('<html lang="zh-CN"><head><meta charset="UTF-8">');
+  h.push('<meta name="viewport" content="width=device-width,initial-scale=1.0">');
+  h.push('<title>TrollVNC - ' + name + '</title>');
+  h.push('<style>');
+  h.push('*{margin:0;padding:0;box-sizing:border-box;}');
+  h.push('body{background:#111;overflow:hidden;height:100vh;display:flex;flex-direction:column;font-family:-apple-system,BlinkMacSystemFont,sans-serif;}');
+  h.push('.toolbar{display:flex;align-items:center;gap:8px;padding:6px 14px;background:linear-gradient(135deg,#1a1a2e,#16213e);flex-shrink:0;box-shadow:0 2px 8px rgba(0,0,0,0.3);}');
+  h.push('.toolbar .name{color:#667eea;font-size:14px;font-weight:700;}');
+  h.push('.toolbar .ip{color:#888;font-size:11px;font-family:monospace;}');
+  h.push('.toolbar .spacer{flex:1;}');
+  h.push('.toolbar .stat{color:#888;font-size:11px;font-family:monospace;}');
+  h.push('.toolbar button{padding:4px 12px;border:1px solid #444;border-radius:6px;background:#222;color:#ddd;font-size:12px;cursor:pointer;transition:all 0.15s;}');
+  h.push('.toolbar button:hover{border-color:#667eea;color:#667eea;background:#1a1a2e;}');
+  h.push('.toolbar button:active{transform:scale(0.95);}');
+  h.push('.toolbar button:disabled{opacity:0.4;cursor:not-allowed;}');
+  h.push('.btn-master{border-color:#52c41a!important;color:#52c41a!important;}');
+  h.push('.btn-master:hover,.btn-master.active{background:#52c41a!important;color:white!important;border-color:#52c41a!important;}');
+  h.push('.btn-close{border-color:#ff4d4f!important;color:#ff4d4f!important;}');
+  h.push('.btn-close:hover{background:#ff4d4f!important;color:white!important;}');
+  h.push('.param-bar{display:flex;align-items:center;gap:8px;padding:4px 14px;background:#0d1117;flex-shrink:0;border-top:1px solid #222;flex-wrap:wrap;}');
+  h.push('.param-bar label{color:#888;font-size:10px;font-family:monospace;white-space:nowrap;}');
+  h.push('.param-bar input[type=range]{width:70px;height:3px;accent-color:#667eea;cursor:pointer;}');
+  h.push('.param-bar input[type=number]{width:50px;border:1px solid #333;border-radius:4px;background:#222;color:#ccc;font-size:10px;padding:2px 4px;text-align:center;}');
+  h.push('.param-bar .pv{color:#667eea;font-size:10px;font-family:monospace;min-width:28px;}');
+  h.push('.param-bar .p-sep{color:#333;}');
+  h.push('.param-bar .p-apply{padding:3px 10px;border:1px solid #667eea;border-radius:5px;background:transparent;color:#667eea;font-size:10px;cursor:pointer;white-space:nowrap;}');
+  h.push('.param-bar .p-apply:hover{background:#667eea;color:white;}');
+  h.push('.screen-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden;}');
+  h.push('.screen-view{background:#000;position:relative;cursor:crosshair;contain:content;}');
+  h.push('.screen-view img{width:100%;height:100%;display:block;object-fit:cover;touch-action:none;user-select:none;-webkit-user-select:none;will-change:transform;pointer-events:none;}');
+  h.push('</style></head><body>');
+
+  // 工具栏
+  h.push('<div class="toolbar">');
+  h.push('<span class="name">' + name + '</span>');
+  h.push('<span class="ip">' + ip + '</span>');
+
+  // 中继状态指示
+  h.push('<span id="relayInd" style="font-size:9px;color:#888;">中继模式</span>');
+
+  h.push('<button class="btn-master' + (isMaster ? ' active' : '') + '" id="masterBtn" onclick="toggleMaster()" title="开启/关闭主控 (M)">' + (isMaster ? '关闭主控' : '启用主控') + '</button>');
+  h.push('<span class="spacer"></span>');
+  h.push('<button onclick="sendHome()" title="单击 Home (H)">🏠 Home</button>');
+  h.push('<button onclick="sendDoubleHome()" title="双击 Home (D)">🏠² ×2</button>');
+  h.push('<button onclick="connectMyRelay()" id="relayBtn" title="连接/断开中继">🔗 连中继</button>');
+  h.push('<span class="stat" id="fpsEl">--</span>');
+  h.push('<span class="stat" id="latEl"></span>');
+  h.push('<button class="btn-close" onclick="closeWindow()" title="关闭 (Esc)">✕ 关闭</button>');
+  h.push('</div>');
+
+  // 参数行
+  var pq = screenParams.popout;
+  h.push('<div class="param-bar">');
+  h.push('<label>质量</label><input type="range" id="p_quality" min="0.1" max="1.0" step="0.05" value="' + pq.quality + '" oninput="onParamChange()">');
+  h.push('<span class="pv" id="p_quality_v">' + pq.quality.toFixed(2) + '</span>');
+  h.push('<span class="p-sep">|</span>');
+  h.push('<label>缩放</label><input type="range" id="p_scale" min="0.1" max="1.0" step="0.05" value="' + pq.scale + '" oninput="onParamChange()">');
+  h.push('<span class="pv" id="p_scale_v">' + pq.scale.toFixed(2) + '</span>');
+  h.push('<span class="p-sep">|</span>');
+  h.push('<label>间隔</label><input type="number" id="p_interval" value="' + pq.interval + '" min="30" max="2000" step="10" style="width:50px"><label>ms</label>');
+  h.push('<button class="p-apply" onclick="applyParamChange()">应用</button>');
+  h.push('</div>');
+
+  // 屏幕
+  h.push('<div class="screen-wrap"><div class="screen-view" id="screenView">');
+  h.push('<img id="screenImg" src="" alt=""></div></div>');
+
+  // JS
+  h.push('<scr' + 'ipt>');
+  h.push('var DEVICE_IP="' + ip + '";');
+  h.push('var DEVICE_ID="' + devId + '";');
+  h.push('var RELAY_IP="' + relayIp + '";');
+  h.push('var isMaster=' + (isMaster ? 'true' : 'false') + ';');
+  h.push('var relayConn=false;');
+  h.push('var ws=null,frameCount=0,lastFpsTime=Date.now();');
+  h.push('var touchDown=false,lastNX=0,lastNY=0,lastMoveTime=0,pendingMove=null,moveFlushTimer=null,MOVE_THROTTLE=16;');
+  h.push('var fetching=false,lastFetchTime=0,MIN_INTERVAL=' + pq.interval + ';');
+  h.push('var currentBlobUrl=null;');
+  h.push('var screenImg=document.getElementById("screenImg");');
+  h.push('var screenView=document.getElementById("screenView");');
+  h.push('var masterBtn=document.getElementById("masterBtn");');
+  h.push('var relayBtn=document.getElementById("relayBtn");');
+  h.push('var curQuality=' + pq.quality + ',curScale=' + pq.scale + ';');
+
+  // 截图 URL — 走中继
+  h.push('function getScreenshotUrl(){');
+  h.push('  return "http://"+RELAY_IP+":9527/api/screenshot?ip="+encodeURIComponent(DEVICE_IP)+"&format=jpeg&quality="+curQuality+"&scale="+curScale+"&rotation=90&_t="+Date.now();');
+  h.push('}');
+
+  // 参数变更
+  h.push('function onParamChange(){');
+  h.push('  document.getElementById("p_quality_v").textContent=parseFloat(document.getElementById("p_quality").value).toFixed(2);');
+  h.push('  document.getElementById("p_scale_v").textContent=parseFloat(document.getElementById("p_scale").value).toFixed(2);');
+  h.push('}');
+  h.push('function applyParamChange(){');
+  h.push('  curQuality=parseFloat(document.getElementById("p_quality").value);');
+  h.push('  curScale=parseFloat(document.getElementById("p_scale").value);');
+  h.push('  MIN_INTERVAL=parseInt(document.getElementById("p_interval").value,10)||80;');
+  h.push('  fetching=false;fetchFrame();');
+  h.push('}');
+
+  // 自适应 16:9
+  h.push('function resizeScreen(){');
+  h.push('  var tb=document.querySelector(".toolbar"),pb=document.querySelector(".param-bar");');
+  h.push('  var tH=(tb?tb.offsetHeight:0)+(pb?pb.offsetHeight:0);');
+  h.push('  var aW=window.innerWidth-16,aH=window.innerHeight-tH-16,sW,sH;');
+  h.push('  if(aW/aH>16/9){sH=aH;sW=Math.floor(aH*16/9);}else{sW=aW;sH=Math.floor(aW*9/16);}');
+  h.push('  screenView.style.width=sW+"px";screenView.style.height=sH+"px";');
+  h.push('}');
+  h.push('window.addEventListener("resize",resizeScreen);resizeScreen();');
+
+  // 截图流水线
+  h.push('function fetchFrame(){');
+  h.push('  if(fetching)return;');
+  h.push('  var now=Date.now();if(now-lastFetchTime<MIN_INTERVAL){setTimeout(fetchFrame,MIN_INTERVAL-(now-lastFetchTime));return;}');
+  h.push('  fetching=true;lastFetchTime=now;var t0=now;');
+  h.push('  fetch(getScreenshotUrl())');
+  h.push('    .then(function(r){if(!r.ok)throw new Error("HTTP "+r.status);return r.blob();})');
+  h.push('    .then(function(blob){');
+  h.push('      if(currentBlobUrl)URL.revokeObjectURL(currentBlobUrl);currentBlobUrl=URL.createObjectURL(blob);');
+  h.push('      screenImg.src=currentBlobUrl;');
+  h.push('      var lat=Date.now()-t0;var le=document.getElementById("latEl");if(le)le.textContent=lat+"ms";');
+  h.push('      frameCount++;var fn=Date.now();if(fn-lastFpsTime>=1000){var fe=document.getElementById("fpsEl");if(fe)fe.textContent=frameCount+" fps";frameCount=0;lastFpsTime=fn;}');
+  h.push('      fetching=false;setTimeout(fetchFrame,Math.max(0,MIN_INTERVAL-(Date.now()-lastFetchTime)));');
+  h.push('    })');
+  h.push('    .catch(function(e){fetching=false;setTimeout(fetchFrame,2000);});');
+  h.push('}');
+
+  // WS 连接中继
+  h.push('function connectRelayWS(){');
+  h.push('  if(!RELAY_IP)return;');
+  h.push('  var url="ws://"+RELAY_IP+":8183?role=browser";');
+  h.push('  try{ws=new WebSocket(url);}catch(e){return;}');
+  h.push('  ws.onopen=function(){console.log("[PopOut] WS connected to relay "+RELAY_IP);};');
+  h.push('  ws.onmessage=function(){};');
+  h.push('  ws.onerror=function(){console.log("[PopOut] WS error");};');
+  h.push('  ws.onclose=function(){setTimeout(connectRelayWS,3000);};');
+  h.push('}');
+
+  // 手机端中继连接
+  h.push('function connectMyRelay(){');
+  h.push('  if(relayConn){disconnectMyRelay();return;}');
+  h.push('  var roleParam=isMaster?"master":"slave";');
+  h.push('  relayBtn.textContent="连接中...";relayBtn.disabled=true;');
+  h.push('  fetch("http://"+DEVICE_IP+":8182/api/group/relay/start?relayIp="+encodeURIComponent(RELAY_IP)+"&role="+roleParam,{method:"POST",signal:AbortSignal.timeout(8000),headers:{"Content-Type":"application/json"}})');
+  h.push('    .then(function(r){return r.json();})');
+  h.push('    .then(function(d){if(d.error)throw new Error(d.error);relayConn=true;relayBtn.textContent="断中继";relayBtn.className="btn-close";relayBtn.disabled=false;})');
+  h.push('    .catch(function(e){alert("连接中继失败:"+e.message);relayBtn.textContent="连中继";relayBtn.disabled=false;});');
+  h.push('}');
+  h.push('function disconnectMyRelay(){');
+  h.push('  fetch("http://"+DEVICE_IP+":8182/api/group/relay/stop",{method:"POST",signal:AbortSignal.timeout(5000)})');
+  h.push('    .then(function(){relayConn=false;relayBtn.textContent="连中继";relayBtn.className="";})');
+  h.push('    .catch(function(){});');
+  h.push('}');
+
+  // 主控开关
+  h.push('function toggleMaster(){if(isMaster){stopMaster();}else{startMaster();}}');
+  h.push('function startMaster(){');
+  h.push('  masterBtn.textContent="启动中...";masterBtn.disabled=true;');
+  h.push('  fetch("http://"+DEVICE_IP+":8182/api/group/start?master=1&port=8183",{method:"POST",signal:AbortSignal.timeout(5000)})');
+  h.push('    .then(function(r){return r.json();})');
+  h.push('    .then(function(d){');
+  h.push('      isMaster=true;');
+  h.push('      masterBtn.textContent="关闭主控";masterBtn.className="btn-master active";masterBtn.disabled=false;');
+  h.push('      connectRelayWS();');
+  h.push('      try{if(window.opener&&!window.opener.closed)window.opener.onPopOutMasterChanged(DEVICE_ID,true);}catch(e){}');
+  h.push('    })');
+  h.push('    .catch(function(e){masterBtn.textContent="启用主控";masterBtn.disabled=false;alert("启动失败:"+e.message);});');
+  h.push('}');
+  h.push('function stopMaster(){');
+  h.push('  masterBtn.textContent="关闭中...";masterBtn.disabled=true;');
+  h.push('  if(ws){try{ws.close();}catch(e){}ws=null;}');
+  h.push('  fetch("http://"+DEVICE_IP+":8182/api/group/stop",{method:"POST",signal:AbortSignal.timeout(3000)})');
+  h.push('    .then(function(){');
+  h.push('      isMaster=false;');
+  h.push('      masterBtn.textContent="启用主控";masterBtn.className="btn-master";masterBtn.disabled=false;');
+  h.push('      try{if(window.opener&&!window.opener.closed)window.opener.onPopOutMasterChanged(DEVICE_ID,false);}catch(e){}');
+  h.push('    })');
+  h.push('    .catch(function(){isMaster=false;masterBtn.textContent="启用主控";masterBtn.className="btn-master";masterBtn.disabled=false;});');
+  h.push('}');
+
+  // 关闭窗口
+  h.push('function closeWindow(){window.close();}');
+
+  // beforeunload
+  h.push('window.addEventListener("beforeunload",function(){');
+  h.push('  if(isMaster){navigator.sendBeacon("http://"+DEVICE_IP+":8182/api/group/stop");');
+  h.push('    try{if(window.opener&&!window.opener.closed)window.opener.onPopOutMasterChanged(DEVICE_ID,false);}catch(e){}}');
+  h.push('});');
+
+  // 触摸坐标归一化
+  h.push('function getNormPos(e){');
+  h.push('  var rect=screenView.getBoundingClientRect();var cx,cy;');
+  h.push('  if(e.touches&&e.touches.length>0){cx=e.touches[0].clientX;cy=e.touches[0].clientY;}');
+  h.push('  else if(e.changedTouches&&e.changedTouches.length>0){cx=e.changedTouches[0].clientX;cy=e.changedTouches[0].clientY;}');
+  h.push('  else{cx=e.clientX;cy=e.clientY;}');
+  h.push('  var nx=Math.max(0,Math.min(1,(cx-rect.left)/rect.width));');
+  h.push('  var ny=Math.max(0,Math.min(1,(cy-rect.top)/rect.height));');
+  h.push('  return{x:nx,y:ny};');
+  h.push('}');
+
+  // 触摸事件发送（优先走中继 WS）
+  h.push('function sendTouch(action,nx,ny){');
+  h.push('  lastNX=nx;lastNY=ny;var rx=1-ny,ry=nx;var now=Date.now();');
+  h.push('  if(action==="move"){if(now-lastMoveTime<MOVE_THROTTLE){pendingMove={x:rx,y:ry};return;}lastMoveTime=now;pendingMove=null;}');
+  h.push('  if(ws&&ws.readyState===1){');
+  h.push('    ws.send(JSON.stringify({type:"touch",action:action,x:+rx.toFixed(4),y:+ry.toFixed(4)}));');
+  h.push('  }else{');
+  h.push('    fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"touch",action:action,x:+rx.toFixed(4),y:+ry.toFixed(4)}),signal:AbortSignal.timeout(2000)}).catch(function(){});');
+  h.push('  }');
+  h.push('}');
+  h.push('function flushMove(){');
+  h.push('  if(pendingMove){if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)}));}else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)}),signal:AbortSignal.timeout(2000)}).catch(function(){});}pendingMove=null;}');
+  h.push('  if(moveFlushTimer){clearTimeout(moveFlushTimer);moveFlushTimer=null;}');
+  h.push('}');
+  h.push('function ensureFlush(){if(pendingMove&&!moveFlushTimer){moveFlushTimer=setTimeout(function(){moveFlushTimer=null;flushMove();},MOVE_THROTTLE);}}');
+
+  // 鼠标事件
+  h.push('screenView.addEventListener("mousedown",function(e){e.preventDefault();touchDown=true;var p=getNormPos(e);sendTouch("down",p.x,p.y);});');
+  h.push('document.addEventListener("mousemove",function(e){if(!touchDown)return;var p=getNormPos(e);sendTouch("move",p.x,p.y);ensureFlush();});');
+  h.push('document.addEventListener("mouseup",function(e){if(!touchDown)return;touchDown=false;flushMove();var p=getNormPos(e);sendTouch("up",p.x,p.y);});');
+
+  // 触摸事件
+  h.push('screenView.addEventListener("touchstart",function(e){e.preventDefault();touchDown=true;var p=getNormPos(e);sendTouch("down",p.x,p.y);},{passive:false});');
+  h.push('screenView.addEventListener("touchmove",function(e){e.preventDefault();var p=getNormPos(e);sendTouch("move",p.x,p.y);ensureFlush();},{passive:false});');
+  h.push('screenView.addEventListener("touchend",function(e){e.preventDefault();touchDown=false;flushMove();sendTouch("up",lastNX,lastNY);},{passive:false});');
+
+  // Home 键
+  h.push('function sendHome(){');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key","action":"home_up"}));},50);}');
+  h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);}');
+  h.push('}');
+  h.push('function sendDoubleHome(){');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);},100);}');
+  h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},100);},150);}');
+  h.push('}');
+
+  // 键盘快捷键
+  h.push('document.addEventListener("keydown",function(e){');
+  h.push('  if(e.key==="Escape")closeWindow();');
+  h.push('  if(e.key==="h"||e.key==="H")sendHome();');
+  h.push('  if(e.key==="d"||e.key==="D")sendDoubleHome();');
+  h.push('  if(e.key==="m"||e.key==="M")toggleMaster();');
+  h.push('});');
+
+  // 启动
+  h.push('fetchFrame();');
+  h.push('if(RELAY_IP&&isMaster)connectRelayWS();');
+  h.push('</scr' + 'ipt></body></html>');
+  return h.join('\n');
+}
+
+// ==================== 画质面板 ====================
+function toggleQualityPanel() {
+  var panel = document.getElementById('qualityPanel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) syncQualityPanelUI();
+}
+
+function syncQualityPanelUI() {
+  document.getElementById('mq_quality').value = screenParams.master.quality;
+  document.getElementById('mq_quality_val').textContent = screenParams.master.quality.toFixed(2);
+  document.getElementById('mq_scale').value = screenParams.master.scale;
+  document.getElementById('mq_scale_val').textContent = screenParams.master.scale.toFixed(2);
+  document.getElementById('mq_interval').value = screenParams.master.interval;
+  document.getElementById('sq_quality').value = screenParams.slave.quality;
+  document.getElementById('sq_quality_val').textContent = screenParams.slave.quality.toFixed(2);
+  document.getElementById('sq_scale').value = screenParams.slave.scale;
+  document.getElementById('sq_scale_val').textContent = screenParams.slave.scale.toFixed(2);
+  document.getElementById('sq_interval').value = screenParams.slave.interval;
+  document.getElementById('pq_quality').value = screenParams.popout.quality;
+  document.getElementById('pq_quality_val').textContent = screenParams.popout.quality.toFixed(2);
+  document.getElementById('pq_scale').value = screenParams.popout.scale;
+  document.getElementById('pq_scale_val').textContent = screenParams.popout.scale.toFixed(2);
+  document.getElementById('pq_interval').value = screenParams.popout.interval;
+}
+
+function applyQualityPreset(name) {
+  var p = qualityPresets[name]; if (!p) return;
+  screenParams.master = Object.assign({}, p.master);
+  screenParams.slave = Object.assign({}, p.slave);
+  screenParams.popout = Object.assign({}, p.popout);
+  syncQualityPanelUI();
+  var names = { lan:'局域网', wifi:'普通WiFi', weak:'弱网节流', perf:'高质流畅' };
+  toast('预设: ' + (names[name] || name), 'ok');
+}
+
+function applyQualitySettings() {
+  screenParams.master.quality = parseFloat(document.getElementById('mq_quality').value);
+  screenParams.master.scale = parseFloat(document.getElementById('mq_scale').value);
+  screenParams.master.interval = parseInt(document.getElementById('mq_interval').value, 10) || 500;
+  screenParams.slave.quality = parseFloat(document.getElementById('sq_quality').value);
+  screenParams.slave.scale = parseFloat(document.getElementById('sq_scale').value);
+  screenParams.slave.interval = parseInt(document.getElementById('sq_interval').value, 10) || 2000;
+  screenParams.popout.quality = parseFloat(document.getElementById('pq_quality').value);
+  screenParams.popout.scale = parseFloat(document.getElementById('pq_scale').value);
+  screenParams.popout.interval = parseInt(document.getElementById('pq_interval').value, 10) || 80;
+
+  document.getElementById('qualityPanel').classList.remove('open');
+  startScreensOnly();
+  log('画质参数已更新并重启投屏', 'ok');
+  toast('画质参数已应用', 'ok');
+}
+
+// 点击面板外关闭
+document.addEventListener('click', function(e) {
+  var panel = document.getElementById('qualityPanel');
+  var btn = document.getElementById('qualityPanelBtn');
+  if (panel && panel.classList.contains('open')) {
+    if (!panel.contains(e.target) && e.target !== btn && !btn.contains(e.target))
+      panel.classList.remove('open');
+  }
+});
+
+</script>
+</body>
+</html>

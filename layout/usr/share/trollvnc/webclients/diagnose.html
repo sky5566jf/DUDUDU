@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrollVNC noVNC Diagnostics</title>
+<style>
+body { font-family: -apple-system, monospace; padding: 20px; max-width: 800px; margin: 0 auto; background: #1a1a1a; color: #e0e0e0; }
+h1 { color: #4CAF50; }
+h2 { color: #2196F3; margin-top: 30px; }
+.test { padding: 10px; margin: 5px 0; border-radius: 5px; }
+.pass { background: #1b5e20; color: #a5d6a7; }
+.fail { background: #b71c1c; color: #ef9a9a; }
+.info { background: #0d47a1; color: #90caf9; }
+.warn { background: #e65100; color: #ffcc80; }
+pre { background: #000; padding: 10px; border-radius: 5px; overflow-x: auto; color: #0f0; font-size: 12px; }
+button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; background: #2196F3; color: white; border: none; border-radius: 5px; }
+button:hover { background: #1976D2; }
+</style>
+</head>
+<body>
+<h1>TrollVNC noVNC 诊断工具</h1>
+<p>当前页面: <span id="page-url"></span></p>
+<p>安全上下文 (isSecureContext): <span id="secure-ctx"></span></p>
+
+<h2>1. 页面加载信息</h2>
+<div id="step1"></div>
+
+<h2>2. 测试 WebSocket 连接到 VNC 端口</h2>
+<div id="step2-info"></div>
+<button onclick="testWebSocket(5901)">测试 ws://设备IP:5901/websockify</button>
+<button onclick="testWebSocket(5801)">测试 ws://设备IP:5801/websockify</button>
+<div id="step2"></div>
+
+<h2>3. 测试 noVNC 模块加载</h2>
+<button onclick="testNoVNCModules()">测试加载 noVNC 模块</button>
+<div id="step3"></div>
+
+<h2>4. 测试 fetch index.vnc</h2>
+<button onclick="testFetchIndex()">fetch /index.vnc</button>
+<button onclick="testFetchVncHtml()">fetch /novnc/vnc.html</button>
+<button onclick="testFetchUiJs()">fetch /novnc/app/ui.js</button>
+<div id="step4"></div>
+
+<h2>5. 完整日志</h2>
+<pre id="log"></pre>
+
+<script>
+var host = document.location.hostname;
+var httpPort = document.location.port || '5801';
+document.getElementById('page-url').textContent = document.location.href;
+document.getElementById('secure-ctx').textContent = window.isSecureContext ? 'YES (HTTPS)' : 'NO (HTTP) - noVNC will show warning';
+document.getElementById('step2-info').innerHTML = '<p>主机: ' + host + ', HTTP端口: ' + httpPort + '</p>';
+
+function log(msg) {
+    var el = document.getElementById('log');
+    var time = new Date().toISOString().split('T')[1].split('.')[0];
+    el.textContent += '[' + time + '] ' + msg + '\n';
+}
+
+function setResult(id, cls, msg) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var div = document.createElement('div');
+    div.className = 'test ' + cls;
+    div.textContent = msg;
+    el.appendChild(div);
+    log(msg);
+}
+
+// Step 1: Page load info
+log('=== 诊断开始 ===');
+log('URL: ' + document.location.href);
+log('Protocol: ' + document.location.protocol);
+log('Host: ' + host);
+log('Port: ' + httpPort);
+log('isSecureContext: ' + window.isSecureContext);
+log('UserAgent: ' + navigator.userAgent);
+
+if (window.isSecureContext) {
+    setResult('step1', 'pass', '页面在安全上下文中加载 (HTTPS) - noVNC 应该可以正常工作');
+} else {
+    setResult('step1', 'warn', '页面在非安全上下文中加载 (HTTP) - noVNC 会显示警告 "Running without HTTPS is not recommended"');
+}
+
+// Check crypto.subtle availability
+if (window.crypto && window.crypto.subtle) {
+    setResult('step1', 'pass', 'crypto.subtle 可用 (加密认证可用)');
+} else {
+    setResult('step1', 'fail', 'crypto.subtle 不可用！非安全上下文下 crypto.subtle 为 undefined。如果 VNC 服务器需要认证，noVNC 会崩溃。');
+}
+
+// Check crypto.getRandomValues
+if (window.crypto && window.crypto.getRandomValues) {
+    setResult('step1', 'pass', 'crypto.getRandomValues 可用');
+} else {
+    setResult('step1', 'fail', 'crypto.getRandomValues 不可用！');
+}
+
+// Step 2: WebSocket test
+function testWebSocket(port) {
+    var wsUrl = 'ws://' + host + ':' + port + '/websockify';
+    setResult('step2', 'info', '正在测试 WebSocket: ' + wsUrl);
+    log('测试 WebSocket: ' + wsUrl);
+
+    try {
+        var ws = new WebSocket(wsUrl);
+
+        ws.onopen = function() {
+            setResult('step2', 'pass', 'WebSocket 连接成功! (' + wsUrl + ') - 端口 ' + port + ' 支持 WebSocket');
+            log('WebSocket 连接成功: ' + wsUrl);
+            // Send a fake RFB handshake to see if server responds
+            ws.send('RFB 003.008\n');
+            setTimeout(function() { ws.close(); }, 2000);
+        };
+
+        ws.onerror = function(e) {
+            setResult('step2', 'fail', 'WebSocket 连接失败! (' + wsUrl + ') - 端口 ' + port + ' 不支持或被拒绝');
+            log('WebSocket 错误: ' + wsUrl + ' - ' + JSON.stringify(e));
+        };
+
+        ws.onclose = function(e) {
+            log('WebSocket 关闭: code=' + e.code + ', reason=' + e.reason);
+            setResult('step2', 'info', 'WebSocket 已关闭 (code=' + e.code + ')');
+        };
+
+        ws.onmessage = function(e) {
+            log('WebSocket 收到消息: ' + (typeof e.data === 'string' ? e.data.substring(0, 50) : 'binary data'));
+        };
+
+        setTimeout(function() {
+            if (ws.readyState === WebSocket.CONNECTING) {
+                setResult('step2', 'fail', 'WebSocket 连接超时 (5秒) - 端口 ' + port + ' 可能不可达');
+                log('WebSocket 超时: ' + wsUrl);
+                ws.close();
+            }
+        }, 5000);
+
+    } catch(e) {
+        setResult('step2', 'fail', 'WebSocket 创建异常: ' + e.message);
+        log('WebSocket 异常: ' + e.message);
+    }
+}
+
+// Step 3: Test noVNC module loading
+function testNoVNCModules() {
+    setResult('step3', 'info', '正在测试加载 noVNC RFB 模块...');
+    log('测试 noVNC 模块加载...');
+
+    try {
+        import('./novnc/core/rfb.js')
+            .then(function(module) {
+                if (module.RFB || module.default) {
+                    setResult('step3', 'pass', 'noVNC RFB 模块加载成功! RFB=' + (module.RFB || module.default));
+                    log('noVNC 模块加载成功');
+                } else {
+                    setResult('step3', 'fail', 'noVNC 模块加载成功但导出异常: ' + JSON.stringify(Object.keys(module)));
+                    log('noVNC 模块导出异常');
+                }
+            })
+            .catch(function(e) {
+                setResult('step3', 'fail', 'noVNC 模块加载失败: ' + e.message);
+                log('noVNC 模块加载失败: ' + e.message + ' (stack: ' + e.stack + ')');
+            });
+    } catch(e) {
+        setResult('step3', 'fail', 'import() 异常: ' + e.message);
+        log('import 异常: ' + e.message);
+    }
+}
+
+// Step 4: Fetch tests
+function testFetchIndex() {
+    setResult('step4', 'info', 'fetch /index.vnc ...');
+    log('fetch /index.vnc');
+    fetch('/index.vnc')
+        .then(function(r) { return r.text(); })
+        .then(function(text) {
+            setResult('step4', 'pass', 'index.vnc 获取成功 (' + text.length + ' bytes), $PORT replaced: ' + (text.indexOf('$PORT') === -1 ? 'YES' : 'NO ($PORT still present)'));
+            log('index.vnc 内容前200字符: ' + text.substring(0, 200));
+        })
+        .catch(function(e) {
+            setResult('step4', 'fail', 'index.vnc 获取失败: ' + e.message);
+            log('fetch /index.vnc 失败: ' + e.message);
+        });
+}
+
+function testFetchVncHtml() {
+    setResult('step4', 'info', 'fetch /novnc/vnc.html ...');
+    log('fetch /novnc/vnc.html');
+    fetch('/novnc/vnc.html')
+        .then(function(r) { return r.text(); })
+        .then(function(text) {
+            setResult('step4', 'pass', 'vnc.html 获取成功 (' + text.length + ' bytes)');
+            log('vnc.html 获取成功');
+        })
+        .catch(function(e) {
+            setResult('step4', 'fail', 'vnc.html 获取失败: ' + e.message);
+            log('fetch /novnc/vnc.html 失败: ' + e.message);
+        });
+}
+
+function testFetchUiJs() {
+    setResult('step4', 'info', 'fetch /novnc/app/ui.js ...');
+    log('fetch /novnc/app/ui.js');
+    fetch('/novnc/app/ui.js')
+        .then(function(r) {
+            log('ui.js response Content-Type: ' + r.headers.get('Content-Type'));
+            return r.text();
+        })
+        .then(function(text) {
+            setResult('step4', 'pass', 'ui.js 获取成功 (' + text.length + ' bytes), Content-Type check in log');
+            log('ui.js 获取成功');
+        })
+        .catch(function(e) {
+            setResult('step4', 'fail', 'ui.js 获取失败: ' + e.message);
+            log('fetch /novnc/app/ui.js 失败: ' + e.message);
+        });
+}
+
+log('=== 诊断页面加载完成，请点击上方按钮进行测试 ===');
+</script>
+</body>
+</html>

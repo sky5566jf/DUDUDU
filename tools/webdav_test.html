@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WebDAV 测试工具</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;padding:20px}
+.container{max-width:1200px;margin:0 auto}
+h1{text-align:center;margin-bottom:20px;color:#00d4ff;font-size:24px}
+.input-section{background:#16213e;border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:0 4px 15px rgba(0,0,0,0.3)}
+.input-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.input-row label{min-width:80px;color:#a0a0b0;font-size:14px}
+.input-row input{flex:1;min-width:200px;padding:10px 14px;background:#0f3460;border:1px solid #1a4a7a;border-radius:8px;color:#fff;font-size:14px;outline:none}
+.input-row input:focus{border-color:#00d4ff;box-shadow:0 0 0 2px rgba(0,212,255,0.2)}
+.input-row input::placeholder{color:#4a6a8a}
+button{padding:10px 20px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all 0.2s;white-space:nowrap}
+.btn-primary{background:linear-gradient(135deg,#00d4ff,#0099cc);color:#fff}
+.btn-primary:hover{background:linear-gradient(135deg,#00e5ff,#00aadd);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,212,255,0.3)}
+.btn-secondary{background:#2a2a4a;color:#e0e0e0;border:1px solid #3a3a5a}
+.btn-secondary:hover{background:#3a3a5a}
+.btn-danger{background:linear-gradient(135deg,#ff4757,#cc3344);color:#fff}
+.btn-danger:hover{background:linear-gradient(135deg,#ff5566,#dd4455);transform:translateY(-1px)}
+.btn-success{background:linear-gradient(135deg,#2ed573,#20bf6b);color:#fff}
+.btn-success:hover{background:linear-gradient(135deg,#3ee583,#30cf7b);transform:translateY(-1px)}
+.btn-warning{background:linear-gradient(135deg,#ffa502,#e67e22);color:#fff}
+.btn-warning:hover{background:linear-gradient(135deg,#ffb512,#f08e32);transform:translateY(-1px)}
+.btn-sm{padding:6px 12px;font-size:12px}
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:15px}
+.toolbar button{padding:8px 16px;font-size:13px}
+.status-bar{background:#0f3460;border-radius:8px;padding:12px 16px;margin-bottom:15px;display:flex;align-items:center;gap:10px;font-size:13px}
+.status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.status-dot.online{background:#2ed573;box-shadow:0 0 8px rgba(46,213,115,0.6)}
+.status-dot.offline{background:#ff4757;box-shadow:0 0 8px rgba(255,71,87,0.6)}
+.status-dot.testing{background:#ffa502;box-shadow:0 0 8px rgba(255,165,2,0.6);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+.breadcrumb{background:#16213e;border-radius:8px;padding:10px 16px;margin-bottom:10px;font-size:13px;color:#a0a0b0;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.breadcrumb a{color:#00d4ff;cursor:pointer;text-decoration:none;padding:2px 6px;border-radius:4px}
+.breadcrumb a:hover{background:#0f3460}
+.breadcrumb span.separator{color:#4a6a8a;margin:0 2px}
+.breadcrumb span.current{color:#fff;font-weight:600}
+.file-list{background:#16213e;border-radius:12px;overflow:hidden;box-shadow:0 4px 15px rgba(0,0,0,0.3)}
+.file-item{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #0f3460;cursor:pointer;transition:background 0.15s;gap:10px}
+.file-item:hover{background:#0f3460}
+.file-item:last-child{border-bottom:none}
+.file-icon{font-size:20px;flex-shrink:0;width:28px;text-align:center}
+.file-icon.dir{color:#ffd700}
+.file-icon.file{color:#00d4ff}
+.file-icon.image{color:#2ed573}
+.file-icon.archive{color:#ff6b6b}
+.file-name{flex:1;font-size:14px;word-break:break-all}
+.file-size{color:#6a8aaa;font-size:12px;min-width:80px;text-align:right;flex-shrink:0}
+.file-date{color:#4a6a8a;font-size:11px;min-width:120px;text-align:right;flex-shrink:0}
+.file-actions{display:flex;gap:4px;flex-shrink:0}
+.empty-state{text-align:center;padding:40px;color:#4a6a8a;font-size:14px}
+.log-section{background:#0d1117;border-radius:12px;padding:16px;margin-top:20px;max-height:400px;overflow-y:auto;font-family:"Cascadia Code","Fira Code",monospace;font-size:12px;line-height:1.6}
+.log-entry{padding:4px 8px;border-bottom:1px solid #161b22;display:flex;gap:8px;align-items:flex-start}
+.log-time{color:#4a6a8a;flex-shrink:0}
+.log-method{font-weight:bold;min-width:70px;flex-shrink:0}
+.log-method.GET{color:#2ed573}
+.log-method.POST{color:#00d4ff}
+.log-method.PROPFIND{color:#ffa502}
+.log-method.PUT{color:#a55eea}
+.log-method.DELETE{color:#ff4757}
+.log-method.MKCOL{color:#fd79a8}
+.log-method.MOVE{color:#6c5ce7}
+.log-method.OPTIONS{color:#636e72}
+.log-status{font-weight:bold;min-width:35px;flex-shrink:0}
+.log-status.s2{color:#2ed573}
+.log-status.s3{color:#00d4ff}
+.log-status.s4{color:#ffa502}
+.log-status.s5{color:#ff4757}
+.log-detail{color:#a0a0b0;word-break:break-all;flex:1}
+.log-entry.error .log-detail{color:#ff4757}
+.upload-section{background:#16213e;border-radius:8px;padding:15px;margin-bottom:15px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.upload-section input[type=file]{display:none}
+.drop-zone{flex:1;border:2px dashed #1a4a7a;border-radius:8px;padding:15px;text-align:center;color:#4a6a8a;font-size:13px;cursor:pointer;transition:all 0.2s;min-width:200px}
+.drop-zone:hover,.drop-zone.dragover{border-color:#00d4ff;color:#00d4ff;background:rgba(0,212,255,0.05)}
+.test-results{background:#16213e;border-radius:12px;padding:20px;margin-bottom:15px}
+.test-result-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #0f3460;font-size:13px}
+.test-result-item:last-child{border-bottom:none}
+.test-icon{font-size:16px;width:20px;text-align:center;flex-shrink:0}
+.test-label{flex:1;color:#a0a0b0}
+.test-value{font-weight:600;flex-shrink:0}
+.test-value.pass{color:#2ed573}
+.test-value.fail{color:#ff4757}
+.test-value.pending{color:#ffa502}
+.loading-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:none;justify-content:center;align-items:center;z-index:9999}
+.loading-overlay.show{display:flex}
+.loading-spinner{width:50px;height:50px;border:4px solid #16213e;border-top-color:#00d4ff;border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.image-preview{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);display:none;justify-content:center;align-items:center;z-index:9998;padding:20px}
+.image-preview.show{display:flex}
+.image-preview img{max-width:90%;max-height:90%;border-radius:8px}
+.image-preview .close-btn{position:absolute;top:20px;right:20px;font-size:30px;color:#fff;cursor:pointer;background:rgba(0,0,0,0.5);width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>WebDAV 测试工具</h1>
+
+<div class="input-section">
+<div class="input-row">
+<label>设备 IP</label>
+<input type="text" id="deviceIp" placeholder="例如: 192.168.1.100" value="">
+<label>端口</label>
+<input type="number" id="devicePort" placeholder="端口" value="8080" style="max-width:100px">
+<button class="btn-primary" onclick="testConnection()">测试连接</button>
+<button class="btn-secondary" onclick="saveConfig()">保存配置</button>
+</div>
+</div>
+
+<div id="testResults" class="test-results" style="display:none">
+<h3 style="margin-bottom:12px;color:#00d4ff">诊断结果</h3>
+<div id="testResultList"></div>
+</div>
+
+<div id="webdavSection" style="display:none">
+
+<div class="status-bar">
+<div class="status-dot online" id="statusDot"></div>
+<span id="statusText">已连接</span>
+<span style="margin-left:auto;color:#4a6a8a" id="serverInfo"></span>
+</div>
+
+<div class="toolbar">
+<button class="btn-secondary btn-sm" onclick="navigateTo('/')">根目录</button>
+<button class="btn-secondary btn-sm" onclick="navigateTo('/var/mobile/')">/var/mobile/</button>
+<button class="btn-secondary btn-sm" onclick="navigateTo('/var/mobile/Media/')">/var/mobile/Media/</button>
+<button class="btn-secondary btn-sm" onclick="navigateTo('/var/mobile/Library/')">/var/mobile/Library/</button>
+<button class="btn-secondary btn-sm" onclick="refreshDir()">刷新</button>
+<button class="btn-warning btn-sm" onclick="document.getElementById('uploadInput').click()">上传文件</button>
+<button class="btn-sm" style="background:#3a3a5a;color:#e0e0e0" onclick="mkdirPrompt()">新建目录</button>
+</div>
+
+<div class="upload-section">
+<input type="file" id="uploadInput" multiple onchange="uploadFiles(this.files)">
+<div class="drop-zone" id="dropZone" onclick="document.getElementById('uploadInput').click()">
+点击或拖拽文件到此处上传
+</div>
+</div>
+
+<div class="breadcrumb" id="breadcrumb">
+<span>路径: </span><span class="current">/</span>
+</div>
+
+<div class="file-list" id="fileList">
+<div class="empty-state">正在加载...</div>
+</div>
+
+</div>
+
+<div class="log-section" id="logSection">
+<div style="color:#4a6a8a;margin-bottom:8px;font-size:13px">请求日志：</div>
+<div id="logList"></div>
+</div>
+
+</div>
+
+<div class="loading-overlay" id="loadingOverlay">
+<div class="loading-spinner"></div>
+</div>
+
+<div class="image-preview" id="imagePreview" onclick="closePreview()">
+<div class="close-btn">x</div>
+<img id="previewImg" src="">
+</div>
+
+<script>
+let baseUrl = '';
+let currentPath = '/';
+
+// ============ 配置管理 ============
+function getConfig() {
+const saved = localStorage.getItem('webdav_test_config');
+if (saved) {
+try { return JSON.parse(saved); } catch(e) {}
+}
+return { ip: '', port: 8080 };
+}
+
+function saveConfig() {
+const ip = document.getElementById('deviceIp').value.trim();
+const port = parseInt(document.getElementById('devicePort').value) || 8080;
+if (!ip) { alert('请输入设备 IP'); return; }
+localStorage.setItem('webdav_test_config', JSON.stringify({ ip, port }));
+log('SYSTEM', '', '配置已保存: ' + ip + ':' + port, '');
+}
+
+// 页面加载时恢复配置
+(function init() {
+const cfg = getConfig();
+if (cfg.ip) document.getElementById('deviceIp').value = cfg.ip;
+if (cfg.port) document.getElementById('devicePort').value = cfg.port;
+})();
+
+// ============ 日志 ============
+function log(method, url, detail, status) {
+const logList = document.getElementById('logList');
+const entry = document.createElement('div');
+entry.className = 'log-entry' + (status === 'error' ? ' error' : '');
+const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+const statusClass = status ? 's' + String(status)[0] : '';
+const statusText = status ? status : (detail.includes('ERROR') ? 'ERR' : '');
+entry.innerHTML =
+'<span class="log-time">' + now + '</span>' +
+'<span class="log-method ' + method + '">' + method + '</span>' +
+'<span class="log-status ' + statusClass + '">' + statusText + '</span>' +
+'<span class="log-detail">' + detail + '</span>';
+logList.insertBefore(entry, logList.firstChild);
+// 保留最近 100 条
+while (logList.children.length > 100) {
+logList.removeChild(logList.lastChild);
+}
+}
+
+// ============ 连接测试 ============
+async function testConnection() {
+const ip = document.getElementById('deviceIp').value.trim();
+const port = parseInt(document.getElementById('devicePort').value) || 8080;
+if (!ip) { alert('请输入设备 IP'); return; }
+
+baseUrl = 'http://' + ip + ':' + port;
+
+// 显示诊断结果
+const resultsDiv = document.getElementById('testResults');
+const listDiv = document.getElementById('testResultList');
+resultsDiv.style.display = 'block';
+listDiv.innerHTML = '';
+
+const tests = [
+{ label: '服务器连通性 (TCP)', icon: 'ping', fn: testTcp },
+{ label: 'HTTP 基础响应', icon: 'http', fn: testHttp },
+{ label: 'API 状态 (/api/status)', icon: 'api', fn: testApiStatus },
+{ label: 'WebDAV 状态 (/api/webdav/status)', icon: 'webdav', fn: testWebdavStatus },
+{ label: 'WebDAV 启用 (/api/webdav/start)', icon: 'enable', fn: testWebdavStart },
+{ label: 'PROPFIND 根目录', icon: 'propfind', fn: testPropfindRoot },
+{ label: 'CORS 跨域支持', icon: 'cors', fn: testCors },
+{ label: 'OPTIONS 预检', icon: 'options', fn: testOptions },
+];
+
+let allPass = true;
+for (const t of tests) {
+const item = document.createElement('div');
+item.className = 'test-result-item';
+item.innerHTML = '<span class="test-icon">...</span><span class="test-label">' + t.label + '</span><span class="test-value pending">测试中</span>';
+listDiv.appendChild(item);
+
+try {
+const result = await t.fn(ip, port);
+const valueEl = item.querySelector('.test-value');
+const iconEl = item.querySelector('.test-icon');
+if (result.pass) {
+valueEl.textContent = result.detail || '通过';
+valueEl.className = 'test-value pass';
+iconEl.textContent = '✓';
+} else {
+valueEl.textContent = result.detail || '失败';
+valueEl.className = 'test-value fail';
+iconEl.textContent = '✗';
+allPass = false;
+}
+} catch (e) {
+const valueEl = item.querySelector('.test-value');
+const iconEl = item.querySelector('.test-icon');
+valueEl.textContent = '异常: ' + e.message;
+valueEl.className = 'test-value fail';
+iconEl.textContent = '✗';
+allPass = false;
+}
+}
+
+if (allPass) {
+document.getElementById('webdavSection').style.display = 'block';
+document.getElementById('statusText').textContent = '已连接 ' + baseUrl;
+document.getElementById('serverInfo').textContent = ip + ':' + port;
+navigateTo('/');
+} else {
+document.getElementById('webdavSection').style.display = 'block';
+document.getElementById('statusDot').className = 'status-dot offline';
+document.getElementById('statusText').textContent = '部分功能不可用，请检查诊断结果';
+}
+}
+
+// ============ 诊断测试函数 ============
+
+async function testTcp(ip, port) {
+// 通过尝试 HTTP 请求来间接测试连通性
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/', {}, 5000);
+return { pass: true, detail: 'HTTP ' + resp.status };
+} catch (e) {
+if (e.name === 'AbortError') {
+return { pass: false, detail: '连接超时 (5s)' };
+}
+return { pass: false, detail: '连接失败: ' + e.message };
+}
+}
+
+async function testHttp(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/', {}, 5000);
+const text = await resp.text();
+return { pass: resp.status > 0, detail: 'HTTP ' + resp.status + ' (' + text.substring(0, 50) + '...)' };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testApiStatus(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/api/status', {}, 5000);
+const data = await resp.json();
+return { pass: data.status === 'running' || resp.status === 200, detail: '端口=' + data.httpPort + ' 版本=' + data.version };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testWebdavStatus(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/api/webdav/status', {}, 5000);
+const data = await resp.json();
+return { pass: resp.status === 200, detail: 'enabled=' + data.enabled + ' root=' + data.rootPath };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testWebdavStart(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/api/webdav/start', {
+method: 'POST'
+}, 5000);
+const data = await resp.json();
+return { pass: data.success, detail: data.message };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testPropfindRoot(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/webdav/', {
+method: 'PROPFIND',
+headers: { 'Depth': '1' }
+}, 5000);
+const text = await resp.text();
+const hasXml = text.includes('<D:response') || text.includes('multistatus');
+const count = (text.match(/<D:response/g) || []).length;
+return { pass: resp.status === 207 || hasXml, detail: 'HTTP ' + resp.status + ', ' + count + ' 个条目' };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testCors(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/api/status', {}, 5000);
+const corsHeader = resp.headers.get('Access-Control-Allow-Origin');
+return { pass: corsHeader === '*', detail: corsHeader ? 'CORS: ' + corsHeader : '无 CORS 头' };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+async function testOptions(ip, port) {
+try {
+const resp = await fetchWithTimeout('http://' + ip + ':' + port + '/webdav/', {
+method: 'OPTIONS'
+}, 5000);
+const allow = resp.headers.get('Access-Control-Allow-Methods') || resp.headers.get('Allow') || '';
+return { pass: resp.status === 200, detail: allow ? '允许: ' + allow.substring(0, 60) : 'HTTP ' + resp.status };
+} catch (e) {
+return { pass: false, detail: e.message };
+}
+}
+
+// ============ WebDAV 文件浏览 ============
+
+async function navigateTo(path) {
+currentPath = path;
+showLoading(true);
+try {
+const encodedPath = encodePath(path);
+const resp = await fetch(baseUrl + '/webdav' + encodedPath, {
+method: 'PROPFIND',
+headers: { 'Depth': '1' }
+});
+log('PROPFIND', '/webdav' + encodedPath, '路径: ' + path, resp.status);
+
+if (resp.status !== 207) {
+const text = await resp.text();
+document.getElementById('fileList').innerHTML = '<div class="empty-state">错误: HTTP ' + resp.status + ' - ' + text.substring(0, 200) + '</div>';
+return;
+}
+
+const text = await resp.text();
+const items = parsePropfindXml(text, path);
+renderFileList(items);
+renderBreadcrumb(path);
+} catch (e) {
+log('PROPFIND', '', 'ERROR: ' + e.message, 'error');
+document.getElementById('fileList').innerHTML = '<div class="empty-state">请求失败: ' + e.message + '</div>';
+} finally {
+showLoading(false);
+}
+}
+
+function parsePropfindXml(xml, basePath) {
+const parser = new DOMParser();
+const doc = parser.parseFromString(xml, 'text/xml');
+const responses = doc.getElementsByTagNameNS('*', 'response');
+const items = [];
+
+for (let i = 0; i < responses.length; i++) {
+const resp = responses[i];
+const href = resp.getElementsByTagNameNS('*', 'href')[0]?.textContent || '';
+const prop = resp.getElementsByTagNameNS('*', 'prop')[0];
+if (!prop) continue;
+
+// 跳过自身（basePath 本身也会返回）
+const decodedHref = decodeURIComponent(href);
+const cleanHref = decodedHref.replace(/^\/webdav/, '').replace(/\/$/, '');
+const cleanBase = basePath.replace(/\/$/, '');
+if (cleanHref === cleanBase) continue;
+
+const displayName = prop.getElementsByTagNameNS('*', 'displayname')[0]?.textContent || '';
+const size = prop.getElementsByTagNameNS('*', 'getcontentlength')[0]?.textContent || '';
+const modDate = prop.getElementsByTagNameNS('*', 'getlastmodified')[0]?.textContent || '';
+const resourceType = prop.getElementsByTagNameNS('*', 'resourcetype')[0];
+const isDir = resourceType && resourceType.getElementsByTagNameNS('*', 'collection').length > 0;
+
+// 从 href 中提取路径名
+let name = displayName;
+if (!name) {
+const parts = decodedHref.replace(/\/$/, '').split('/');
+name = parts[parts.length - 1];
+}
+
+items.push({
+name: name,
+path: decodedHref.replace(/^\/webdav/, ''),
+isDir: isDir,
+size: size ? parseInt(size) : 0,
+modDate: modDate,
+href: href
+});
+}
+
+// 排序：目录在前
+items.sort((a, b) => {
+if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+return a.name.localeCompare(b.name);
+});
+
+return items;
+}
+
+function renderFileList(items) {
+const list = document.getElementById('fileList');
+if (items.length === 0) {
+list.innerHTML = '<div class="empty-state">空目录</div>';
+return;
+}
+
+list.innerHTML = items.map(item => {
+const icon = getFileIcon(item);
+const sizeStr = item.isDir ? '-' : formatSize(item.size);
+const dateStr = formatDate(item.modDate);
+return '<div class="file-item" onclick="onItemClick(\'' + escapeJs(item.path) + '\', ' + item.isDir + ', \'' + escapeJs(item.name) + '\')">' +
+'<span class="file-icon ' + icon.cls + '">' + icon.char + '</span>' +
+'<span class="file-name">' + escapeHtml(item.name) + '</span>' +
+'<span class="file-size">' + sizeStr + '</span>' +
+'<span class="file-date">' + dateStr + '</span>' +
+'<span class="file-actions">' +
+'<button class="btn-sm btn-secondary" onclick="event.stopPropagation();downloadFile(\'' + escapeJs(item.path) + '\',\'' + escapeJs(item.name) + '\')">下载</button>' +
+'<button class="btn-sm btn-danger" onclick="event.stopPropagation();deleteFile(\'' + escapeJs(item.path) + '\',\'' + escapeJs(item.name) + '\')">删除</button>' +
+'</span>' +
+'</div>';
+}).join('');
+}
+
+function getFileIcon(item) {
+if (item.isDir) return { char: '📁', cls: 'dir' };
+const ext = item.name.split('.').pop().toLowerCase();
+if (['png','jpg','jpeg','gif','bmp','heic'].includes(ext)) return { char: '🖼️', cls: 'image' };
+if (['zip','rar','7z','gz','tar'].includes(ext)) return { char: '📦', cls: 'archive' };
+if (['deb','tipa','ipa'].includes(ext)) return { char: '📦', cls: 'archive' };
+return { char: '📄', cls: 'file' };
+}
+
+function renderBreadcrumb(path) {
+const bc = document.getElementById('breadcrumb');
+const parts = path.split('/').filter(p => p.length > 0);
+let html = '<span>路径: </span><a onclick="navigateTo(\'/\')">/</a>';
+let current = '';
+for (const part of parts) {
+current += '/' + part;
+html += '<span class="separator">/</span><a onclick="navigateTo(\'' + escapeJs(current) + '\')">' + escapeHtml(part) + '</a>';
+}
+bc.innerHTML = html;
+}
+
+function onItemClick(path, isDir, name) {
+if (isDir) {
+navigateTo(path);
+} else {
+// 图片预览
+const ext = name.split('.').pop().toLowerCase();
+if (['png','jpg','jpeg','gif','bmp'].includes(ext)) {
+previewImage(path);
+} else {
+downloadFile(path, name);
+}
+}
+}
+
+// ============ 文件操作 ============
+
+async function downloadFile(path, name) {
+showLoading(true);
+try {
+const encodedPath = encodePath(path);
+const resp = await fetch(baseUrl + '/webdav' + encodedPath, { method: 'GET' });
+log('GET', '/webdav' + encodedPath, '下载: ' + name, resp.status);
+
+if (resp.status !== 200) {
+alert('下载失败: HTTP ' + resp.status);
+return;
+}
+
+const blob = await resp.blob();
+const url = URL.createObjectURL(blob);
+const a = document.createElement('a');
+a.href = url;
+a.download = name;
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+URL.revokeObjectURL(url);
+} catch (e) {
+log('GET', '', 'ERROR: ' + e.message, 'error');
+alert('下载失败: ' + e.message);
+} finally {
+showLoading(false);
+}
+}
+
+async function deleteFile(path, name) {
+if (!confirm('确定删除 "' + name + '" 吗？')) return;
+showLoading(true);
+try {
+const encodedPath = encodePath(path);
+const resp = await fetch(baseUrl + '/webdav' + encodedPath, { method: 'DELETE' });
+log('DELETE', '/webdav' + encodedPath, '删除: ' + name, resp.status);
+
+if (resp.status === 204 || resp.status === 200) {
+refreshDir();
+} else {
+const text = await resp.text();
+alert('删除失败: HTTP ' + resp.status + ' - ' + text);
+}
+} catch (e) {
+log('DELETE', '', 'ERROR: ' + e.message, 'error');
+alert('删除失败: ' + e.message);
+} finally {
+showLoading(false);
+}
+}
+
+async function uploadFiles(files) {
+if (!files || files.length === 0) return;
+showLoading(true);
+for (const file of files) {
+try {
+const encodedPath = encodePath(currentPath === '/' ? '/' : currentPath + '/') + encodeURIComponent(file.name);
+const resp = await fetch(baseUrl + '/webdav' + encodedPath, {
+method: 'PUT',
+body: file
+});
+log('PUT', '/webdav' + encodedPath, '上传: ' + file.name + ' (' + formatSize(file.size) + ')', resp.status);
+
+if (resp.status !== 200 && resp.status !== 201 && resp.status !== 204) {
+const text = await resp.text();
+alert('上传失败: ' + file.name + ' - HTTP ' + resp.status + '\n' + text);
+}
+} catch (e) {
+log('PUT', '', 'ERROR: ' + e.message, 'error');
+alert('上传失败: ' + file.name + ' - ' + e.message);
+}
+}
+showLoading(false);
+refreshDir();
+}
+
+async function mkdirPrompt() {
+const name = prompt('请输入目录名:');
+if (!name) return;
+showLoading(true);
+try {
+const encodedPath = encodePath(currentPath === '/' ? '/' : currentPath + '/') + encodeURIComponent(name);
+const resp = await fetch(baseUrl + '/webdav' + encodedPath, { method: 'MKCOL' });
+log('MKCOL', '/webdav' + encodedPath, '创建目录: ' + name, resp.status);
+
+if (resp.status === 200 || resp.status === 201) {
+refreshDir();
+} else {
+const text = await resp.text();
+alert('创建失败: HTTP ' + resp.status + ' - ' + text);
+}
+} catch (e) {
+log('MKCOL', '', 'ERROR: ' + e.message, 'error');
+alert('创建失败: ' + e.message);
+} finally {
+showLoading(false);
+}
+}
+
+function refreshDir() {
+navigateTo(currentPath);
+}
+
+function previewImage(path) {
+const encodedPath = encodePath(path);
+document.getElementById('previewImg').src = baseUrl + '/webdav' + encodedPath;
+document.getElementById('imagePreview').classList.add('show');
+}
+
+function closePreview() {
+document.getElementById('imagePreview').classList.remove('show');
+document.getElementById('previewImg').src = '';
+}
+
+// ============ 拖拽上传 ============
+const dropZone = document.getElementById('dropZone');
+if (dropZone) {
+dropZone.addEventListener('dragover', function(e) {
+e.preventDefault();
+this.classList.add('dragover');
+});
+dropZone.addEventListener('dragleave', function(e) {
+this.classList.remove('dragover');
+});
+dropZone.addEventListener('drop', function(e) {
+e.preventDefault();
+this.classList.remove('dragover');
+uploadFiles(e.dataTransfer.files);
+});
+}
+
+// ============ 工具函数 ============
+
+function fetchWithTimeout(url, options, timeout) {
+return Promise.race([
+fetch(url, options),
+new Promise((_, reject) =>
+setTimeout(() => reject(new DOMException('请求超时', 'AbortError')), timeout)
+)
+]);
+}
+
+function encodePath(path) {
+// 对路径进行编码：拆分每段，用 encodeURIComponent 编码，然后重新拼接
+if (!path || path === '/') return '/';
+const parts = path.split('/').filter(p => p.length > 0);
+return '/' + parts.map(p => encodeURIComponent(p)).join('/') + '/';
+}
+
+function escapeHtml(str) {
+if (!str) return '';
+const div = document.createElement('div');
+div.textContent = str;
+return div.innerHTML;
+}
+
+function escapeJs(str) {
+if (!str) return '';
+return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+function formatSize(bytes) {
+if (!bytes || bytes === 0) return '0 B';
+const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+let i = 0;
+while (bytes >= 1024 && i < units.length - 1) {
+bytes /= 1024;
+i++;
+}
+return bytes.toFixed(i === 0 ? 0 : 1) + ' ' + units[i];
+}
+
+function formatDate(dateStr) {
+if (!dateStr) return '-';
+try {
+const d = new Date(dateStr);
+return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+} catch (e) {
+return dateStr;
+}
+}
+
+function showLoading(show) {
+document.getElementById('loadingOverlay').classList.toggle('show', show);
+}
+
+// ============ 快捷路径 ============
+// 预设一些常用路径方便测试
+</script>
+</body>
+</html>

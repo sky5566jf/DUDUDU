@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>title</key>
+	<string>MatisuXCS</string>
+	<key>items</key>
+	<array>
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string></string>
+			<key>footerText</key>
+			<string></string>
+		</dict>
+
+		<!-- Logout Device -->
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>注销设备</string>
+		<key>action</key>
+			<string>respringDevice:</string>
+			<key>isDestructive</key>
+			<true/>
+		</dict>
+		
+		<!-- Reboot Device -->
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>重启设备</string>
+			<key>action</key>
+			<string>restartDevice:</string>
+			<key>isDestructive</key>
+			<true/>
+		</dict>
+
+		<!-- Device Info -->
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>设备信息</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSTitleValueCell</string>
+			<key>label</key>
+			<string>设备名称</string>
+			<key>id</key>
+			<string>DeviceName</string>
+			<key>get</key>
+			<string>deviceNameValue</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSTitleValueCell</string>
+			<key>label</key>
+			<string>系统版本</string>
+			<key>id</key>
+			<string>SystemVersion</string>
+			<key>get</key>
+			<string>systemVersionValue</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSTitleValueCell</string>
+			<key>label</key>
+			<string>设备型号</string>
+			<key>id</key>
+			<string>DeviceModel</string>
+			<key>get</key>
+			<string>deviceModelValue</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSTitleValueCell</string>
+			<key>label</key>
+			<string>存储空间</string>
+			<key>id</key>
+			<string>StorageSpace</string>
+			<key>get</key>
+			<string>storageSpaceValue</string>
+		</dict>
+
+	</array>
+</dict>
+</plist>

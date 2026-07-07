@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Enabled</key>
+  <true/>
+  <key>DesktopName</key>
+  <string>Matisu</string>
+  <key>Port</key>
+  <integer>5901</integer>
+  <key>ViewOnly</key>
+  <false/>
+  <key>ClipboardEnabled</key>
+  <true/>
+  <key>ServerCursor</key>
+  <true/>
+  <key>SingleNotifEnabled</key>
+  <false/>
+  <key>ClientNotifsEnabled</key>
+  <false/>
+  <key>KeepAliveSec</key>
+  <real>300</real>
+  <key>Scale</key>
+  <real>0.6</real>
+  <key>FrameRateSpec</key>
+  <string>30-60</string>
+  <key>OrientationSync</key>
+  <true/>
+  <key>DeferWindowSec</key>
+  <real>0.010</real>
+  <key>MaxInflight</key>
+  <integer>1</integer>
+  <key>TileSize</key>
+  <integer>64</integer>
+  <key>MaxRects</key>
+  <integer>128</integer>
+  <key>FullscreenThresholdPercent</key>
+  <integer>0</integer>
+  <key>HttpPort</key>
+  <integer>5801</integer>
+</dict>
+</plist>

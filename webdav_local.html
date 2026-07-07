@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MatisuXCS WebDAV</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 20px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .header h1 { font-size: 20px; font-weight: 600; }
+        .header .status { font-size: 13px; opacity: 0.9; }
+        .connect-bar { background: #2c2c2c; padding: 10px 20px; display: flex; gap: 10px; align-items: center; }
+        .connect-bar input { padding: 8px 12px; border: 1px solid #555; border-radius: 6px; font-size: 14px; background: #1a1a1a; color: white; width: 280px; }
+        .connect-bar input::placeholder { color: #888; }
+        .toolbar { background: white; padding: 10px 20px; display: flex; gap: 10px; align-items: center; border-bottom: 1px solid #e0e0e0; flex-wrap: wrap; }
+        .btn { padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 6px; }
+        .btn-sm { padding: 6px 12px; font-size: 13px; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #5568d3; }
+        .btn-success { background: #52c41a; color: white; }
+        .btn-success:hover { background: #43a814; }
+        .btn-warning { background: #faad14; color: #333; }
+        .btn-warning:hover { background: #d99a0e; }
+        .btn-info { background: #1890ff; color: white; }
+        .btn-info:hover { background: #1478d6; }
+        .btn-danger { background: #ff4d4f; color: white; }
+        .btn-danger:hover { background: #e04345; }
+        .btn-secondary { background: #8c8c8c; color: white; }
+        .btn-secondary:hover { background: #737373; }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .path-bar { background: white; padding: 10px 20px; border-bottom: 1px solid #e0e0e0; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+        .breadcrumb-item { color: #667eea; cursor: pointer; font-size: 14px; }
+        .breadcrumb-item:hover { text-decoration: underline; }
+        .breadcrumb-separator { color: #ccc; }
+        .file-list { background: white; margin: 20px; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .file-item { display: flex; align-items: center; padding: 12px 20px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; user-select: none; }
+        .file-item:hover { background: #f8f9ff; }
+        .file-item.selected { background: #eef0ff; }
+        .file-item .icon { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-size: 24px; margin-right: 15px; flex-shrink: 0; }
+        .file-item .info { flex: 1; min-width: 0; }
+        .file-item .name { font-size: 15px; color: #333; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-item .meta { font-size: 12px; color: #999; margin-top: 3px; }
+        .file-item .actions { display: flex; gap: 8px; opacity: 0; transition: opacity 0.2s; }
+        .file-item:hover .actions { opacity: 1; }
+        .action-btn { padding: 4px 10px; border: 1px solid #d9d9d9; background: white; border-radius: 4px; cursor: pointer; font-size: 12px; color: #666; transition: all 0.2s; }
+        .action-btn:hover { border-color: #667eea; color: #667eea; }
+        .action-btn.danger:hover { border-color: #ff4d4f; color: #ff4d4f; }
+        .checkbox { width: 20px; height: 20px; margin-right: 12px; cursor: pointer; flex-shrink: 0; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #999; }
+        .empty-state .icon { font-size: 48px; margin-bottom: 15px; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: white; border-radius: 12px; padding: 24px; min-width: 400px; max-width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+        .modal-content h3 { margin-bottom: 20px; font-size: 18px; }
+        .modal-content input { width: 100%; padding: 10px 12px; border: 1px solid #d9d9d9; border-radius: 6px; font-size: 14px; margin-bottom: 15px; }
+        .modal-content input:focus { outline: none; border-color: #667eea; }
+        .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
+        .progress-bar { position: fixed; bottom: 0; left: 0; width: 100%; height: 6px; background: #e0e0e0; z-index: 999; display: none; }
+        .progress-bar.active { display: block; }
+        .progress-bar .fill { height: 100%; background: linear-gradient(90deg, #667eea, #764ba2); transition: width 0.3s; width: 0%; }
+        .progress-status { position: fixed; bottom: 12px; right: 20px; color: #666; font-size: 12px; z-index: 1000; display: none; }
+        .progress-status.active { display: block; }
+        .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: white; font-size: 14px; z-index: 2000; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+        .toast.show { opacity: 1; }
+        .toast.success { background: #52c41a; }
+        .toast.error { background: #ff4d4f; }
+        .toast.info { background: #1890ff; }
+        .upload-area { border: 2px dashed #d9d9d9; border-radius: 8px; padding: 40px; text-align: center; color: #999; margin: 20px; cursor: pointer; transition: all 0.2s; }
+        .upload-area:hover, .upload-area.dragover { border-color: #667eea; color: #667eea; background: #f8f9ff; }
+        input[type="file"] { display: none; }
+        .debug-hint { position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.85); color: #ffcc00; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 3000; display: none; }
+        .connected-hint { position: fixed; bottom: 20px; left: 20px; background: rgba(0,128,0,0.9); color: white; padding: 10px 16px; border-radius: 8px; font-size: 13px; z-index: 3000; display: none; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📁 MatisuXCS WebDAV</h1>
+        <div class="status" id="status">正在连接...</div>
+    </div>
+
+    <!-- 连接栏 -->
+    <div class="connect-bar">
+        <span style="color: #aaa; font-size: 13px;">🌐 服务器:</span>
+        <input type="text" id="server-input" placeholder="输入手机IP地址，例如: http://192.168.1.100:5000" onkeydown="if(event.key==='Enter') connectToServer()">
+        <button class="btn btn-success btn-sm" onclick="connectToServer()">🔗 连接</button>
+        <button class="btn btn-secondary btn-sm" onclick="useMockMode()">🔧 模拟模式</button>
+        <span style="margin-left: auto; color: #666; font-size: 12px;" id="connection-info"></span>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn btn-primary" onclick="goHome()">🏠 根目录</button>
+        <button class="btn btn-success" onclick="showUploadDialog()">⬆️ 上传</button>
+        <button class="btn btn-primary" onclick="showMkdirDialog()">📁 新建文件夹</button>
+        <button class="btn btn-danger" onclick="deleteSelected()" id="btn-delete" disabled>🗑️ 删除</button>
+        <button class="btn btn-secondary" onclick="refreshList()">🔄 刷新</button>
+        <span style="width:1px; height:20px; background:#e0e0e0; margin:0 5px;"></span>
+        <button class="btn btn-success" onclick="installFile('tipa')">📦 安装巨魔</button>
+        <button class="btn btn-warning" onclick="installFile('deb')">📦 安装 DEB</button>
+        <button class="btn btn-info" onclick="installFile('ipa')">📦 安装 IPA</button>
+        <span style="margin-left:auto; font-size:13px; color:#999;" id="stats"></span>
+    </div>
+
+    <div class="path-bar">
+        <div id="breadcrumb"></div>
+        <input type="text" id="path-input" placeholder="输入完整路径，按回车跳转，如 /var/mobile/Media/Downloads" 
+               style="margin-left:15px;padding:4px 8px;font-size:13px;width:400px;border:1px solid #d9d9d9;border-radius:4px;"
+               onkeydown="if(event.key==='Enter') jumpToPath()">
+    </div>
+
+    <div class="upload-area" id="upload-area" style="display:none;">
+        <input type="file" id="file-input" multiple onchange="uploadFiles(this.files)">
+        <div>点击或拖拽文件到此处上传</div>
+        <div style="font-size:12px; margin-top:8px;">支持多文件上传</div>
+    </div>
+
+    <!-- 安装文件输入 -->
+    <input type="file" id="install-tipa-input" accept=".tipa" onchange="doInstall('tipa', this.files)" style="display:none;">
+    <input type="file" id="install-deb-input" accept=".deb" onchange="doInstall('deb', this.files)" style="display:none;">
+    <input type="file" id="install-ipa-input" accept=".ipa" onchange="doInstall('ipa', this.files)" style="display:none;">
+
+    <div class="file-list" id="file-list">
+        <div class="empty-state"><div class="icon">⏳</div><div>正在加载...</div></div>
+    </div>
+
+    <div class="progress-bar" id="progress-bar">
+        <div class="fill" id="progress-fill"></div>
+    </div>
+    <div class="progress-status" id="progress-status"></div>
+
+    <div class="toast" id="toast"></div>
+    <div class="debug-hint" id="debug-hint">🔧 模拟模式 - 所有操作均为模拟</div>
+    <div class="connected-hint" id="connected-hint">✅ 已连接</div>
+
+    <!-- 新建文件夹对话框 -->
+    <div class="modal" id="mkdir-modal">
+        <div class="modal-content">
+            <h3>📁 新建文件夹</h3>
+            <input type="text" id="mkdir-name" placeholder="输入文件夹名称" onkeydown="if(event.key==='Enter') doMkdir()">
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideModal('mkdir-modal')">取消</button>
+                <button class="btn btn-primary" onclick="doMkdir()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 重命名对话框 -->
+    <div class="modal" id="rename-modal">
+        <div class="modal-content">
+            <h3>✏️ 重命名</h3>
+            <input type="text" id="rename-name" placeholder="输入新名称" onkeydown="if(event.key==='Enter') doRename()">
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="hideModal('rename-modal')">取消</button>
+                <button class="btn btn-primary" onclick="doRename()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let serverBase = '';
+        let debugMode = false;
+        let currentPath = '/';
+        let fileList = [];
+        let selectedFiles = new Set();
+
+        // 模拟数据
+        const MOCK_DATA = {
+            '/': [
+                { name: 'Documents', path: '/Documents', isDir: true, size: 0, modified: '2024-01-15T10:30:00Z' },
+                { name: 'Downloads', path: '/Downloads', isDir: true, size: 0, modified: '2024-01-14T09:00:00Z' },
+                { name: 'Photos', path: '/Photos', isDir: true, size: 0, modified: '2024-01-13T14:20:00Z' },
+                { name: 'test.txt', path: '/test.txt', isDir: false, size: 1024, modified: '2024-01-12T16:45:00Z' },
+                { name: 'notes.md', path: '/notes.md', isDir: false, size: 2048, modified: '2024-01-11T08:30:00Z' },
+                { name: 'app.ipa', path: '/app.ipa', isDir: false, size: 52428800, modified: '2024-01-10T12:00:00Z' }
+            ],
+            '/Documents': [
+                { name: 'report.pdf', path: '/Documents/report.pdf', isDir: false, size: 1048576, modified: '2024-01-15T10:30:00Z' },
+                { name: 'slides.pptx', path: '/Documents/slides.pptx', isDir: false, size: 5242880, modified: '2024-01-14T15:20:00Z' }
+            ],
+            '/Downloads': [
+                { name: 'video.mp4', path: '/Downloads/video.mp4', isDir: false, size: 104857600, modified: '2024-01-14T09:00:00Z' },
+                { name: 'archive.zip', path: '/Downloads/archive.zip', isDir: false, size: 26214400, modified: '2024-01-13T11:30:00Z' }
+            ],
+            '/Photos': [
+                { name: 'vacation.jpg', path: '/Photos/vacation.jpg', isDir: false, size: 3145728, modified: '2024-01-13T14:20:00Z' },
+                { name: 'screenshot.png', path: '/Photos/screenshot.png', isDir: false, size: 524288, modified: '2024-01-12T08:15:00Z' }
+            ]
+        };
+
+        // 页面加载
+        function init() {
+            // 检查 URL 参数
+            const params = new URLSearchParams(window.location.search);
+            const server = params.get('server');
+            if (server) {
+                document.getElementById('server-input').value = server;
+                connectToServer();
+            } else {
+                useMockMode();
+            }
+        }
+
+        // 连接到服务器
+        async function connectToServer() {
+            const input = document.getElementById('server-input').value.trim();
+            if (!input) {
+                showToast('请输入服务器地址', 'error');
+                return;
+            }
+            serverBase = input.replace(/\/$/, '');
+            debugMode = false;
+            try {
+                const resp = await fetch(`${serverBase}/api/webdav/status`);
+                const data = await resp.json();
+                if (data.enabled) {
+                    document.getElementById('status').textContent = `WebDAV 已启用 | ${data.rootPath}`;
+                    document.getElementById('status').style.color = '#aaffaa';
+                    document.getElementById('connection-info').textContent = serverBase;
+                    document.getElementById('debug-hint').style.display = 'none';
+                    document.getElementById('connected-hint').style.display = 'block';
+                    document.getElementById('connected-hint').textContent = '✅ 已连接: ' + serverBase;
+                    await loadDir(currentPath);
+                } else {
+                    showToast('WebDAV 未启用', 'error');
+                    useMockMode();
+                }
+            } catch (e) {
+                showToast(`连接失败: ${e.message}`, 'error');
+                useMockMode();
+            }
+        }
+
+        // 进入模拟模式
+        function useMockMode() {
+            debugMode = true;
+            serverBase = '';
+            document.getElementById('status').textContent = '🔧 模拟模式';
+            document.getElementById('status').style.color = '#ffcc00';
+            document.getElementById('connection-info').textContent = '';
+            document.getElementById('debug-hint').style.display = 'block';
+            document.getElementById('connected-hint').style.display = 'none';
+            loadMockDir(currentPath);
+        }
+
+        // 加载模拟目录
+        function loadMockDir(path) {
+            currentPath = path;
+            updateBreadcrumb();
+            const data = MOCK_DATA[path] || [];
+            fileList = [...data];
+            fileList.sort((a, b) => {
+                if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            });
+            renderFileList();
+        }
+
+        // 输入完整路径直接跳转
+        function jumpToPath() {
+            const input = document.getElementById('path-input').value.trim();
+            if (!input) return;
+            const normalized = input.startsWith('/') ? input : '/' + input;
+            document.getElementById('path-input').value = '';
+            debugMode ? loadMockDir(normalized) : loadDir(normalized);
+        }
+
+        // 加载真实目录
+        async function loadDir(path) {
+            currentPath = (path.startsWith('/') ? path : '/' + path).replace(/\/$/, '') || '/';
+            updateBreadcrumb();
+            showProgress(true);
+            try {
+                // PROPFIND 用相对路径（不含 webdavRoot），与服务端 href 保持一致
+                const webdavRoot = '/var/mobile/Media';
+                const relPath = currentPath.startsWith(webdavRoot)
+                    ? currentPath.substring(webdavRoot.length) || '/'
+                    : (currentPath.startsWith('/') ? currentPath : '/' + currentPath);
+                const url = `${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`;
+                const resp = await fetch(url, { method: 'PROPFIND', headers: { 'Depth': '1' } });
+                if (!resp.ok && resp.status !== 207) throw new Error(`HTTP ${resp.status}`);
+                const text = await resp.text();
+                const xml = parseXML(text);
+                const responses = xml.getElementsByTagNameNS('DAV:', 'response');
+                fileList = [];
+                for (let i = 0; i < responses.length; i++) {
+                    const respEl = responses[i];
+                    const href = getElementText(respEl, 'DAV:', 'href');
+                    const isCollection = respEl.getElementsByTagNameNS('DAV:', 'collection').length > 0;
+                    const sizeEl = respEl.getElementsByTagNameNS('DAV:', 'getcontentlength')[0];
+                    const size = sizeEl ? parseInt(sizeEl.textContent) : 0;
+                    const modEl = respEl.getElementsByTagNameNS('DAV:', 'getlastmodified')[0];
+                    const modified = modEl ? modEl.textContent : '';
+                    const decodedHref = decodeURIComponent(href || '');
+                    let itemPath = decodedHref.startsWith('/') ? decodedHref : '/' + decodedHref;
+                    // 如果 href 是相对于 webdavRoot 的（不含 /var/mobile/），补上 webdavRoot 前缀
+                    // 服务端返回的 href：/xxx（相对于 /var/mobile/Media）
+                    const webdavRoot = '/var/mobile/Media';
+                    if (!itemPath.startsWith(webdavRoot)) {
+                        itemPath = webdavRoot + (itemPath.startsWith('/') ? itemPath : '/' + itemPath);
+                    }
+                    itemPath = itemPath.replace(/\/$/, '') || '/';
+                    const rawDisplayName = getElementText(respEl, 'DAV:', 'displayname');
+                    const finalName = rawDisplayName || itemPath.split('/').pop() || '';
+                    if (i === 0 && itemPath === currentPath) continue;
+                    fileList.push({ name: finalName, path: itemPath, isDir: isCollection, size, modified });
+                }
+                fileList.sort((a, b) => {
+                    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+                    return a.name.localeCompare(b.name);
+                });
+                renderFileList();
+            } catch (e) {
+                showToast('加载失败: ' + e.message, 'error');
+                if (path !== '/') { currentPath = '/'; loadDir('/'); }
+            } finally {
+                showProgress(false);
+            }
+        }
+
+        function parseXML(text) {
+            const parser = new DOMParser();
+            return parser.parseFromString(text, 'application/xml');
+        }
+
+        function getElementText(parent, ns, tag) {
+            const el = parent.getElementsByTagNameNS(ns, tag)[0];
+            return el ? el.textContent : '';
+        }
+
+        // 渲染文件列表
+        function renderFileList() {
+            const container = document.getElementById('file-list');
+            if (fileList.length === 0 && currentPath !== '/') {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📂</div><div>此文件夹为空</div></div>';
+                updateStats();
+                return;
+            }
+            let html = '';
+            if (currentPath !== '/') {
+                html += `<div class="file-item" ondblclick="goUp()"><div class="icon">⬆️</div><div class="info"><div class="name">.. (返回上级)</div></div></div>`;
+            }
+            for (const file of fileList) {
+                const icon = file.isDir ? '📁' : getFileIcon(file.name);
+                const sizeStr = file.isDir ? '--' : formatSize(file.size);
+                const modStr = file.modified ? new Date(file.modified).toLocaleString('zh-CN') : '--';
+                const encodedPath = encodeURI(file.path);
+                html += `<div class="file-item" data-path="${file.path}" data-name="${file.name}" data-dir="${file.isDir}" onclick="toggleSelect(this)" ondblclick="openItem('${encodedPath}', ${file.isDir})">
+                    <input type="checkbox" class="checkbox" onchange="toggleCheckbox(this, '${file.path}')" ${selectedFiles.has(file.path) ? 'checked' : ''}>
+                    <div class="icon">${icon}</div>
+                    <div class="info"><div class="name">${escapeHtml(file.name)}</div><div class="meta">${sizeStr} | ${modStr}</div></div>
+                    <div class="actions">
+                        ${!file.isDir ? `<button class="action-btn" onclick="event.stopPropagation(); downloadFile('${encodedPath}', '${escapeAttr(file.name)}')">下载</button>` : ''}
+                        <button class="action-btn" onclick="event.stopPropagation(); showRenameDialog('${escapeAttr(file.name)}', '${escapeAttr(file.path)}')">重命名</button>
+                        <button class="action-btn danger" onclick="event.stopPropagation(); deleteFile('${encodedPath}', '${escapeAttr(file.name)}')">删除</button>
+                    </div>
+                </div>`;
+            }
+            container.innerHTML = html || '<div class="empty-state"><div class="icon">📂</div><div>此文件夹为空</div></div>';
+            updateStats();
+        }
+
+        function getFileIcon(name) {
+            const ext = name.split('.').pop().toLowerCase();
+            const iconMap = { 'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️', 'pdf': '📕', 'txt': '📄', 'md': '📝', 'zip': '📦', 'ipa': '📱', 'deb': '📦', 'mp4': '🎬', 'mp3': '🎵', 'wav': '🎵', 'json': '📋', 'xml': '📋', 'html': '🌐', 'js': '📜', 'css': '🎨' };
+            return iconMap[ext] || '📄';
+        }
+
+        function openItem(path, isDir) {
+            if (isDir) {
+                const decodedPath = decodeURIComponent(path);
+                const normalizedPath = decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath;
+                debugMode ? loadMockDir(normalizedPath) : loadDir(normalizedPath);
+            } else {
+                const decodedPath = decodeURIComponent(path);
+                const normalizedPath = decodedPath.startsWith('/') ? decodedPath : '/' + decodedPath;
+                downloadFile(encodeURI(normalizedPath), '');
+            }
+        }
+
+        function downloadFile(encodedPath, name) {
+            const fullPath = decodeURIComponent(encodedPath.startsWith('/') ? encodedPath : '/' + encodedPath);
+            const webdavRoot = '/var/mobile/Media';
+            const relPath = fullPath.startsWith(webdavRoot)
+                ? fullPath.substring(webdavRoot.length) || '/'
+                : (fullPath.startsWith('/') ? fullPath : '/' + fullPath);
+                const url = `${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`;
+                const a = document.createElement('a');
+                a.href = url;
+            a.download = name || 'download';
+            a.click();
+        }
+
+        function goUp() {
+            if (currentPath === '/') return;
+            const normalizedPath = currentPath.startsWith('/') ? currentPath : '/' + currentPath;
+            const parent = normalizedPath.replace(/\/$/, '').split('/').slice(0, -1).join('/') || '/';
+            debugMode ? loadMockDir(parent) : loadDir(parent);
+        }
+
+        function goHome() {
+            debugMode ? loadMockDir('/') : loadDir('/');
+        }
+
+        function updateBreadcrumb() {
+            const container = document.getElementById('breadcrumb');
+            const parts = currentPath === '/' ? [] : currentPath.replace(/\/$/, '').split('/').filter(Boolean);
+            let html = '<span class="breadcrumb-item" onclick="goHome()">📁 根目录</span>';
+            let accumulated = '';
+            for (let i = 0; i < parts.length; i++) {
+                accumulated += '/' + parts[i];
+                const path = accumulated + '/';
+                html += `<span class="breadcrumb-separator">/</span><span class="breadcrumb-item" onclick="debugMode ? loadMockDir('${path}') : loadDir('${path}')">${escapeHtml(parts[i])}</span>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function toggleSelect(el) {
+            const path = el.dataset.path;
+            if (selectedFiles.has(path)) {
+                selectedFiles.delete(path);
+                el.classList.remove('selected');
+            } else {
+                selectedFiles.add(path);
+                el.classList.add('selected');
+            }
+            updateDeleteButton();
+        }
+
+        function toggleCheckbox(cb, path) {
+            if (cb.checked) {
+                selectedFiles.add(path);
+                cb.closest('.file-item').classList.add('selected');
+            } else {
+                selectedFiles.delete(path);
+                cb.closest('.file-item').classList.remove('selected');
+            }
+            updateDeleteButton();
+        }
+
+        function updateDeleteButton() {
+            document.getElementById('btn-delete').disabled = selectedFiles.size === 0;
+        }
+
+        function showUploadDialog() {
+            document.getElementById('upload-area').style.display = 'block';
+            document.getElementById('file-input').click();
+        }
+
+        document.addEventListener('dragover', e => e.preventDefault());
+        document.addEventListener('drop', e => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
+        });
+
+        async function uploadFiles(files) {
+            if (!files || files.length === 0) return;
+            document.getElementById('upload-area').style.display = 'none';
+
+            if (debugMode) {
+                showProgress(true);
+                for (let i = 0; i < files.length; i++) {
+                    await new Promise(r => setTimeout(r, 300));
+                    updateProgress((i + 1) / files.length * 100);
+                }
+                showProgress(false);
+                showToast(`模拟上传 ${files.length} 个文件`, 'success');
+                return;
+            }
+
+            showProgress(true);
+            let completed = 0;
+            // 立即捕获当前路径，避免 loadDir 异步更新导致路径错乱
+            const capturedPath = currentPath;
+            const webdavRoot = '/var/mobile/Media';
+            const baseRel = capturedPath === '/'
+                ? '/'
+                : (capturedPath.startsWith(webdavRoot) ? capturedPath.substring(webdavRoot.length) || '/' : capturedPath);
+            for (const file of files) {
+                try {
+                    const relPath = baseRel === '/' ? '/' + file.name : baseRel + '/' + file.name;
+                    await fetch(`${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`, { method: 'PUT', body: file });
+                    completed++;
+                    updateProgress(completed / files.length * 100);
+                } catch (e) {
+                    showToast(`上传失败: ${file.name}`, 'error');
+                }
+            }
+            showProgress(false);
+            showToast(`成功上传 ${completed} 个文件`, 'success');
+            loadDir(currentPath);
+        }
+
+        function showMkdirDialog() {
+            document.getElementById('mkdir-name').value = '';
+            document.getElementById('mkdir-modal').classList.add('active');
+            setTimeout(() => document.getElementById('mkdir-name').focus(), 100);
+        }
+
+        async function doMkdir() {
+            const name = document.getElementById('mkdir-name').value.trim();
+            if (!name) return;
+            const fullPath = currentPath === '/' ? '/' + name : currentPath + '/' + name;
+
+            if (debugMode) {
+                MOCK_DATA[currentPath] = MOCK_DATA[currentPath] || [];
+                MOCK_DATA[currentPath].push({ name, path: fullPath, isDir: true, size: 0, modified: new Date().toISOString() });
+                showToast('模拟创建文件夹 "' + name + '"', 'success');
+                hideModal('mkdir-modal');
+                loadMockDir(currentPath);
+                return;
+            }
+
+            // 服务端用相对路径（不含 webdavRoot），与 PROPFIND 保持一致
+            const webdavRoot = '/var/mobile/Media';
+            const relPath = fullPath.startsWith(webdavRoot)
+                ? fullPath.substring(webdavRoot.length) || '/'
+                : (fullPath.startsWith('/') ? fullPath : '/' + fullPath);
+            try {
+                const resp = await fetch(`${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`, { method: 'MKCOL' });
+                if (resp.ok || resp.status === 201) {
+                    showToast('文件夹创建成功', 'success');
+                    hideModal('mkdir-modal');
+                    loadDir(currentPath);
+                } else {
+                    showToast('创建失败: HTTP ' + resp.status, 'error');
+                }
+            } catch (e) {
+                showToast('创建失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteFile(encodedPath, name) {
+            if (!confirm(`确定要删除 "${name}" 吗？`)) return;
+
+            if (debugMode) {
+                const path = decodeURIComponent(encodedPath);
+                for (let i = 0; i < MOCK_DATA[currentPath].length; i++) {
+                    if (MOCK_DATA[currentPath][i].path === path) {
+                        MOCK_DATA[currentPath].splice(i, 1);
+                        break;
+                    }
+                }
+                showToast('模拟删除 "' + name + '"', 'success');
+                loadMockDir(currentPath);
+                return;
+            }
+
+            try {
+                const path = decodeURIComponent(encodedPath);
+                const fullPath = path.startsWith('/') ? path : '/' + path;
+                const webdavRoot = '/var/mobile/Media';
+                const relPath = fullPath.startsWith(webdavRoot)
+                    ? fullPath.substring(webdavRoot.length) || '/'
+                    : (fullPath.startsWith('/') ? fullPath : '/' + fullPath);
+                const resp = await fetch(`${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`, { method: 'DELETE' });
+                if (resp.ok || resp.status === 204) {
+                    showToast('删除成功', 'success');
+                    loadDir(currentPath);
+                } else {
+                    showToast('删除失败: HTTP ' + resp.status, 'error');
+                }
+            } catch (e) {
+                showToast('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        async function deleteSelected() {
+            if (selectedFiles.size === 0) return;
+            if (!confirm(`确定要删除选中的 ${selectedFiles.size} 项吗？`)) return;
+
+            if (debugMode) {
+                for (const path of selectedFiles) {
+                    for (let i = 0; i < MOCK_DATA[currentPath].length; i++) {
+                        if (MOCK_DATA[currentPath][i].path === path) {
+                            MOCK_DATA[currentPath].splice(i, 1);
+                            break;
+                        }
+                    }
+                }
+                selectedFiles.clear();
+                updateDeleteButton();
+                showToast('模拟删除 ' + selectedFiles.size + ' 项', 'success');
+                loadMockDir(currentPath);
+                return;
+            }
+
+            const webdavRoot = '/var/mobile/Media';
+            showProgress(true);
+            let completed = 0;
+            for (const path of selectedFiles) {
+                try {
+                    const fullPath = path.startsWith('/') ? path : '/' + path;
+                    const relPath = fullPath.startsWith(webdavRoot)
+                        ? fullPath.substring(webdavRoot.length) || '/'
+                        : (fullPath.startsWith('/') ? fullPath : '/' + fullPath);
+                    await fetch(`${serverBase}/webdav${relPath === '/' ? '' : encodeURI(relPath)}`, { method: 'DELETE' });
+                    completed++;
+                } catch (e) {}
+            }
+            selectedFiles.clear();
+            updateDeleteButton();
+            showProgress(false);
+            showToast(`已删除 ${completed} 项`, 'success');
+            loadDir(currentPath);
+        }
+
+        let renameOldPath = '';
+        function showRenameDialog(name, path) {
+            renameOldPath = path;
+            document.getElementById('rename-name').value = name;
+            document.getElementById('rename-modal').classList.add('active');
+            setTimeout(() => document.getElementById('rename-name').focus(), 100);
+        }
+
+        async function doRename() {
+            const newName = document.getElementById('rename-name').value.trim();
+            if (!newName) return;
+            const decodedOld = decodeURIComponent(renameOldPath);
+            const oldPathNormalized = decodedOld.startsWith('/') ? decodedOld : '/' + decodedOld;
+            const parentPath = oldPathNormalized.replace(/\/$/, '').split('/').slice(0, -1).join('/') || '/';
+            const newPath = parentPath + '/' + newName;
+
+            if (debugMode) {
+                for (let i = 0; i < MOCK_DATA[currentPath].length; i++) {
+                    if (MOCK_DATA[currentPath][i].path === decodedOld || MOCK_DATA[currentPath][i].path === oldPathNormalized) {
+                        MOCK_DATA[currentPath][i].name = newName;
+                        MOCK_DATA[currentPath][i].path = newPath;
+                        break;
+                    }
+                }
+                showToast('模拟重命名为 "' + newName + '"', 'success');
+                hideModal('rename-modal');
+                loadMockDir(currentPath);
+                return;
+            }
+
+            try {
+                const webdavRoot = '/var/mobile/Media';
+                const toRelPath = (fullPath) => {
+                    const fp = fullPath.startsWith('/') ? fullPath : '/' + fullPath;
+                    return fp.startsWith(webdavRoot)
+                        ? fp.substring(webdavRoot.length) || '/'
+                        : fp;
+                };
+                const oldRel = toRelPath(oldPathNormalized);
+                const newRel = toRelPath(newPath);
+                const resp = await fetch(`${serverBase}/webdav${oldRel === '/' ? '' : encodeURI(oldRel)}`, {
+                    method: 'MOVE',
+                    headers: { 'Destination': `${serverBase}/webdav${newRel === '/' ? '' : encodeURI(newRel)}`, 'Overwrite': 'F' }
+                });
+                if (resp.ok || resp.status === 201 || resp.status === 204) {
+                    showToast('重命名成功', 'success');
+                    hideModal('rename-modal');
+                    loadDir(currentPath);
+                } else if (resp.status === 501) {
+                    showToast('服务器不支持重命名操作 (HTTP 501)', 'error');
+                } else {
+                    showToast('重命名失败: HTTP ' + resp.status, 'error');
+                }
+            } catch (e) {
+                showToast('重命名失败: ' + e.message, 'error');
+            }
+        }
+
+        function refreshList() {
+            debugMode ? loadMockDir(currentPath) : loadDir(currentPath);
+        }
+
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i];
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function escapeAttr(str) {
+            return str.replace(/'/g, "\\'").replace(/"/g, '\\"');
+        }
+
+        function showProgress(show, statusText) {
+            document.getElementById('progress-bar').classList.toggle('active', show);
+            document.getElementById('progress-status').classList.toggle('active', show);
+            if (show) updateProgress(0, statusText || '');
+        }
+
+        function updateProgress(pct, statusText) {
+            document.getElementById('progress-fill').style.width = pct + '%';
+            if (statusText !== undefined) {
+                document.getElementById('progress-status').textContent = statusText;
+            }
+        }
+
+        function showToast(msg, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast ' + type;
+            setTimeout(() => toast.classList.add('show'), 10);
+            setTimeout(() => toast.classList.remove('show'), 3000);
+        }
+
+        function hideModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function updateStats() {
+            const dirs = fileList.filter(f => f.isDir).length;
+            const files = fileList.filter(f => !f.isDir).length;
+            document.getElementById('stats').textContent = `共 ${dirs} 个文件夹, ${files} 个文件`;
+        }
+
+        function installFile(type) {
+            const inputMap = {
+                'tipa': 'install-tipa-input',
+                'deb': 'install-deb-input',
+                'ipa': 'install-ipa-input'
+            };
+            const inputId = inputMap[type];
+            if (inputId) {
+                document.getElementById(inputId).click();
+            }
+        }
+
+        function doInstall(type, files) {
+            if (!files || files.length === 0) return;
+            const file = files[0];
+            const typeName = { tipa: '巨魔', deb: 'DEB', ipa: 'IPA' }[type] || type;
+
+            // 模拟模式或未连接时不支持安装
+            if (debugMode || !serverBase) {
+                showToast('请先连接到设备服务器后再安装', 'error');
+                return;
+            }
+
+            showProgress(true, `上传 ${file.name} (0%)`);
+
+            const webdavRoot = '/var/mobile/Media';
+            const uploadPath = webdavRoot + '/Downloads/' + file.name;
+            const encodedFileName = encodeURIComponent(file.name);
+            const relPath = '/Downloads/' + encodedFileName;
+            const uploadUrl = serverBase + '/webdav' + relPath;
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', uploadUrl, true);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 90);
+                    updateProgress(pct, `上传 ${file.name} (${pct}%)`);
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    updateProgress(90, `${typeName}安装中...`);
+                    let installUrl;
+                    if (type === 'tipa') {
+                        installUrl = serverBase + '/api/install/tipa?path=' + encodeURIComponent(uploadPath);
+                    } else if (type === 'deb') {
+                        installUrl = serverBase + '/api/install/deb?path=' + encodeURIComponent(uploadPath);
+                    } else {
+                        installUrl = serverBase + '/api/install?path=' + encodeURIComponent(uploadPath);
+                    }
+                    fetch(installUrl, { method: 'POST' })
+                        .then(async (resp) => {
+                            updateProgress(100);
+                            if (resp.ok) {
+                                showToast(`${typeName}安装成功: ${file.name}`, 'success');
+                            } else {
+                                const t = await resp.text();
+                                showToast(`${typeName}安装失败: HTTP ${resp.status} ${t}`, 'error');
+                            }
+                        })
+                        .catch(e => {
+                            showToast(`${typeName}安装失败: ${e.message}`, 'error');
+                        })
+                        .finally(() => {
+                            setTimeout(() => showProgress(false), 800);
+                        });
+                } else {
+                    showProgress(false, '');
+                    showToast(`上传失败: HTTP ${xhr.status}`, 'error');
+                }
+            };
+
+            xhr.onerror = () => {
+                showProgress(false, '');
+                showToast('上传失败: 网络错误', 'error');
+            };
+
+            xhr.send(file);
+        }
+
+        init();
+    </script>
+</body>
+</html>

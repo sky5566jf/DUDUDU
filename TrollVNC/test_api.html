@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TrollVNC API 测试工具</title>
+    <style>
+        :root {
+            --primary: #007AFF;
+            --success: #34C759;
+            --danger: #FF3B30;
+            --warning: #FF9500;
+            --bg-dark: #1a1a1a;
+            --bg-panel: #2d2d2d;
+            --bg-input: #3d3d3d;
+            --text: #fff;
+            --text-muted: #8e8e93;
+            --border: #444;
+        }
+        
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        h1 {
+            text-align: center;
+            color: var(--primary);
+            margin-bottom: 30px;
+            font-size: 28px;
+        }
+        
+        h1 .icon { font-size: 32px; }
+        
+        h2 {
+            color: var(--primary);
+            margin: 25px 0 15px 0;
+            font-size: 18px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 8px;
+        }
+        
+        h3 {
+            color: var(--text);
+            margin: 15px 0 10px 0;
+            font-size: 15px;
+        }
+        
+        .panel {
+            background: var(--bg-panel);
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        
+        .connection-bar {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        input, textarea, select {
+            padding: 12px 15px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-input);
+            color: var(--text);
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+        
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+        
+        input[type="text"], input[type="number"] { flex: 1; min-width: 180px; }
+        input[type="number"] { width: 100px; flex: none; }
+        
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            resize: vertical;
+            font-family: 'Monaco', 'Menlo', monospace;
+        }
+        
+        select { cursor: pointer; }
+        
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            background: var(--primary);
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        
+        button:hover { opacity: 0.85; transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        
+        button.danger { background: var(--danger); }
+        button.success { background: var(--success); }
+        button.warning { background: var(--warning); }
+        
+        button.small { padding: 8px 12px; font-size: 12px; }
+        
+        .status-badge {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        
+        .status-badge.connected { background: var(--success); }
+        .status-badge.disconnected { background: var(--text-muted); }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        
+        .grid-2 { grid-template-columns: repeat(2, 1fr); }
+        
+        .response-box {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .screen-container {
+            text-align: center;
+            background: #000;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .screen-placeholder {
+            color: var(--text-muted);
+            font-size: 16px;
+        }
+        
+        #screen img {
+            max-width: 100%;
+            max-height: 500px;
+            border-radius: 8px;
+        }
+        
+        .controls-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 15px;
+        }
+        
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 250px;
+        }
+        
+        .slider-group label { white-space: nowrap; }
+        
+        input[type="range"] {
+            flex: 1;
+            -webkit-appearance: none;
+            background: var(--border);
+            height: 6px;
+            border-radius: 3px;
+            padding: 0;
+            border: none;
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+        }
+        
+        .slider-value {
+            min-width: 45px;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .note {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-top: 8px;
+        }
+        
+        .section-divider {
+            border-top: 1px solid var(--border);
+            margin: 20px 0;
+        }
+        
+        .api-method {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        
+        .api-method.get { background: var(--success); }
+        .api-method.post { background: var(--primary); }
+        
+        .log-container {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 15px;
+            height: 250px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+        }
+        
+        .log-entry { margin-bottom: 5px; }
+        .log-entry.success { color: var(--success); }
+        .log-entry.error { color: var(--danger); }
+        .log-entry.info { color: var(--primary); }
+        .log-entry.warn { color: var(--warning); }
+        
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        
+        @media (max-width: 768px) {
+            .two-col { grid-template-columns: 1fr; }
+            .grid-2 { grid-template-columns: 1fr; }
+        }
+        
+        .hidden { display: none; }
+        
+        .file-upload {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        
+        .file-upload:hover { border-color: var(--primary); }
+        .file-upload input { display: none; }
+        .file-upload .icon { font-size: 32px; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1><span class="icon">📱</span> TrollVNC API 测试工具</h1>
+        
+        <!-- 连接设置 -->
+        <div class="panel">
+            <h2>🔗 连接设置</h2>
+            <div class="connection-bar">
+                <input type="text" id="ip" placeholder="设备 IP (如: 192.168.1.100)">
+                <input type="number" id="port" value="8182" min="1" max="65535">
+                <button onclick="connect()">连接</button>
+                <button onclick="disconnect()" class="danger">断开</button>
+                <span id="status" class="status-badge disconnected">未连接</span>
+            </div>
+            <div id="deviceInfo" class="response-box hidden"></div>
+        </div>
+        
+        <!-- 屏幕预览 -->
+        <div class="panel">
+            <h2>🖥️ 屏幕预览</h2>
+            <div class="screen-container">
+                <div id="screen" class="screen-placeholder">连接后显示屏幕</div>
+            </div>
+            <div class="controls-row">
+                <label>旋转:</label>
+                <select id="rotation" style="width:120px;">
+                    <option value="0">0°</option>
+                    <option value="90">90°</option>
+                    <option value="180">180°</option>
+                    <option value="270">270°</option>
+                </select>
+                <label>格式:</label>
+                <select id="format" style="width:80px;">
+                    <option value="png">PNG</option>
+                    <option value="jpeg">JPEG</option>
+                </select>
+                <label>质量:</label>
+                <input type="number" id="quality" value="0.8" min="0.1" max="1" step="0.1" style="width:60px;">
+                <label>缩放:</label>
+                <input type="number" id="scale" value="0.5" min="0.1" max="1" step="0.1" style="width:60px;">
+                <button onclick="refreshScreen()">刷新</button>
+                <button onclick="toggleAutoRefresh()" id="autoRefreshBtn">自动刷新</button>
+            </div>
+        </div>
+        
+        <div class="two-col">
+            <!-- 左列 -->
+            <div>
+                <!-- 设备信息 -->
+                <div class="panel">
+                    <h2>📊 设备信息</h2>
+                    <div class="grid">
+                        <button onclick="getDeviceInfo()">获取设备信息</button>
+                        <button onclick="getServerStatus()">服务器状态</button>
+                        <button onclick="getClients()">VNC 客户端</button>
+                    </div>
+                </div>
+                
+                <!-- 快捷操作 -->
+                <div class="panel">
+                    <h2>⚡ 快捷操作</h2>
+                    <div class="grid">
+                        <button onclick="apiCall('POST', 'home')">🏠 Home</button>
+                        <button onclick="apiCall('POST', 'taskmanager')">📋 任务管理</button>
+                        <button onclick="apiCall('POST', 'clearapps/smart')">🧹 清理后台</button>
+                    </div>
+                </div>
+                
+                <!-- 屏幕控制 -->
+                <div class="panel">
+                    <h2>🔐 屏幕控制</h2>
+                    <div class="grid">
+                        <button onclick="apiCall('POST', 'screen/lock')">🔒 锁屏</button>
+                        <button onclick="apiCall('POST', 'screen/unlock')">🔓 解锁</button>
+                    </div>
+                </div>
+                
+                <!-- 系统控制 -->
+                <div class="panel">
+                    <h2>⚙️ 系统控制</h2>
+                    <div class="grid">
+                        <button onclick="apiCall('POST', 'reboot')" class="danger">🔄 重启</button>
+                        <button onclick="apiCall('POST', 'respring')" class="danger">🔄 注销</button>
+                    </div>
+                </div>
+                
+                <!-- 音量亮度 -->
+                <div class="panel">
+                    <h2>🔊 音量与亮度</h2>
+                    <div class="slider-group">
+                        <label>音量:</label>
+                        <input type="range" id="volumeSlider" min="0" max="100" value="50">
+                        <span class="slider-value" id="volumeValue">50%</span>
+                        <button class="small" onclick="setVolume()">设置</button>
+                    </div>
+                    <div class="slider-group" style="margin-top: 15px;">
+                        <label>亮度:</label>
+                        <input type="range" id="brightnessSlider" min="0" max="100" value="50">
+                        <span class="slider-value" id="brightnessValue">50%</span>
+                        <button class="small" onclick="setBrightness()">设置</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右列 -->
+            <div>
+                <!-- 文本输入 -->
+                <div class="panel">
+                    <h2>⌨️ 文本输入</h2>
+                    <textarea id="inputText" placeholder="输入要发送的文本..."></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="sendInput()">发送文本</button>
+                        <button onclick="sendKey(13)">⏎ 回车</button>
+                        <button onclick="sendKey(8)">⌫ 退格</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 15px; font-size: 14px;">常用按键 (macOS 键码)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(27)" title="Escape">ESC</button>
+                        <button onclick="sendKey(32)" title="Space">空格</button>
+                        <button onclick="sendKey(9)" title="Tab">Tab</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">方向键 (macOS 键码)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(126)" title="Up">↑</button>
+                        <button onclick="sendKey(125)" title="Down">↓</button>
+                        <button onclick="sendKey(123)" title="Left">←</button>
+                        <button onclick="sendKey(124)" title="Right">→</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(115)" title="Home">Home</button>
+                        <button onclick="sendKey(119)" title="End">End</button>
+                        <button onclick="sendKey(116)" title="PageUp">PgUp</button>
+                        <button onclick="sendKey(117)" title="PageDown">PgDn</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">功能键 (F1-F12)</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(122)">F1</button>
+                        <button onclick="sendKey(120)">F2</button>
+                        <button onclick="sendKey(99)">F3</button>
+                        <button onclick="sendKey(118)">F4</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(96)">F5</button>
+                        <button onclick="sendKey(97)">F6</button>
+                        <button onclick="sendKey(98)">F7</button>
+                        <button onclick="sendKey(100)">F8</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(101)">F9</button>
+                        <button onclick="sendKey(109)">F10</button>
+                        <button onclick="sendKey(103)">F11</button>
+                        <button onclick="sendKey(111)">F12</button>
+                    </div>
+                    
+                    <h3 style="margin-top: 12px; font-size: 14px;">小键盘</h3>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(96)">Num7</button>
+                        <button onclick="sendKey(97)">Num8</button>
+                        <button onclick="sendKey(98)">Num9</button>
+                        <button onclick="sendKey(67)">Num*</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(100)">Num4</button>
+                        <button onclick="sendKey(101)">Num5</button>
+                        <button onclick="sendKey(102)">Num6</button>
+                        <button onclick="sendKey(78)">Num-</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(103)">Num1</button>
+                        <button onclick="sendKey(104)">Num2</button>
+                        <button onclick="sendKey(105)">Num3</button>
+                        <button onclick="sendKey(69)">Num+</button>
+                    </div>
+                    <div class="grid" style="margin-top: 8px;">
+                        <button onclick="sendKey(76)">Num.</button>
+                        <button onclick="sendKey(53)">Clear</button>
+                    </div>
+                </div>
+                
+                <!-- 剪贴板 -->
+                <div class="panel">
+                    <h2>📋 剪贴板</h2>
+                    <textarea id="clipboardText" placeholder="剪贴板内容..."></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="setClipboard()">设置剪贴板</button>
+                        <button onclick="getClipboard()">获取剪贴板</button>
+                    </div>
+                </div>
+                
+                <!-- AssistiveTouch -->
+                <div class="panel">
+                    <h2>✋ AssistiveTouch</h2>
+                    <div class="grid">
+                        <button onclick="getAssistiveTouchStatus()">状态</button>
+                        <button onclick="toggleAssistiveTouch('enable')" class="success">启用</button>
+                        <button onclick="toggleAssistiveTouch('disable')" class="warning">禁用</button>
+                    </div>
+                </div>
+                
+                <!-- 应用管理 -->
+                <div class="panel">
+                    <h2>📦 应用管理</h2>
+                    <h3>安装应用</h3>
+                    <input type="text" id="installPath" placeholder="IPA 文件路径">
+                    <button onclick="installApp()" style="margin-top: 10px;">安装</button>
+                    
+                    <div class="section-divider"></div>
+                    
+                    <h3>卸载应用</h3>
+                    <input type="text" id="uninstallBundleId" placeholder="Bundle ID">
+                    <button onclick="uninstallApp()" class="danger" style="margin-top: 10px;">卸载</button>
+                    
+                    <div class="section-divider"></div>
+                    
+                    <button onclick="trollStoreDiagnostics()">TrollStore 诊断</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 文件管理 -->
+        <div class="panel">
+            <h2>📂 文件管理 <span style="font-size:12px;color:var(--text-muted);font-weight:normal;">(root权限)</span></h2>
+            
+            <!-- 浏览目录 -->
+            <div style="margin-bottom: 20px;">
+                <h3>浏览目录</h3>
+                <div class="connection-bar">
+                    <input type="text" id="listPath" placeholder="目录路径 (留空使用懒人精灵目录)">
+                    <button onclick="listDirectory()">📁 列出</button>
+                </div>
+                <div id="fileList" class="response-box" style="max-height: 300px; margin-top: 10px;"></div>
+            </div>
+            
+            <div class="section-divider"></div>
+            
+            <!-- 读取文件 -->
+            <div style="margin-bottom: 20px;">
+                <h3>读取文件</h3>
+                <div class="connection-bar">
+                    <input type="text" id="readFilePath" placeholder="文件路径" style="min-width: 300px;">
+                    <button onclick="readFile()">📖 读取</button>
+                </div>
+                <div id="fileContent" class="response-box" style="max-height: 250px; margin-top: 10px;"></div>
+            </div>
+            
+            <div class="section-divider"></div>
+            
+            <!-- 创建目录 -->
+            <div style="margin-bottom: 20px;">
+                <h3>创建目录</h3>
+                <div class="connection-bar">
+                    <input type="text" id="createFolderPath" placeholder="新目录路径" style="min-width: 300px;">
+                    <button onclick="createFolder()" class="success">📁 创建</button>
+                </div>
+            </div>
+            
+            <div class="section-divider"></div>
+            
+            <!-- 删除 -->
+            <div>
+                <h3>删除文件/目录</h3>
+                <div class="connection-bar">
+                    <input type="text" id="deletePath" placeholder="文件或目录路径" style="min-width: 300px;">
+                    <button onclick="deleteFile()" class="danger">🗑️ 删除</button>
+                </div>
+                <div class="note">⚠️ 删除操作不可恢复，请谨慎使用</div>
+            </div>
+        </div>
+        
+        <!-- 文件操作 -->
+        <div class="panel">
+            <h2>📁 文件操作</h2>
+            <div class="grid-2" style="display: grid; gap: 20px;">
+                <div>
+                    <h3>写入文本文件</h3>
+                    <input type="text" id="writeFilePath" placeholder="文件路径">
+                    <textarea id="writeFileContent" placeholder="文件内容" style="margin-top: 10px;"></textarea>
+                    <div class="grid" style="margin-top: 10px;">
+                        <button onclick="writeFile(false)">写入</button>
+                        <button onclick="writeFile(true)">追加</button>
+                    </div>
+                </div>
+                <div>
+                    <h3>上传文件</h3>
+                    <div class="file-upload" onclick="document.getElementById('uploadFile').click()">
+                        <div class="icon">📤</div>
+                        <div>点击选择文件</div>
+                        <div id="fileName" style="margin-top: 5px; font-size: 12px; color: var(--text-muted);"></div>
+                        <input type="file" id="uploadFile" onchange="onFileSelected(this)">
+                    </div>
+                    <input type="text" id="uploadPath" placeholder="目标路径" style="margin-top: 10px;">
+                    <button onclick="uploadFile()" style="margin-top: 10px;">上传</button>
+                </div>
+            </div>
+            <button onclick="checkFile()" style="margin-top: 15px;">检查 zhuangtai.txt</button>
+        </div>
+        
+        <!-- API 文档 -->
+        <div class="panel">
+            <h2>📖 API 参考</h2>
+            <div id="apiRef" class="response-box" style="max-height: 500px;">
+<span class="api-method get">GET</span><b>/api/device</b> - 设备信息
+<span class="api-method get">GET</span><b>/api/status</b> - 服务器状态
+<span class="api-method get">GET</b></span><b>/api/clients</b> - VNC 客户端列表
+<span class="api-method get">GET</span><b>/api/screenshot</b> - 屏幕截图
+
+<span class="api-method post">POST</span><b>/api/input</b> - 输入文本
+<span class="api-method post">POST</span><b>/api/key?code=13</b> - 发送按键
+<span style="color:#888;font-size:11px;">  方向键: 上126 下125 左123 右124 | Home115 End119</span>
+<span class="api-method post">POST</span><b>/api/clipboard_text</b> - 设置剪贴板
+<span class="api-method get">GET</span><b>/api/clipboard_text</b> - 获取剪贴板
+
+<span class="api-method post">POST</span><b>/api/writefile_text?path=xxx</b> - 写入文件
+<span class="api-method post">POST</span><b>/api/upload?path=xxx</b> - 上传文件
+
+<span class="api-method post">POST</span><b>/api/upload?path=xxx</b> - 上传文件
+
+<span class="api-method post">POST</span><b>/api/reboot</b> - 重启
+<span class="api-method post">POST</span><b>/api/respring</b> - 注销
+<span class="api-method post">POST</b>/api/screen/lock</b> - 锁屏
+<span class="api-method post">POST</span><b>/api/screen/unlock</b> - 解锁
+<span class="api-method post">POST</span><b>/api/home</b> - Home 键
+<span class="api-method post">POST</span><b>/api/taskmanager</b> - 任务管理器
+
+<span class="api-method get">GET</span><b>/api/volume</b> - 获取音量
+<span class="api-method post">POST</span><b>/api/volume?value=0.5</b> - 设置音量
+<span class="api-method get">GET</span><b>/api/brightness</b> - 获取亮度
+<span class="api-method post">POST</span><b>/api/brightness?value=0.5</b> - 设置亮度
+
+<span class="api-method post">POST</span><b>/api/install?path=xxx.ipa</b> - 安装应用
+<span class="api-method post">POST</span><b>/api/uninstall?bundleId=xxx</b> - 卸载应用
+<span class="api-method get">GET</span><b>/api/trollstore/diagnostics</b> - TrollStore 诊断
+
+<span class="api-method post">POST</span><b>/api/clearapps/smart</b> - 智能清理后台
+
+<span class="api-method get">GET</span><b>/api/filelist?path=xxx</b> - 列出目录
+<span class="api-method get">GET</span><b>/api/readfile?path=xxx</b> - 读取文件
+<span class="api-method post">POST</span><b>/api/deletefile?path=xxx</b> - 删除文件/目录
+<span class="api-method post">POST</span><b>/api/createfolder?path=xxx</b> - 创建目录
+
+<span class="api-method get">GET</span><b>/api/assistivetouch</b> - 小白点状态
+<span class="api-method post">POST</span><b>/api/assistivetouch?action=enable</b> - 启用小白点
+<span class="api-method post">POST</span><b>/api/assistivetouch?action=disable</b> - 禁用小白点
+            </div>
+        </div>
+        
+        <!-- 日志 -->
+        <div class="panel">
+            <h2>📋 日志 <button onclick="clearLog()" style="float: right; padding: 5px 15px;">清空</button></h2>
+            <div id="log" class="log-container"></div>
+        </div>
+    </div>
+    
+    <script>
+        let baseUrl = '';
+        let autoRefreshInterval = null;
+        let isAutoRefreshing = false;
+        let selectedFile = null;
+        
+        // 日志
+        function log(msg, type = 'info') {
+            const el = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            el.appendChild(entry);
+            el.scrollTop = el.scrollHeight;
+        }
+        
+        function clearLog() {
+            document.getElementById('log').length = 0;
+            document.getElementById('log').innerHTML = '';
+        }
+        
+        // 获取基础 URL
+        function getBaseUrl() {
+            const ip = document.getElementById('ip').value.trim();
+            const port = document.getElementById('port').value;
+            if (!ip) {
+                alert('请输入设备 IP');
+                return null;
+            }
+            return `http://${ip}:${port}`;
+        }
+        
+        // 连接
+        async function connect() {
+            baseUrl = getBaseUrl();
+            if (!baseUrl) return;
+            
+            log('正在连接...', 'info');
+            try {
+                const res = await fetch(`${baseUrl}/api/device`);
+                if (res.ok) {
+                    const data = await res.json();
+                    log(`连接成功: ${data.deviceName} (${data.deviceModelName || data.deviceModel}) iOS ${data.systemVersion}`, 'success');
+                    
+                    document.getElementById('status').textContent = '已连接';
+                    document.getElementById('status').className = 'status-badge connected';
+                    
+                    document.getElementById('deviceInfo').textContent = JSON.stringify(data, null, 2);
+                    document.getElementById('deviceInfo').classList.remove('hidden');
+                    
+                    refreshScreen();
+                } else {
+                    throw new Error('HTTP ' + res.status);
+                }
+            } catch (err) {
+                log(`连接失败: ${err.message}`, 'error');
+                alert('连接失败: ' + err.message);
+            }
+        }
+        
+        // 断开
+        function disconnect() {
+            stopAutoRefresh();
+            baseUrl = '';
+            document.getElementById('status').textContent = '未连接';
+            document.getElementById('status').className = 'status-badge disconnected';
+            document.getElementById('screen').innerHTML = '<div class="screen-placeholder">连接后显示屏幕</div>';
+            document.getElementById('deviceInfo').classList.add('hidden');
+            log('已断开连接', 'info');
+        }
+        
+        // 刷新屏幕
+        async function refreshScreen() {
+            if (!baseUrl) return;
+            
+            try {
+                const rotation = document.getElementById('rotation').value;
+                const format = document.getElementById('format').value;
+                const quality = document.getElementById('quality').value;
+                const scale = document.getElementById('scale').value;
+                
+                const res = await fetch(`${baseUrl}/api/screenshot?ts=${Date.now()}&rotation=${rotation}&format=${format}&quality=${quality}&scale=${scale}`);
+                
+                if (res.ok) {
+                    const blob = await res.blob();
+                    const url = URL.createObjectURL(blob);
+                    const screen = document.getElementById('screen');
+                    screen.innerHTML = '';
+                    const img = document.createElement('img');
+                    img.src = url;
+                    screen.appendChild(img);
+                    log(`截图已刷新 (${format.toUpperCase()})`, 'success');
+                }
+            } catch (err) {
+                log(`截图失败: ${err.message}`, 'error');
+            }
+        }
+        
+        // 自动刷新
+        function toggleAutoRefresh() {
+            const btn = document.getElementById('autoRefreshBtn');
+            
+            if (isAutoRefreshing) {
+                stopAutoRefresh();
+                btn.textContent = '自动刷新';
+                btn.className = '';
+            } else {
+                if (!baseUrl) {
+                    alert('请先连接');
+                    return;
+                }
+                isAutoRefreshing = true;
+                const interval = setInterval(refreshScreen, 2000);
+                autoRefreshInterval = interval;
+                btn.textContent = '停止刷新';
+                btn.className = 'warning';
+                log('开始自动刷新 (2秒/次)', 'info');
+            }
+        }
+        
+        function stopAutoRefresh() {
+            isAutoRefreshing = false;
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+        
+        // API 调用
+        async function apiCall(method, endpoint, body = null, params = '') {
+            if (!baseUrl) {
+                alert('请先连接');
+                return null;
+            }
+            
+            const url = `${baseUrl}/api/${endpoint}${params}`;
+            log(`${method} ${url}`, 'info');
+            
+            try {
+                const opts = { method: method };
+                if (body) {
+                    opts.headers = { 'Content-Type': 'text/plain; charset=utf-8' };
+                    opts.body = body;
+                }
+                
+                const res = await fetch(url, opts);
+                const data = await res.json().catch(() => ({}));
+                
+                if (res.ok) {
+                    log(`成功: ${JSON.stringify(data).slice(0, 100)}`, 'success');
+                } else {
+                    log(`失败 (${res.status}): ${JSON.stringify(data)}`, 'error');
+                }
+                
+                return data;
+            } catch (err) {
+                log(`错误: ${err.message}`, 'error');
+                return null;
+            }
+        }
+        
+        // 设备信息
+        async function getDeviceInfo() {
+            const data = await apiCall('GET', 'device');
+            if (data) {
+                document.getElementById('deviceInfo').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('deviceInfo').classList.remove('hidden');
+            }
+        }
+        
+        async function getServerStatus() {
+            await apiCall('GET', 'status');
+        }
+        
+        async function getClients() {
+            await apiCall('GET', 'clients');
+        }
+        
+        // 音量亮度
+        async function setVolume() {
+            const value = document.getElementById('volumeSlider').value / 100;
+            await apiCall('POST', 'volume', null, `?value=${value}`);
+        }
+        
+        async function setBrightness() {
+            const value = document.getElementById('brightnessSlider').value / 100;
+            await apiCall('POST', 'brightness', null, `?value=${value}`);
+        }
+        
+        // 文本输入
+        async function sendInput() {
+            const text = document.getElementById('inputText').value;
+            if (!text) {
+                alert('请输入文本');
+                return;
+            }
+            await apiCall('POST', 'input', text);
+        }
+        
+        async function sendKey(code) {
+            await apiCall('POST', 'key', null, `?code=${code}`);
+        }
+        
+        // 剪贴板
+        async function setClipboard() {
+            const text = document.getElementById('clipboardText').value;
+            if (!text) {
+                alert('请输入文本');
+                return;
+            }
+            await apiCall('POST', 'clipboard_text', text);
+        }
+        
+        async function getClipboard() {
+            await apiCall('GET', 'clipboard_text');
+        }
+        
+        // AssistiveTouch
+        async function getAssistiveTouchStatus() {
+            await apiCall('GET', 'assistivetouch');
+        }
+        
+        async function toggleAssistiveTouch(action) {
+            await apiCall('POST', `assistivetouch`, null, `?action=${action}`);
+        }
+        
+        // 应用管理
+        async function installApp() {
+            const path = document.getElementById('installPath').value;
+            if (!path) {
+                alert('请输入 IPA 路径');
+                return;
+            }
+            await apiCall('POST', 'install', null, `?path=${encodeURIComponent(path)}`);
+        }
+        
+        async function uninstallApp() {
+            const bundleId = document.getElementById('uninstallBundleId').value;
+            if (!bundleId) {
+                alert('请输入 Bundle ID');
+                return;
+            }
+            if (!confirm(`确定要卸载 ${bundleId} 吗？`)) return;
+            await apiCall('POST', 'uninstall', null, `?bundleId=${encodeURIComponent(bundleId)}`);
+        }
+        
+        async function trollStoreDiagnostics() {
+            await apiCall('GET', 'trollstore/diagnostics');
+        }
+        
+        // 文件操作
+        async function writeFile(append) {
+            const path = document.getElementById('writeFilePath').value;
+            const content = document.getElementById('writeFileContent').value;
+            if (!path) {
+                alert('请输入文件路径');
+                return;
+            }
+            await apiCall('POST', 'writefile_text', content, `?path=${encodeURIComponent(path)}&append=${append}`);
+        }
+        
+        function onFileSelected(input) {
+            if (input.files.length > 0) {
+                selectedFile = input.files[0];
+                document.getElementById('fileName').textContent = selectedFile.name;
+            }
+        }
+        
+        async function uploadFile() {
+            if (!selectedFile) {
+                alert('请选择文件');
+                return;
+            }
+            const path = document.getElementById('uploadPath').value;
+            if (!path) {
+                alert('请输入目标路径');
+                return;
+            }
+            
+            const fullPath = path.endsWith('/') ? path + selectedFile.name : path;
+            log(`上传 ${selectedFile.name}...`, 'info');
+            
+            try {
+                const res = await fetch(`${baseUrl}/api/upload?path=${encodeURIComponent(fullPath)}`, {
+                    method: 'POST',
+                    body: selectedFile
+                });
+                const data = await res.json();
+                log(`上传: ${data.success ? '成功' : '失败'} (${data.bytes || 0} bytes)`, data.success ? 'success' : 'error');
+            } catch (err) {
+                log(`上传失败: ${err.message}`, 'error');
+            }
+        }
+        
+        async function checkFile() {
+            await apiCall('GET', 'checkfile');
+        }
+        
+        // 文件管理功能
+        async function listDirectory() {
+            const path = document.getElementById('listPath').value.trim();
+            const params = path ? `?path=${encodeURIComponent(path)}` : '';
+            const data = await apiCall('GET', `filelist${params}`);
+            if (data) {
+                const el = document.getElementById('fileList');
+                if (data.error) {
+                    el.textContent = `错误: ${data.error}`;
+                } else if (data.files) {
+                    el.textContent = data.files.map(f => 
+                        `${f.isDirectory ? '📁' : '📄'} ${f.name}${f.isDirectory ? '/' : ''} (${formatSize(f.size)})`
+                    ).join('\n') + `\n\n共 ${data.files.length} 项`;
+                } else {
+                    el.textContent = JSON.stringify(data, null, 2);
+                }
+            }
+        }
+        
+        async function readFile() {
+            const path = document.getElementById('readFilePath').value.trim();
+            if (!path) {
+                alert('请输入文件路径');
+                return;
+            }
+            const data = await apiCall('GET', `readfile?path=${encodeURIComponent(path)}`);
+            const el = document.getElementById('fileContent');
+            if (data) {
+                if (data.error) {
+                    el.textContent = `错误: ${data.error}`;
+                } else {
+                    el.textContent = data.content || data.data || JSON.stringify(data, null, 2);
+                }
+            }
+        }
+        
+        async function createFolder() {
+            const path = document.getElementById('createFolderPath').value.trim();
+            if (!path) {
+                alert('请输入目录路径');
+                return;
+            }
+            const data = await apiCall('POST', `createfolder?path=${encodeURIComponent(path)}`);
+            if (data?.success) {
+                document.getElementById('createFolderPath').value = '';
+                log(`目录创建成功: ${path}`, 'success');
+            }
+        }
+        
+        async function deleteFile() {
+            const path = document.getElementById('deletePath').value.trim();
+            if (!path) {
+                alert('请输入文件或目录路径');
+                return;
+            }
+            if (!confirm(`确定要删除吗？\n${path}\n\n此操作不可恢复！`)) return;
+            
+            const data = await apiCall('POST', `deletefile?path=${encodeURIComponent(path)}`);
+            if (data?.success) {
+                document.getElementById('deletePath').value = '';
+                log(`删除成功: ${path}`, 'success');
+            }
+        }
+        
+        function formatSize(bytes) {
+            if (bytes === 0 || bytes === undefined) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+        
+        // 滑块值更新
+        document.getElementById('volumeSlider')?.addEventListener('input', function() {
+            document.getElementById('volumeValue').textContent = this.value + '%';
+        });
+        
+        document.getElementById('brightnessSlider')?.addEventListener('input', function() {
+            document.getElementById('brightnessValue').textContent = this.value + '%';
+        });
+        
+        // 键盘快捷键
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                if (document.activeElement.id === 'inputText') {
+                    sendInput();
+                }
+            }
+        });
+    </script>
+</body>
+</html>

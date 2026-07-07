@@ -1,0 +1,16 @@
+{
+  "name": "trollvnc-relay-server",
+  "version": "1.0.0",
+  "description": "TrollVNC Group Control - Computer Relay Server",
+  "main": "relay-server.js",
+  "scripts": {
+    "start": "node relay-server.js",
+    "dev": "node relay-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
+}
