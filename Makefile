@@ -81,6 +81,11 @@ endif
 # On iOS 13.4+: libSystem provides a strong 3-underscore symbol that takes precedence.
 trollvncserver_LDFLAGS += -Wl,-alias,____darwin_check_fd_set_overflow,___darwin_check_fd_set_overflow
 
+# v3.28: roothide scheme needs -lroothide for the roothide API
+ifeq ($(THEOS_PACKAGE_SCHEME),roothide)
+trollvncserver_LDFLAGS += -lroothide
+endif
+
 trollvncserver_FRAMEWORKS += Accelerate
 trollvncserver_FRAMEWORKS += AVFoundation
 trollvncserver_FRAMEWORKS += CoreGraphics
