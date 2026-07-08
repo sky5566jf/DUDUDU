@@ -124,7 +124,10 @@ int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unu
 #include "fishhook.h"
 // v3.34: Directly include fishhook.c here instead of relying on Makefile _FILES.
 // Theos common.mk may silently ignore files added via _FILES after include.
+// v3.35: Wrap in extern "C" so functions compile with C linkage (matching fishhook.h declarations)
+extern "C" {
 #include "fishhook.c"
+}
 
 static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
     // Check iOS version — only rebind if < 13.4
