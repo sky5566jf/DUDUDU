@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.38
+export PACKAGE_VERSION := 3.39
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -31,10 +31,10 @@ trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 
-# v3.37: fishhook.c code is inlined directly in trollvncserver.mm (unconditional).
-# System headers are outside extern "C", function bodies inside extern "C".
-# Previous v3.35-v3.36 used #include "fishhook.c" inside extern "C" block,
-# which wrapped system headers in extern "C" — compiler silently skipped codegen.
+# v3.39: fishhook.c compiled as standalone .c file (standard way).
+# Inlining (v3.36-v3.38) failed because Theos -dead_strip removed all fishhook code
+# despite __attribute__((used)). Standalone .c + -Wl,-u,_rebind_symbols forces linkage.
+trollvncserver_FILES += src/fishhook.c
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
@@ -82,6 +82,10 @@ endif
 # v3.29: Reverted v3.28 linker alias (-Wl,-alias,...) which broke noVNC on iOS 13.4+.
 # Back to v3.27 state: source 3 underscores, no alias. iOS 13.4+ works normally.
 # iOS 13.3.x dyld crash remains unfixed (needs different approach).
+
+# v3.39: Force linker to keep rebind_symbols from standalone fishhook.c.
+# Without this, -dead_strip removes fishhook code even from standalone .c files.
+trollvncserver_LDFLAGS += -Wl,-u,_rebind_symbols
 
 # roothide scheme needs -lroothide for the roothide API.
 # BUT bootstrap.sh also sets THEOS_PACKAGE_SCHEME=roothide (uses roothide toolchain for
