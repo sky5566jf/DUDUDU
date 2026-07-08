@@ -108,6 +108,7 @@
 #include <sys/select.h>
 
 // Our custom implementation that fishhook will point the lazy symbol to
+__attribute__((used))
 static int _tvnc_fd_set_overflow_replacement(int fd, const struct fd_set *fdsetp, int unused) {
     (void)fdsetp;
     (void)unused;
@@ -125,6 +126,8 @@ int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unu
 }
 }
 
+// v3.38: fishhook inlined — UNCONDITIONAL compilation, __attribute__((used)) on all functions
+// to prevent -dead_strip linker optimization from removing the code.
 // v3.37: fishhook inlined — UNCONDITIONAL compilation (no #ifdef guard).
 //
 // WHY INLINE (not #include "fishhook.c"):
@@ -169,6 +172,7 @@ static struct rebindings_entry *_rebindings_head;
 
 extern "C" {
 
+__attribute__((used))
 static int prepend_rebindings(struct rebindings_entry **rebindings_head,
                               struct rebinding rebindings[],
                               size_t nel) {
@@ -188,6 +192,7 @@ static int prepend_rebindings(struct rebindings_entry **rebindings_head,
   return 0;
 }
 
+__attribute__((used))
 static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
                                            section_t *section,
                                            intptr_t slide,
@@ -228,6 +233,7 @@ static void perform_rebinding_with_section(struct rebindings_entry *rebindings,
   }
 }
 
+__attribute__((used))
 static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
                                      const struct mach_header *header,
                                      intptr_t slide) {
@@ -290,11 +296,13 @@ static void rebind_symbols_for_image(struct rebindings_entry *rebindings,
   }
 }
 
+__attribute__((used))
 static void _rebind_symbols_for_image(const struct mach_header *header,
                                       intptr_t slide) {
     rebind_symbols_for_image(_rebindings_head, header, slide);
 }
 
+__attribute__((used))
 int rebind_symbols_image(void *header,
                          intptr_t slide,
                          struct rebinding rebindings[],
@@ -309,6 +317,7 @@ int rebind_symbols_image(void *header,
     return retval;
 }
 
+__attribute__((used))
 int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
   int retval = prepend_rebindings(&_rebindings_head, rebindings, rebindings_nel);
   if (retval < 0) {
@@ -329,7 +338,7 @@ int rebind_symbols(struct rebinding rebindings[], size_t rebindings_nel) {
 
 // ---- end of fishhook.c inlined code ----
 
-static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
+static __attribute__((constructor)) __attribute__((used)) void _tvnc_init_fd_set_shim(void) {
     // Check iOS version — only rebind if < 13.4
     NSProcessInfo *pi = [NSProcessInfo processInfo];
     if ([pi respondsToSelector:@selector(operatingSystemVersion)]) {
@@ -350,7 +359,7 @@ static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
     rebind_symbols(rebinds, 1);
 }
 
-// End of fishhook constructor (v3.37: inlined fishhook.c code)
+// End of fishhook constructor (v3.38: __attribute__((used)) to prevent -dead_strip)
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
