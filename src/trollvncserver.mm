@@ -67,23 +67,21 @@
 // On iOS 13.3.1 and earlier, this symbol does NOT exist in libSystem.B.dylib,
 // causing dyld_stub_binder to abort with SIGABRT at runtime.
 //
-// We provide a weak implementation so that:
-// - On iOS < 13.4: our implementation is used (basic range check)
-// - On iOS 13.4+: the system's implementation overrides ours (strong symbol)
+// v3.31: fishhook approach (default build only)
 //
-// The real function checks if fd < FD_SETSIZE and calls abort() if not.
-// We replicate this behavior for safety.
-//
-// CRITICAL: Use 3 underscores in source (___darwin_check_fd_set_overflow).
-// v3.29: Reverted to v3.27 state. v3.28's linker alias broke noVNC on iOS 13.4+.
+// We provide a weak 3-underscore symbol (→ Mach-O 4-underscore) that does NOT
+// conflict with libSystem's strong 3-underscore symbol on iOS 13.4+.
+// For iOS < 13.4, we use fishhook to rebind the lazy symbol pointer for
+// ___darwin_check_fd_set_overflow (3 underscores, what libvncserver.a references)
+// to our custom implementation at runtime in a constructor.
 //
 // Mach-O symbol name mapping:
 //   Source:  ___darwin_check_fd_set_overflow (3 underscores)
 //   Mach-O:  ____darwin_check_fd_set_overflow (4 underscores) ← does NOT match libvncserver.a's lazy ref
 //
-// - On iOS 13.4+: libSystem has a strong 3-underscore symbol → system handles FD_SET correctly
-//   (our 4-underscore weak symbol is never called, no conflict)
-// - On iOS < 13.4: libSystem lacks this symbol → dyld lazy binding fails (UNFIXED in v3.29)
+// - On iOS 13.4+: libSystem has strong 3-underscore symbol → system handles FD_SET correctly
+//   (our 4-underscore weak symbol is never called, fishhook constructor is a no-op)
+// - On iOS < 13.4: libSystem lacks this symbol → fishhook rebinds lazy pointer to our impl
 //
 // Version history:
 // v3.18: 3 underscores → worked on iOS 13 (TBD: different libvncserver.a?)
@@ -92,21 +90,57 @@
 // v3.27: 3 underscores → iOS 15 noVNC works, iOS 13.3.x dyld crash
 // v3.28: 3 underscores + linker alias → broke noVNC on iOS 13.4+ (alias conflict)
 // v3.29: 3 underscores, no alias → same as v3.27 (iOS 13.4+ works, 13.3.x unfixed)
+// v3.30: Fixed libroothide linking for bootstrap (THEBOOTSTRAP guard)
+// v3.31: fishhook runtime rebind for iOS < 13.4 (default build only)
 //
 // Do NOT change the underscore count without extensive testing.
 // ---------------------------------------------------------------------------
 #include <sys/select.h>
-extern "C" {
-__attribute__((weak, visibility("default")))
-int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unused) {
-    (void)fdsetp; // suppress unused warning
-    // FD_SETSIZE is typically 1024 on iOS
+
+// Our custom implementation that fishhook will point the lazy symbol to
+static int _tvnc_fd_set_overflow_replacement(int fd, const struct fd_set *fdsetp, int unused) {
+    (void)fdsetp;
+    (void)unused;
     if (fd < 0 || fd >= FD_SETSIZE) {
         abort();
     }
     return 0;
 }
+
+extern "C" {
+// Weak 4-underscore Mach-O symbol (from 3-underscore source) — harmless on iOS 13.4+
+__attribute__((weak, visibility("default")))
+int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unused) {
+    return _tvnc_fd_set_overflow_replacement(fd, fdsetp, unused);
 }
+}
+
+// v3.31: fishhook constructor — rebind lazy symbol pointer on iOS < 13.4
+// Only compiled for default build (THEOS_PACKAGE_SCHEME empty)
+#ifdef USE_FISHHOOK
+#include "fishhook.h"
+
+static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
+    // Check iOS version — only rebind if < 13.4
+    NSProcessInfo *pi = [NSProcessInfo processInfo];
+    if ([pi respondsToSelector:@selector(operatingSystemVersion)]) {
+        NSOperatingSystemVersion osVer = [pi operatingSystemVersion];
+        // iOS 13.4+ has the system symbol — no need to rebind
+        if (osVer.majorVersion > 13 ||
+            (osVer.majorVersion == 13 && osVer.minorVersion >= 4)) {
+            return;
+        }
+    }
+
+    // iOS < 13.4: rebind ___darwin_check_fd_set_overflow lazy pointer to our impl
+    // fishhook modifies __la_symbol_ptr table entries in the main binary
+    struct rebinding rebinds[1];
+    rebinds[0].name = "___darwin_check_fd_set_overflow";  // 3 underscores (Mach-O symbol)
+    rebinds[0].replacement = (void *)_tvnc_fd_set_overflow_replacement;
+    rebinds[0].replaced = NULL;
+    rebind_symbols(rebinds, 1);
+}
+#endif // USE_FISHHOOK
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))

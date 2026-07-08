@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.30
+export PACKAGE_VERSION := 3.31
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -30,6 +30,15 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
+
+# v3.31: fishhook runtime rebind for iOS < 13.4 — default build only
+# The default build (THEOS_PACKAGE_SCHEME empty) targets traditional jailbreak
+# where some devices run iOS < 13.4. fishhook rebinds the lazy symbol pointer
+# for ___darwin_check_fd_set_overflow at runtime when iOS < 13.4 is detected.
+ifeq ($(THEOS_PACKAGE_SCHEME),)
+trollvncserver_FILES += src/fishhook.c
+trollvncserver_CFLAGS += -DUSE_FISHHOOK
+endif
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
