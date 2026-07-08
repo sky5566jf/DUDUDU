@@ -29,6 +29,7 @@
 #import <stdlib.h>
 #import <sys/proc_info.h>
 #import <sys/socket.h>
+#import <sys/sysctl.h>
 #import <unistd.h>
 
 #import "Control.h"
@@ -42,6 +43,33 @@ BOOL tvncLoggingEnabled = YES;
 BOOL tvncVerboseLoggingEnabled = NO;
 
 static TRWatchDog *gWatchDog = nil;
+
+// Send signal to all processes with the given name (replacement for killall command)
+static void tvncKillAllByName(NSString *processName, int sig) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) < 0) return;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return;
+    if (sysctl(mib, 4, procs, &size, NULL, 0) < 0) {
+        free(procs);
+        return;
+    }
+    size_t count = size / sizeof(struct kinfo_proc);
+    for (size_t i = 0; i < count; i++) {
+        pid_t pid = procs[i].kp_proc.p_pid;
+        if (pid == getpid()) continue;
+        char pathBuffer[PROC_PIDPATHINFO_MAXSIZE];
+        int pathLength = proc_pidpath(pid, pathBuffer, sizeof(pathBuffer));
+        if (pathLength > 0) {
+            NSString *fullPath = [NSString stringWithUTF8String:pathBuffer];
+            if ([[fullPath lastPathComponent] isEqualToString:processName]) {
+                kill(pid, sig);
+            }
+        }
+    }
+    free(procs);
+}
 
 static void mSignalAction(int signal, struct __siginfo *info, void *context) {
     if (signal == SIGCHLD) {
@@ -220,29 +248,32 @@ int main(int argc, const char *argv[]) {
         executablePath = [executablePath stringByAppendingPathComponent:@"trollvncserver"];
 
 #ifdef THEBOOTSTRAP
-        // Bootstrap 模式下，自动将 trollvncserver 拷贝到 /usr/bin/
+        // Bootstrap 模式下，如果有越狱环境，自动将 trollvncserver 拷贝到 /usr/bin/
         // 确保 LaunchDaemon 启动的是最新版本的二进制
+        // 纯 TrollStore 环境（无越狱）不需要此操作，因为没有 LaunchDaemon
         NSString *srcPath = executablePath;
-        NSString *jbRoot = @"";
+        NSString *jbRoot = nil;
         if (access("/var/jb", F_OK) == 0) {
             jbRoot = @"/var/jb";
         }
-        NSString *dstPath = [jbRoot stringByAppendingPathComponent:@"usr/bin/trollvncserver"];
+        if (jbRoot) {
+            NSString *dstPath = [jbRoot stringByAppendingPathComponent:@"usr/bin/trollvncserver"];
 
-        NSFileManager *fm = [NSFileManager defaultManager];
-        if ([fm fileExistsAtPath:srcPath]) {
-            // 比较版本，只有不同时才覆盖
-            NSDictionary *srcAttrs = [fm attributesOfItemAtPath:srcPath error:nil];
-            NSDictionary *dstAttrs = [fm attributesOfItemAtPath:dstPath error:nil];
-            if (![srcAttrs isEqualToDictionary:dstAttrs]) {
-                [fm removeItemAtPath:dstPath error:nil];
-                NSError *copyErr = nil;
-                if ([fm copyItemAtPath:srcPath toPath:dstPath error:&copyErr]) {
-                    chmod([dstPath UTF8String], 0755);
-                    NSLog(@"[TrollVNC] 已更新 daemon 二进制: %@", dstPath);
-                    // 通知 launchd 重启 daemon（让下次加载用新二进制）
-                    // 发送 SIGTERM 给 running daemon，launchd 会自动重启
-                    killall([@"trollvncserver" UTF8String], SIGTERM);
+            NSFileManager *fm = [NSFileManager defaultManager];
+            if ([fm fileExistsAtPath:srcPath]) {
+                // 比较版本，只有不同时才覆盖
+                NSDictionary *srcAttrs = [fm attributesOfItemAtPath:srcPath error:nil];
+                NSDictionary *dstAttrs = [fm attributesOfItemAtPath:dstPath error:nil];
+                if (![srcAttrs isEqualToDictionary:dstAttrs]) {
+                    [fm removeItemAtPath:dstPath error:nil];
+                    NSError *copyErr = nil;
+                    if ([fm copyItemAtPath:srcPath toPath:dstPath error:&copyErr]) {
+                        chmod([dstPath UTF8String], 0755);
+                        NSLog(@"[TrollVNC] 已更新 daemon 二进制: %@", dstPath);
+                        // 通知 launchd 重启 daemon（让下次加载用新二进制）
+                        // 发送 SIGTERM 给 running daemon，launchd 会自动重启
+                        tvncKillAllByName(@"trollvncserver", SIGTERM);
+                    }
                 }
             }
         }

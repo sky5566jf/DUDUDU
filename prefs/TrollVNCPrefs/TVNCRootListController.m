@@ -31,6 +31,7 @@
 #import <string.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
+#import <unistd.h>
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
@@ -40,6 +41,9 @@
 
 #ifdef THEBOOTSTRAP
 #endif
+
+// Forward declaration: tvncGetRealDeviceName() is defined later but used in crash handlers
+static NSString *tvncGetRealDeviceName(void);
 
 NS_INLINE NSString *GetDefaultRouteInterface(void) {
     static SCDynamicStoreRef (*_SCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack,
@@ -201,7 +205,7 @@ static void TVNCCrashHandleSignal(int sig) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.41\n"];
+    [log appendFormat:@"App Version: 3.42\n"];
 
     // 调用栈
     [log appendString:@"\nCall Stack:\n"];
@@ -228,7 +232,7 @@ static void TVNCCrashHandleException(NSException *exception) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.41\n"];
+    [log appendFormat:@"App Version: 3.42\n"];
 
     [log appendString:@"\nCall Stack:\n"];
     NSArray *symbols = exception.callStackSymbols;

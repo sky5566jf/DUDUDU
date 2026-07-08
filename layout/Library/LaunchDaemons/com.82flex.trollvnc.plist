@@ -25,6 +25,8 @@
 	<true/>
 	<key>Label</key>
 	<string>com.82flex.trollvnc</string>
+	<key>POSIXSpawnType</key>
+	<string>App</string>
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>ProgramArguments</key>

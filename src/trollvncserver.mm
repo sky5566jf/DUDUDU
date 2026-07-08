@@ -5464,7 +5464,7 @@ static void tvncCrashHandleSignal(int sig) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.41\n"];
+    [log appendFormat:@"App Version: 3.42\n"];
     [log appendString:@"\nCall Stack:\n"];
     for (NSString *s in [NSThread callStackSymbols]) {
         [log appendFormat:@"  %@\n", s];
@@ -5484,7 +5484,7 @@ static void tvncCrashHandleException(NSException *exception) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.41\n"];
+    [log appendFormat:@"App Version: 3.42\n"];
     [log appendString:@"\nCall Stack:\n"];
     NSArray *symbols = exception.callStackSymbols;
     if (symbols) {

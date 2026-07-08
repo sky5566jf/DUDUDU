@@ -31,6 +31,7 @@
 #import <string.h>
 #import <sys/sysctl.h>
 #import <sys/utsname.h>
+#import <unistd.h>
 
 #import "StripedTextTableViewController.h"
 #import "TVNCClientListController.h"
