@@ -33,14 +33,11 @@
 #import <errno.h>
 #import <fcntl.h>
 #import <mach-o/dyld.h>
-// v3.37: fishhook dependencies — MUST be outside extern "C" (included from .mm file)
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <mach/vm_region.h>
-#include <mach-o/loader.h>
-#include <mach-o/nlist.h>
 #import <netdb.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
@@ -66,92 +63,9 @@
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
 
-// ---------------------------------------------------------------------------
-// ___darwin_check_fd_set_overflow — iOS 13.4+ compatibility shim
-//
-// This symbol was introduced in iOS 13.4 / macOS 10.15.4 as part of the
-// FD_SET macro in <sys/select.h>. When code compiled with Xcode 11.4+
-// (SDK 13.4+) uses FD_SET, the compiler emits a call to this function.
-// On iOS 13.3.1 and earlier, this symbol does NOT exist in libSystem.B.dylib,
-// causing dyld_stub_binder to abort with SIGABRT at runtime.
-//
-// v3.31: fishhook approach (all builds, v3.33: unconditional)
-//
-// We provide a weak 3-underscore symbol (→ Mach-O 4-underscore) that does NOT
-// conflict with libSystem's strong 3-underscore symbol on iOS 13.4+.
-// For iOS < 13.4, we use fishhook to rebind the lazy symbol pointer for
-// ___darwin_check_fd_set_overflow (3 underscores, what libvncserver.a references)
-// to our custom implementation at runtime in a constructor.
-//
-// Mach-O symbol name mapping:
-//   Source:  ___darwin_check_fd_set_overflow (3 underscores)
-//   Mach-O:  ____darwin_check_fd_set_overflow (4 underscores) ← does NOT match libvncserver.a's lazy ref
-//
-// - On iOS 13.4+: libSystem has strong 3-underscore symbol → system handles FD_SET correctly
-//   (our 4-underscore weak symbol is never called, fishhook constructor is a no-op)
-// - On iOS < 13.4: libSystem lacks this symbol → fishhook rebinds lazy pointer to our impl
-//
-// Version history:
-// v3.18: 3 underscores → worked on iOS 13 (TBD: different libvncserver.a?)
-// v3.19: 2 underscores → iOS 13 OK but broke noVNC on iOS 15
-// v3.20-v3.26: 2 underscores → iOS 13 crash, iOS 15 noVNC broken
-// v3.27: 3 underscores → iOS 15 noVNC works, iOS 13.3.x dyld crash
-// v3.28: 3 underscores + linker alias → broke noVNC on iOS 13.4+ (alias conflict)
-// v3.29: 3 underscores, no alias → same as v3.27 (iOS 13.4+ works, 13.3.x unfixed)
-// v3.30: Fixed libroothide linking for bootstrap (THEBOOTSTRAP guard)
-// v3.31: fishhook runtime rebind for iOS < 13.4 (default build only, v3.33: all builds)
-// v3.32: attempted TVNC_FISHHOOK env var (did not trigger in Theos build system)
-// v3.33: unconditional fishhook compilation — always compiled, runtime check in constructor
-//
-// Do NOT change the underscore count without extensive testing.
-// ---------------------------------------------------------------------------
-#include <sys/select.h>
-
-// Our custom implementation that fishhook will point the lazy symbol to
-__attribute__((used))
-static int _tvnc_fd_set_overflow_replacement(int fd, const struct fd_set *fdsetp, int unused) {
-    (void)fdsetp;
-    (void)unused;
-    if (fd < 0 || fd >= FD_SETSIZE) {
-        abort();
-    }
-    return 0;
-}
-
-extern "C" {
-// Weak 4-underscore Mach-O symbol (from 3-underscore source) — harmless on iOS 13.4+
-__attribute__((weak, visibility("default")))
-int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unused) {
-    return _tvnc_fd_set_overflow_replacement(fd, fdsetp, unused);
-}
-}
-
-// v3.39: fishhook as standalone .c compilation unit via Makefile.
-// fishhook.c is compiled separately and linked normally — no inline trickery.
-// This avoids all the -dead_strip / __attribute__((used)) issues from v3.36-v3.38.
-// The linker flag -Wl,-u,_rebind_symbols forces rebind_symbols to be kept.
-#include "fishhook.h"
-
-// v3.39: fishhook constructor — calls rebind_symbols() from standalone fishhook.c.
-// Runtime iOS version check: only rebind on iOS < 13.4.
-// Safe on iOS 13.4+: constructor returns early without touching anything.
-static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
-    NSProcessInfo *pi = [NSProcessInfo processInfo];
-    if ([pi respondsToSelector:@selector(operatingSystemVersion)]) {
-        NSOperatingSystemVersion osVer = [pi operatingSystemVersion];
-        if (osVer.majorVersion > 13 ||
-            (osVer.majorVersion == 13 && osVer.minorVersion >= 4)) {
-            return;
-        }
-    }
-
-    struct rebinding rebinds[1];
-    rebinds[0].name = "___darwin_check_fd_set_overflow";
-    rebinds[0].replacement = (void *)_tvnc_fd_set_overflow_replacement;
-    rebinds[0].replaced = NULL;
-    rebind_symbols(rebinds, 1);
-}
-
+// v3.40: Dropped iOS < 13.4 compatibility.
+// ___darwin_check_fd_set_overflow is available in libSystem on iOS 13.4+.
+// Earlier iOS versions are no longer supported.
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
 
