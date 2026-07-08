@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.32
+export PACKAGE_VERSION := 3.33
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -31,14 +31,12 @@ trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 
-# v3.31: fishhook runtime rebind for iOS < 13.4 — default build only
-# Set TVNC_FISHHOOK=1 in devkit/default.sh to enable.
-# This rebinds the lazy symbol pointer for ___darwin_check_fd_set_overflow
-# at runtime when iOS < 13.4 is detected.
-ifneq ($(TVNC_FISHHOOK),)
+# v3.33: fishhook runtime rebind for iOS < 13.4 ___darwin_check_fd_set_overflow
+# Always compiled in; runtime constructor checks iOS version and skips rebind on iOS 13.4+.
+# v3.31/v3.32 tried conditional compilation (THEOS_PACKAGE_SCHEME/TVNC_FISHHOOK) but
+# the conditions never triggered under Theos build framework.
 trollvncserver_FILES += src/fishhook.c
 trollvncserver_CFLAGS += -DUSE_FISHHOOK
-endif
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option

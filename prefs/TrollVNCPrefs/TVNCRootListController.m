@@ -201,7 +201,7 @@ static void TVNCCrashHandleSignal(int sig) {
     [log appendFormat:@"Device: %@\n", dev.name];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.32\n"];
+    [log appendFormat:@"App Version: 3.33\n"];
 
     // 调用栈
     [log appendString:@"\nCall Stack:\n"];
@@ -228,7 +228,7 @@ static void TVNCCrashHandleException(NSException *exception) {
     [log appendFormat:@"Device: %@\n", dev.name];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.32\n"];
+    [log appendFormat:@"App Version: 3.33\n"];
 
     [log appendString:@"\nCall Stack:\n"];
     NSArray *symbols = exception.callStackSymbols;

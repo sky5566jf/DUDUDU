@@ -67,7 +67,7 @@
 // On iOS 13.3.1 and earlier, this symbol does NOT exist in libSystem.B.dylib,
 // causing dyld_stub_binder to abort with SIGABRT at runtime.
 //
-// v3.31: fishhook approach (default build only)
+// v3.31: fishhook approach (all builds, v3.33: unconditional)
 //
 // We provide a weak 3-underscore symbol (→ Mach-O 4-underscore) that does NOT
 // conflict with libSystem's strong 3-underscore symbol on iOS 13.4+.
@@ -91,7 +91,9 @@
 // v3.28: 3 underscores + linker alias → broke noVNC on iOS 13.4+ (alias conflict)
 // v3.29: 3 underscores, no alias → same as v3.27 (iOS 13.4+ works, 13.3.x unfixed)
 // v3.30: Fixed libroothide linking for bootstrap (THEBOOTSTRAP guard)
-// v3.31: fishhook runtime rebind for iOS < 13.4 (default build only)
+// v3.31: fishhook runtime rebind for iOS < 13.4 (default build only, v3.33: all builds)
+// v3.32: attempted TVNC_FISHHOOK env var (did not trigger in Theos build system)
+// v3.33: unconditional fishhook compilation — always compiled, runtime check in constructor
 //
 // Do NOT change the underscore count without extensive testing.
 // ---------------------------------------------------------------------------
@@ -116,7 +118,8 @@ int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unu
 }
 
 // v3.31: fishhook constructor — rebind lazy symbol pointer on iOS < 13.4
-// Only compiled for default build (THEOS_PACKAGE_SCHEME empty)
+// v3.33: Now compiled into all build variants (default/roothide/rootless/bootstrap).
+//        Safe because constructor checks iOS version at runtime; only activates on iOS < 13.4.
 #ifdef USE_FISHHOOK
 #include "fishhook.h"
 
