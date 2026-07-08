@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.36
+export PACKAGE_VERSION := 3.37
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -31,9 +31,10 @@ trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 
-# v3.36: fishhook.c is directly #included in trollvncserver.mm (unconditional, no #ifdef guard).
-# No _CFLAGS or _FILES needed — the code is embedded in the .mm translation unit.
-# Previous -DUSE_FISHHOOK was never passed to .mm files by Theos (only applies to .c files).
+# v3.37: fishhook.c code is inlined directly in trollvncserver.mm (unconditional).
+# System headers are outside extern "C", function bodies inside extern "C".
+# Previous v3.35-v3.36 used #include "fishhook.c" inside extern "C" block,
+# which wrapped system headers in extern "C" — compiler silently skipped codegen.
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
