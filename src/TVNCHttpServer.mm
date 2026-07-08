@@ -33,6 +33,8 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <CommonCrypto/CommonDigest.h> // SHA-1 for WebSocket handshake
+#import <dlfcn.h>
+#import <unistd.h>
 
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
@@ -1351,6 +1353,63 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     return response;
 }
 
+// v3.41: 获取真实设备名
+// iOS 16+ daemon 上下文中 UIDevice name 返回泛化的 "iPhone"（隐私保护），
+// 依次尝试: UIDevice name → MGCopyAnswer → preferences.plist → hostname → "iPhone"
+static NSString *tvncGetRealDeviceName(void) {
+    NSString *uidName = [[UIDevice currentDevice] name];
+
+    // 如果 UIDevice 返回的不是泛化的 "iPhone"，直接用
+    if (uidName && uidName.length > 0 && ![uidName isEqualToString:@"iPhone"]) {
+        return uidName;
+    }
+
+    // 尝试 MGCopyAnswer("DeviceName") 私有 API
+    void *mg = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+    if (mg) {
+        CFStringRef (*MGCopyAnswerPtr)(CFStringRef) = (CFStringRef (*)(CFStringRef))dlsym(mg, "MGCopyAnswer");
+        if (MGCopyAnswerPtr) {
+            CFStringRef mgName = MGCopyAnswerPtr(CFSTR("DeviceName"));
+            if (mgName) {
+                NSString *result = [(__bridge_transfer NSString *)mgName
+                    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (result.length > 0) {
+                    return result;
+                }
+            }
+        }
+    }
+
+    // 读 SystemConfiguration preferences.plist 中的 DeviceName
+    NSMutableArray *plistPaths = [NSMutableArray array];
+    if (access("/var/jb", F_OK) == 0) {
+        [plistPaths addObject:@"/var/jb/var/mobile/Library/Preferences/SystemConfiguration/preferences.plist"];
+        [plistPaths addObject:@"/var/jb/var/preferences/SystemConfiguration/preferences.plist"];
+    }
+    [plistPaths addObject:@"/var/mobile/Library/Preferences/SystemConfiguration/preferences.plist"];
+    [plistPaths addObject:@"/var/preferences/SystemConfiguration/preferences.plist"];
+
+    for (NSString *plistPath in plistPaths) {
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        NSDictionary *controller = prefs[@"Controller"];
+        NSString *devName = controller[@"DeviceName"];
+        if (devName && devName.length > 0) {
+            return devName;
+        }
+    }
+
+    // 尝试 hostname（有时等于设备名）
+    if (uidName && uidName.length > 0) {
+        return uidName;
+    }
+    NSString *hostname = [[NSProcessInfo processInfo] hostName];
+    if (hostname && hostname.length > 0) {
+        return hostname;
+    }
+
+    return @"iPhone";
+}
+
 // GET /api/device
 // 返回设备信息：设备名、设备ID、系统版本、电量、充电状态
 // 支持参数：ip=客户端IP，save=true（保存到 /var/mobile/Media/fuwuduan.txt）
@@ -1358,14 +1417,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
 - (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
-    // 获取设备名称
-    NSString *deviceName = [[UIDevice currentDevice] name];
-    if (!deviceName || deviceName.length == 0) {
-        deviceName = [[NSProcessInfo processInfo] hostName];
-    }
-    if (!deviceName || deviceName.length == 0) {
-        deviceName = @"iPhone";
-    }
+    // 获取设备名称 (v3.41: 使用 tvncGetRealDeviceName 修复 iOS 16+ daemon 上下文返回 "iPhone" 的问题)
+    NSString *deviceName = tvncGetRealDeviceName();
     
     // 获取系统版本
     NSString *systemVersion = [[UIDevice currentDevice] systemVersion];

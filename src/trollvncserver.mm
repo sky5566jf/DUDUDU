@@ -5418,6 +5418,42 @@ static void tvncCrashWriteToFile(NSString *log) {
     NSLog(@"[TrollVNC CrashLog] saved to: %@", path);
 }
 
+// v3.41: 获取真实设备名（iOS 16+ daemon 上下文修复）
+static NSString *tvncGetRealDeviceName(void) {
+    NSString *uidName = [[UIDevice currentDevice] name];
+    if (uidName && uidName.length > 0 && ![uidName isEqualToString:@"iPhone"]) {
+        return uidName;
+    }
+    void *mg = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+    if (mg) {
+        CFStringRef (*MGCopyAnswerPtr)(CFStringRef) = (CFStringRef (*)(CFStringRef))dlsym(mg, "MGCopyAnswer");
+        if (MGCopyAnswerPtr) {
+            CFStringRef mgName = MGCopyAnswerPtr(CFSTR("DeviceName"));
+            if (mgName) {
+                NSString *result = [(__bridge_transfer NSString *)mgName
+                    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+                if (result.length > 0) return result;
+            }
+        }
+    }
+    NSMutableArray *plistPaths = [NSMutableArray array];
+    if (access("/var/jb", F_OK) == 0) {
+        [plistPaths addObject:@"/var/jb/var/mobile/Library/Preferences/SystemConfiguration/preferences.plist"];
+        [plistPaths addObject:@"/var/jb/var/preferences/SystemConfiguration/preferences.plist"];
+    }
+    [plistPaths addObject:@"/var/mobile/Library/Preferences/SystemConfiguration/preferences.plist"];
+    [plistPaths addObject:@"/var/preferences/SystemConfiguration/preferences.plist"];
+    for (NSString *plistPath in plistPaths) {
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+        NSString *devName = prefs[@"Controller"][@"DeviceName"];
+        if (devName && devName.length > 0) return devName;
+    }
+    if (uidName && uidName.length > 0) return uidName;
+    NSString *hostname = [[NSProcessInfo processInfo] hostName];
+    if (hostname && hostname.length > 0) return hostname;
+    return @"iPhone";
+}
+
 static void tvncCrashHandleSignal(int sig) {
     signal(sig, SIG_DFL);
     NSMutableString *log = [NSMutableString string];
@@ -5425,10 +5461,10 @@ static void tvncCrashHandleSignal(int sig) {
     [log appendFormat:@"Time: %@\n", [NSDate date]];
     [log appendFormat:@"Signal: %d (%s)\n", sig, strsignal(sig)];
     UIDevice *dev = [UIDevice currentDevice];
-    [log appendFormat:@"Device: %@\n", dev.name];
+    [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.19\n"];
+    [log appendFormat:@"App Version: 3.41\n"];
     [log appendString:@"\nCall Stack:\n"];
     for (NSString *s in [NSThread callStackSymbols]) {
         [log appendFormat:@"  %@\n", s];
@@ -5445,10 +5481,10 @@ static void tvncCrashHandleException(NSException *exception) {
     [log appendFormat:@"Exception: %@\n", exception.name];
     [log appendFormat:@"Reason: %@\n", exception.reason];
     UIDevice *dev = [UIDevice currentDevice];
-    [log appendFormat:@"Device: %@\n", dev.name];
+    [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.19\n"];
+    [log appendFormat:@"App Version: 3.41\n"];
     [log appendString:@"\nCall Stack:\n"];
     NSArray *symbols = exception.callStackSymbols;
     if (symbols) {
