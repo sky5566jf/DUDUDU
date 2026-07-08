@@ -61,6 +61,10 @@
 	<true/>
 	<key>com.apple.private.MobileContainerManager.allowed</key>
 	<true/>
+	<key>com.apple.private.MobileGestalt.AllowedProtectedStrings</key>
+	<array>
+		<string>DeviceName</string>
+	</array>
 	<key>com.apple.private.allow-explicit-graphics-priority</key>
 	<true/>
 	<key>com.apple.private.hid.client.event-dispatch</key>

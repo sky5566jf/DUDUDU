@@ -2,7 +2,9 @@ name: Build TrollVNC
 
 on:
   push:
-    branches: [release, main]
+    branches: [release, main, master]
+  pull_request:
+    branches: [main, master]
   workflow_dispatch:
     inputs:
       is_managed:
@@ -92,24 +94,16 @@ jobs:
         with:
           repository: roothide/theos
           path: theos-roothide
-          submodules: false
+          submodules: recursive
 
       - name: Install iOS SDKs
         run: |
           export THEOS=$GITHUB_WORKSPACE/theos-roothide
-          cd $THEOS
+          cd theos-roothide
           ./bin/install-sdk iPhoneOS16.5
           ./bin/install-sdk iPhoneOS14.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup theos vendor dirs (update-theos)
-        run: |
-          cd theos-roothide
-          export THEOS=$(pwd)
-          rm -rf vendor/dm.pl vendor/dm.pl/ 2>/dev/null || true
-          bash bin/update-theos || true
-        shell: bash
 
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -147,17 +141,10 @@ jobs:
         run: |
           bash devkit/gen-managed-plist.sh
 
-      - name: Clean build cache
-        run: |
-          # Force clean all build artifacts to avoid version cache issues
-          rm -rf .theos/obj
-          rm -rf packages
-          rm -rf .theos/_/
-
       - name: Build package (${{ matrix.scheme }})
         run: |
           source devkit/${{ matrix.scheme }}.sh
-          FINALPACKAGE=1 gmake -B package
+          FINALPACKAGE=1 gmake clean package
 
       - name: Prepare artifacts
         run: |
@@ -196,9 +183,7 @@ jobs:
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/release'
     needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    runs-on: macos-14
 
     steps:
       - name: Checkout repository
@@ -224,7 +209,16 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: Release ${{ steps.tag.outputs.tag_name }}
-          body_path: CHANGELOG.md
+          body: |
+            Automated build from release branch
+
+            This release contains packages built with:
+            - Default scheme
+            - Rootless scheme
+            - RootHide scheme
+            - Bootstrap (TrollStore)
+
+            Built on: ${{ github.sha }}
           files: release-packages/**/*
           draft: false
           prerelease: false

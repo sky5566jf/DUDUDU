@@ -5418,7 +5418,8 @@ static void tvncCrashWriteToFile(NSString *log) {
     NSLog(@"[TrollVNC CrashLog] saved to: %@", path);
 }
 
-// v3.41: 获取真实设备名（iOS 16+ daemon 上下文修复）
+// v3.43: 获取真实设备名（增强版，iOS 16+ daemon 上下文修复）
+// Fallback: UIDevice name → MGCopyAnswer → MobileGestalt cache → preferences.plist → sysctl hostname → "iPhone"
 static NSString *tvncGetRealDeviceName(void) {
     NSString *uidName = [[UIDevice currentDevice] name];
     if (uidName && uidName.length > 0 && ![uidName isEqualToString:@"iPhone"]) {
@@ -5432,9 +5433,21 @@ static NSString *tvncGetRealDeviceName(void) {
             if (mgName) {
                 NSString *result = [(__bridge_transfer NSString *)mgName
                     stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                if (result.length > 0) return result;
+                if (result.length > 0 && ![result isEqualToString:@"iPhone"]) return result;
             }
         }
+    }
+    // v3.43: MobileGestalt cache plist (file read, no entitlement needed)
+    NSMutableArray *mgCachePaths = [NSMutableArray array];
+    if (access("/var/jb", F_OK) == 0) {
+        [mgCachePaths addObject:@"/var/jb/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist"];
+    }
+    [mgCachePaths addObject:@"/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist"];
+    for (NSString *mgPath in mgCachePaths) {
+        NSDictionary *mgCache = [NSDictionary dictionaryWithContentsOfFile:mgPath];
+        NSDictionary *cacheExtra = mgCache[@"CacheExtra"];
+        NSString *devName = cacheExtra[@"DeviceName"];
+        if ([devName isKindOfClass:[NSString class]] && devName.length > 0 && ![devName isEqualToString:@"iPhone"]) return devName;
     }
     NSMutableArray *plistPaths = [NSMutableArray array];
     if (access("/var/jb", F_OK) == 0) {
@@ -5446,11 +5459,19 @@ static NSString *tvncGetRealDeviceName(void) {
     for (NSString *plistPath in plistPaths) {
         NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:plistPath];
         NSString *devName = prefs[@"Controller"][@"DeviceName"];
-        if (devName && devName.length > 0) return devName;
+        if (devName && devName.length > 0 && ![devName isEqualToString:@"iPhone"]) return devName;
+    }
+    // v3.43: sysctl kern.hostname
+    char hostname[256] = {0};
+    size_t hsize = sizeof(hostname);
+    if (sysctlbyname("kern.hostname", hostname, &hsize, NULL, 0) == 0) {
+        NSString *hn = [[NSString stringWithUTF8String:hostname]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (hn.length > 0 && ![hn isEqualToString:@"iPhone"] && ![hn isEqualToString:@"localhost"]) return hn;
     }
     if (uidName && uidName.length > 0) return uidName;
-    NSString *hostname = [[NSProcessInfo processInfo] hostName];
-    if (hostname && hostname.length > 0) return hostname;
+    NSString *procHostname = [[NSProcessInfo processInfo] hostName];
+    if (procHostname && procHostname.length > 0) return procHostname;
     return @"iPhone";
 }
 
@@ -5464,7 +5485,7 @@ static void tvncCrashHandleSignal(int sig) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.42\n"];
+    [log appendFormat:@"App Version: 3.43\n"];
     [log appendString:@"\nCall Stack:\n"];
     for (NSString *s in [NSThread callStackSymbols]) {
         [log appendFormat:@"  %@\n", s];
@@ -5484,7 +5505,7 @@ static void tvncCrashHandleException(NSException *exception) {
     [log appendFormat:@"Device: %@\n", tvncGetRealDeviceName()];
     [log appendFormat:@"System: %@ %@\n", dev.systemName, dev.systemVersion];
     [log appendFormat:@"Model: %@\n", dev.model];
-    [log appendFormat:@"App Version: 3.42\n"];
+    [log appendFormat:@"App Version: 3.43\n"];
     [log appendString:@"\nCall Stack:\n"];
     NSArray *symbols = exception.callStackSymbols;
     if (symbols) {

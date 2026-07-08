@@ -17,7 +17,6 @@
 
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
-
 #import <NetworkExtension/NetworkExtension.h>
 
 @implementation TVNCHotspotManager
@@ -41,10 +40,11 @@
 - (BOOL)registerWithName:(NSString *)name {
     NSDictionary *options = @{kNEHotspotHelperOptionDisplayName: name};
     __weak typeof(self) weakSelf = self;
-    return [NEHotspotHelper registerWithOptions:options queue:dispatch_get_main_queue() handler:^(NEHotspotHelperCommand * _Nonnull cmd) {
+    BOOL result = [NEHotspotHelper registerWithOptions:options queue:dispatch_get_main_queue() handler:^(NEHotspotHelperCommand * _Nonnull cmd) {
         __strong typeof(self) strongSelf = weakSelf;
         [strongSelf handleCommand:cmd];
     }];
+    return result;
 }
 
 - (void)handleCommand:(NEHotspotHelperCommand *)command {
@@ -65,7 +65,25 @@
 }
 
 - (void)executeAutoStartupTaskIfNecessary {
+    // v3.43: 使用 beginBackgroundTask 延长后台执行时间
+    // iOS 15 上 NEHotspotHelper 唤醒 app 后，如果没有 background task，
+    // 系统可能会在服务启动前就杀死 app
+    UIApplication *app = [UIApplication sharedApplication];
+    __block UIBackgroundTaskIdentifier bgTaskId = [app beginBackgroundTaskWithExpirationHandler:^{
+        [app endBackgroundTask:bgTaskId];
+        bgTaskId = UIBackgroundTaskInvalid;
+    }];
+
     [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+
+    // 给服务一点时间启动
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+        if (bgTaskId != UIBackgroundTaskInvalid) {
+            [app endBackgroundTask:bgTaskId];
+            bgTaskId = UIBackgroundTaskInvalid;
+        }
+    });
 }
 
 @end

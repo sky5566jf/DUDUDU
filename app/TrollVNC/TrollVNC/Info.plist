@@ -36,6 +36,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>network-authentication</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.82flex.trollvnc.servicemonitor</string>
 	</array>
 </dict>
 </plist>
