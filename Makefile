@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.35
+export PACKAGE_VERSION := 3.36
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -31,10 +31,9 @@ trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 
-# v3.35: fishhook runtime rebind for iOS < 13.4 ___darwin_check_fd_set_overflow
-# fishhook.c is directly #included in trollvncserver.mm (wrapped in extern "C").
-# We keep _CFLAGS here but NOT _FILES — fishhook is embedded in the main .mm file.
-trollvncserver_CFLAGS += -DUSE_FISHHOOK
+# v3.36: fishhook.c is directly #included in trollvncserver.mm (unconditional, no #ifdef guard).
+# No _CFLAGS or _FILES needed — the code is embedded in the .mm translation unit.
+# Previous -DUSE_FISHHOOK was never passed to .mm files by Theos (only applies to .c files).
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option

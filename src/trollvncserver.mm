@@ -117,13 +117,14 @@ int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unu
 }
 }
 
-// v3.31: fishhook constructor — rebind lazy symbol pointer on iOS < 13.4
-// v3.33: Now compiled into all build variants (default/roothide/rootless/bootstrap).
-//        Safe because constructor checks iOS version at runtime; only activates on iOS < 13.4.
-#ifdef USE_FISHHOOK
+// v3.36: fishhook constructor — UNCONDITIONAL compilation (no #ifdef guard).
+// Previous versions (v3.31-v3.35) used #ifdef USE_FISHHOOK guard, but Theos
+// passes _CFLAGS to .c files only, NOT .mm files — so -DUSE_FISHHOOK never
+// reached the compiler for trollvncserver.mm, and the entire fishhook block
+// was silently skipped. Removing the guard ensures fishhook is always compiled.
+// Safe because constructor checks iOS version at runtime; only activates on iOS < 13.4.
 #include "fishhook.h"
 // v3.34: Directly include fishhook.c here instead of relying on Makefile _FILES.
-// Theos common.mk may silently ignore files added via _FILES after include.
 // v3.35: Wrap in extern "C" so functions compile with C linkage (matching fishhook.h declarations)
 extern "C" {
 #include "fishhook.c"
@@ -149,7 +150,8 @@ static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
     rebinds[0].replaced = NULL;
     rebind_symbols(rebinds, 1);
 }
-#endif // USE_FISHHOOK
+
+// End of fishhook constructor (v3.36: no longer guarded by #ifdef USE_FISHHOOK)
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
