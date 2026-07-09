@@ -20,6 +20,9 @@
 #import <NetworkExtension/NetworkExtension.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <UIKit/UIKit.h>
+#ifdef THEBOOTSTRAP
+#import <objc/message.h>
+#endif
 
 // Phantom WiFi SSID used to ensure iOS always scans for WiFi after reboot,
 // which triggers NEHotspotHelper and wakes the app for auto-start.
@@ -169,9 +172,34 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
         return;
     }
     
-    // initWithSSID:passphrase:isWPA3: is iOS 15+, not available in bootstrap SDK (iOS 14.5)
-    // Use initWithSSID:passphrase: (iOS 11+) which creates WPA2/WPA3 config; for our phantom SSID
-    // WPA2 is sufficient — we just need iOS to remember and scan for this SSID after reboot
+#ifdef THEBOOTSTRAP
+    // Bootstrap build: NEHotspotConfiguration/NEHotspotConfigurationManager APIs are not
+    // declared in the iOS 14.5 SDK headers used for bootstrap compilation, even though
+    // they ARE available at runtime (iOS 11+). Use objc_msgSend to bypass compile-time
+    // method resolution since the actual target device (iOS 14+) has these APIs available.
+    Class configClass = NSClassFromString(@"NEHotspotConfiguration");
+    Class managerClass = NSClassFromString(@"NEHotspotConfigurationManager");
+    if (!configClass || !managerClass) {
+        NSLog(@"[TVNC] NEHotspotConfiguration classes not available at runtime, skipping phantom WiFi");
+        return;
+    }
+    
+    // Create NEHotspotConfiguration with initWithSSID:passphrase: (WPA2, iOS 11+)
+    NEHotspotConfiguration *config = (NEHotspotConfiguration *)[configClass alloc];
+    if (@available(iOS 15.0, *)) {
+        // Use isWPA3:NO initializer on iOS 15+ for explicit WPA2
+        config = ((id (*)(id, SEL, id, id, BOOL))objc_msgSend)(config, sel_registerName("initWithSSID:passphrase:isWPA3:"), kPhantomSSID, kPhantomPassword, NO);
+    } else {
+        config = ((id (*)(id, SEL, id, id))objc_msgSend)(config, sel_registerName("initWithSSID:passphrase:"), kPhantomSSID, kPhantomPassword);
+    }
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(config, sel_registerName("setJoinOnce:"), NO);
+    
+    // Apply configuration via NEHotspotConfigurationManager
+    id manager = [managerClass performSelector:NSSelectorFromString(@"sharedManager")];
+    SEL applySel = sel_registerName("applyConfiguration:completionHandler:");
+    ((void (*)(id, SEL, id, void (^)(NSError *)))objc_msgSend)(manager, applySel, config, ^(NSError *error) {
+#else
+    // Non-bootstrap build: SDK headers have full NEHotspotConfiguration declarations
     NEHotspotConfiguration *config;
     if (@available(iOS 15.0, *)) {
         config = [[NEHotspotConfiguration alloc] initWithSSID:kPhantomSSID
@@ -184,6 +212,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     config.joinOnce = NO; // Persistent across reboots
     
     [[NEHotspotConfigurationManager sharedManager] applyConfiguration:config completionHandler:^(NSError *error) {
+#endif
         if (error) {
             // Error code -7 = already joined, which is fine
             if (error.code == -7) {
