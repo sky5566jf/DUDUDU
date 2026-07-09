@@ -139,7 +139,12 @@ jobs:
       - name: Build package (${{ matrix.scheme }})
         run: |
           source devkit/${{ matrix.scheme }}.sh
-          FINALPACKAGE=1 gmake clean package
+          # xcbeautify hides compile errors in bootstrap builds, use verbose mode for debugging
+          if [ "${{ matrix.scheme }}" == "bootstrap" ]; then
+            FINALPACKAGE=1 V=1 gmake clean package
+          else
+            FINALPACKAGE=1 gmake clean package
+          fi
 
       - name: Prepare artifacts
         run: |

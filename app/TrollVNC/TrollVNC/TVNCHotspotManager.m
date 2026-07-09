@@ -162,8 +162,9 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     
     // Check if phantom SSID is already saved (avoid unnecessary prompts)
     NSString *savedKey = @"MatisuXCS_PhantomWiFiSaved";
+    NSString *packageVer = [NSString stringWithUTF8String:PACKAGE_VERSION];
     NSString *savedVersion = [[NSUserDefaults standardUserDefaults] stringForKey:savedKey];
-    if ([savedVersion isEqualToString:@PACKAGE_VERSION]) {
+    if ([savedVersion isEqualToString:packageVer]) {
         NSLog(@"[TVNC] Phantom WiFi already saved for version %s, skipping", PACKAGE_VERSION);
         return;
     }
@@ -178,14 +179,14 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
             // Error code -7 = already joined, which is fine
             if (error.code == -7) {
                 NSLog(@"[TVNC] Phantom WiFi SSID already in system configuration");
-                [[NSUserDefaults standardUserDefaults] setObject:@PACKAGE_VERSION forKey:savedKey];
+                [[NSUserDefaults standardUserDefaults] setObject:packageVer forKey:savedKey];
             } else {
                 NSLog(@"[TVNC] Failed to save phantom WiFi: %@", error.localizedDescription);
                 // Even if this fails, the existing NEHotspotHelper mechanism still works for WiFi
             }
         } else {
             NSLog(@"[TVNC] Phantom WiFi SSID '%@' saved successfully - iOS will scan for it after reboot", kPhantomSSID);
-            [[NSUserDefaults standardUserDefaults] setObject:@PACKAGE_VERSION forKey:savedKey];
+            [[NSUserDefaults standardUserDefaults] setObject:packageVer forKey:savedKey];
         }
     }];
 }
