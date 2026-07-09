@@ -11,3 +11,7 @@ export THEOS_DEVICE_IP=127.0.0.1
 export THEOS_DEVICE_PORT=58422
 export THEOS_DEVICE_SIMULATOR=
 export THEBOOTSTRAP=1
+
+# v3.43 debug: disable xcbeautify to see raw xcodebuild errors
+export _THEOS_VERBOSE=1
+export DEBUG=1
