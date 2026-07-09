@@ -51,6 +51,8 @@
 		CC91EF902E6C2208002F5B2A /* TVNCClientListController.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF8F2E6C2208002F5B2A /* TVNCClientListController.m */; };
 		CC91EF932E6CA6C5002F5B2A /* TVNCClientCell.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF922E6CA6C5002F5B2A /* TVNCClientCell.m */; };
 		CC91EF972E6EF165002F5B2A /* TVNCListItemsController.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF962E6EF165002F5B2A /* TVNCListItemsController.m */; };
+		CC2BF93E2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */; };
+		CC2BF93F2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -90,6 +92,7 @@
 		CC17D9B82EC79DA1005C275A /* ZTSelfSignedCertificate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ZTSelfSignedCertificate.h; sourceTree = "<group>"; };
 		CC17D9B92EC79DA1005C275A /* ZTSelfSignedCertificate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ZTSelfSignedCertificate.m; sourceTree = "<group>"; };
 		CC1BF93D2F101B2F00111D96 /* SpringBoardServices.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; path = SpringBoardServices.tbd; sourceTree = "<group>"; };
+		CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = BackgroundTasks.framework; path = System/Library/Frameworks/BackgroundTasks.framework; sourceTree = SDKROOT; };
 		CC80617A2E74967500B1AA3E /* DpkgVersion.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DpkgVersion.h; sourceTree = "<group>"; };
 		CC80617B2E74967500B1AA3E /* DpkgVersion.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = DpkgVersion.m; sourceTree = "<group>"; };
 		CC80617C2E74967500B1AA3E /* GitHubReleaseUpdater.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GitHubReleaseUpdater.h; sourceTree = "<group>"; };
@@ -112,6 +115,7 @@
 				CC1BF93E2F101B2F00111D96 /* SpringBoardServices.tbd in Frameworks */,
 				61C756BE2E65BDAC00B2B371 /* Preferences.tbd in Frameworks */,
 				615EFE9F2F1602D700187EAF /* CoreServices.framework in Frameworks */,
+				CC2BF93E2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +125,7 @@
 			files = (
 				615401BF2EB1180C009FDD6F /* NetworkExtension.framework in Frameworks */,
 				615401C12EB1180C009FDD6F /* Preferences.Sim.tbd in Frameworks */,
+				CC2BF93F2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,6 +177,7 @@
 			children = (
 				615EFE9E2F1602D700187EAF /* CoreServices.framework */,
 				61C756662E65B72E00B2B371 /* NetworkExtension.framework */,
+				CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

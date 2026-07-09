@@ -18,6 +18,7 @@
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
 #import <NetworkExtension/NetworkExtension.h>
+#import <UIKit/UIKit.h>
 
 @implementation TVNCHotspotManager
 
