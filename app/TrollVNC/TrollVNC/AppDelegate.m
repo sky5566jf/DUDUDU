@@ -24,6 +24,8 @@
 #import "GitHubReleaseUpdater.h"
 #endif
 
+static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemonitor";
+
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
@@ -37,11 +39,14 @@
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"TrollVNC"];
 
+    // v3.43: 注册 BGTaskScheduler
+    [self registerBackgroundTask];
+
 #ifdef THEBOOTSTRAP
     [[TVNCVersionChecker shared] setCurrentVersion:@"3.43"];
 #endif
 
-    // 延迟释放 background task，给服务启动留出时间
+    // 延迟释放 background task
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         if (launchBgTask != UIBackgroundTaskInvalid) {
             [application endBackgroundTask:launchBgTask];
@@ -50,6 +55,42 @@
     });
 
     return YES;
+}
+
+#pragma mark - Background Task Scheduler (v3.43)
+
+- (void)registerBackgroundTask {
+    BOOL registered = [[BGTaskScheduler sharedScheduler]
+        registerForTaskWithIdentifier:kTVNCBGTaskIdentifier
+                          usingQueue:nil
+                           handler:^void(BGTask *task) {
+        [self handleBackgroundTask:task];
+    }];
+    if (registered) {
+        [self scheduleNextBackgroundTask];
+    }
+}
+
+- (void)scheduleNextBackgroundTask {
+    BGAppRefreshTaskRequest *request = [[BGAppRefreshTaskRequest alloc] initWithIdentifier:kTVNCBGTaskIdentifier];
+    request.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:60];
+    NSError *error = nil;
+    [[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error];
+}
+
+- (void)handleBackgroundTask:(BGTask *)task {
+    [self scheduleNextBackgroundTask];
+    UIApplication *app = [UIApplication sharedApplication];
+    __block UIBackgroundTaskIdentifier bgTaskId = [app beginBackgroundTaskWithExpirationHandler:^{
+        [app endBackgroundTask:bgTaskId];
+        bgTaskId = UIBackgroundTaskInvalid;
+    }];
+    [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+    [task setTaskCompletedWithSuccess:YES];
+    if (bgTaskId != UIBackgroundTaskInvalid) {
+        [app endBackgroundTask:bgTaskId];
+        bgTaskId = UIBackgroundTaskInvalid;
+    }
 }
 
 #pragma mark - UISceneSession lifecycle
