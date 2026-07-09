@@ -5531,6 +5531,54 @@ static void tvncSetupCrashLogger(void) {
 
 int main(int argc, const char *argv[]) {
 
+#ifdef THEBOOTSTRAP
+    // v3.47: daemon 在 dropPrivileges 之前以 platform-application 权限
+    // 自动创建 LaunchDaemon，确保纯 TrollStore 重启后自启动
+    @autoreleasepool {
+        NSString *srcPath = [NSString stringWithUTF8String:argv[0]];
+        BOOL hasJB = (access("/var/jb", F_OK) == 0);
+        NSString *dstPath = hasJB ? @"/var/jb/usr/bin/trollvncserver" : @"/usr/bin/trollvncserver";
+        NSString *plistDir = hasJB ? @"/var/jb/Library/LaunchDaemons" : @"/Library/LaunchDaemons";
+        NSString *plistPath = [plistDir stringByAppendingPathComponent:@"com.82flex.trollvnc.plist"];
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+
+        // Copy daemon binary to stable path (only if different)
+        if (![srcPath isEqualToString:dstPath]) {
+            [[NSFileManager defaultManager] createDirectoryAtPath:[dstPath stringByDeletingLastPathComponent]
+                                      withIntermediateDirectories:YES attributes:nil error:nil];
+            NSDictionary *srcAttrs = [fm attributesOfItemAtPath:srcPath error:nil];
+            NSDictionary *dstAttrs = [fm attributesOfItemAtPath:dstPath error:nil];
+            if (![srcAttrs isEqualToDictionary:dstAttrs]) {
+                [fm removeItemAtPath:dstPath error:nil];
+                if ([fm copyItemAtPath:srcPath toPath:dstPath error:nil]) {
+                    chmod([dstPath UTF8String], 0755);
+                }
+            }
+        }
+
+        // Create LaunchDaemon plist (only if not exists)
+        [fm createDirectoryAtPath:plistDir withIntermediateDirectories:YES attributes:nil error:nil];
+        if (![fm fileExistsAtPath:plistPath]) {
+            NSDictionary *plist = @{
+                @"Label": @"com.82flex.trollvnc",
+                @"ProgramArguments": @[dstPath, @"-daemon"],
+                @"RunAtLoad": @YES,
+                @"KeepAlive": @YES,
+                @"UserName": @"root",
+                @"GroupName": @"wheel",
+                @"ExitTimeOut": @3,
+                @"ThrottleInterval": @5,
+                @"StandardOutPath": @"/tmp/trollvnc-stdout.log",
+                @"StandardErrorPath": @"/tmp/trollvnc-stderr.log",
+            };
+            if ([plist writeToFile:plistPath atomically:YES]) {
+                chmod([plistPath UTF8String], 0644);
+            }
+        }
+    }
+#endif
+
     /* Drop privileges: this program should run as mobile */
     dropPrivileges();
     
