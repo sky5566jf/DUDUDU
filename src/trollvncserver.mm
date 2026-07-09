@@ -35,6 +35,7 @@
 #import <mach-o/dyld.h>
 #include <dlfcn.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <mach/mach.h>
 #include <mach/vm_map.h>
 #include <mach/vm_region.h>
