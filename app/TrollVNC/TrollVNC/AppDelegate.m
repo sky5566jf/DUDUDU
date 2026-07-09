@@ -27,14 +27,27 @@
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // v3.43: 申请后台执行时间，确保服务有足够时间启动
+    __block UIBackgroundTaskIdentifier launchBgTask = [application beginBackgroundTaskWithExpirationHandler:^{
+        [application endBackgroundTask:launchBgTask];
+        launchBgTask = UIBackgroundTaskInvalid;
+    }];
+
     // Override point for customization after application launch.
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"TrollVNC"];
 
 #ifdef THEBOOTSTRAP
-    // Initialize Version Checker (manual only, no background check)
     [[TVNCVersionChecker shared] setCurrentVersion:@"3.43"];
 #endif
+
+    // 延迟释放 background task，给服务启动留出时间
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (launchBgTask != UIBackgroundTaskInvalid) {
+            [application endBackgroundTask:launchBgTask];
+            launchBgTask = UIBackgroundTaskInvalid;
+        }
+    });
 
     return YES;
 }
