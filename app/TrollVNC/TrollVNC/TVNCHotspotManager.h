@@ -25,7 +25,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)registerWithName:(NSString *)name;
 - (void)executeAutoStartupTaskIfNecessary;
 - (void)startNetworkReachabilityMonitor;
-- (void)savePhantomWiFiConfiguration;
 
 @end
 
