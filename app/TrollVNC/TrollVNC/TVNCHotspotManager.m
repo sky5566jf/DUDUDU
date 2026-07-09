@@ -169,9 +169,18 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
         return;
     }
     
-    NEHotspotConfiguration *config = [[NEHotspotConfiguration alloc] initWithSSID:kPhantomSSID
-                                                                           passphrase:kPhantomPassword
-                                                                        isWPA3:NO];
+    // initWithSSID:passphrase:isWPA3: is iOS 15+, not available in bootstrap SDK (iOS 14.5)
+    // Use initWithSSID:passphrase: (iOS 11+) which creates WPA2/WPA3 config; for our phantom SSID
+    // WPA2 is sufficient — we just need iOS to remember and scan for this SSID after reboot
+    NEHotspotConfiguration *config;
+    if (@available(iOS 15.0, *)) {
+        config = [[NEHotspotConfiguration alloc] initWithSSID:kPhantomSSID
+                                                     passphrase:kPhantomPassword
+                                                      isWPA3:NO];
+    } else {
+        config = [[NEHotspotConfiguration alloc] initWithSSID:kPhantomSSID
+                                                     passphrase:kPhantomPassword];
+    }
     config.joinOnce = NO; // Persistent across reboots
     
     [[NEHotspotConfigurationManager sharedManager] applyConfiguration:config completionHandler:^(NSError *error) {

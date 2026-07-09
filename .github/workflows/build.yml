@@ -139,9 +139,12 @@ jobs:
       - name: Build package (${{ matrix.scheme }})
         run: |
           source devkit/${{ matrix.scheme }}.sh
-          # xcbeautify hides compile errors in bootstrap builds, use verbose mode for debugging
+          # For bootstrap builds, uninstall xcbeautify/xcpretty to prevent hiding compile errors
+          # Theos pipes xcodebuild output through xcpretty/xcbeautify, which strips error details
           if [ "${{ matrix.scheme }}" == "bootstrap" ]; then
-            FINALPACKAGE=1 V=1 gmake clean package
+            brew uninstall xcbeautify 2>/dev/null || true
+            brew uninstall xcpretty 2>/dev/null || true
+            FINALPACKAGE=1 TARGET_XCPRETTY= gmake clean package
           else
             FINALPACKAGE=1 gmake clean package
           fi
