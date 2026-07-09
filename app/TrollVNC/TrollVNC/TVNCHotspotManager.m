@@ -197,7 +197,8 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     // Apply configuration via NEHotspotConfigurationManager
     id manager = [managerClass performSelector:NSSelectorFromString(@"sharedManager")];
     SEL applySel = sel_registerName("applyConfiguration:completionHandler:");
-    ((void (*)(id, SEL, id, void (^)(NSError *)))objc_msgSend)(manager, applySel, config, ^(NSError *error) {
+    // Extract block as local variable to avoid C function-pointer cast incompatibility with ObjC block literals
+    void (^completionHandler)(NSError *) = ^(NSError *error) {
 #else
     // Non-bootstrap build: SDK headers have full NEHotspotConfiguration declarations
     NEHotspotConfiguration *config;
@@ -226,7 +227,11 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
             NSLog(@"[TVNC] Phantom WiFi SSID '%@' saved successfully - iOS will scan for it after reboot", kPhantomSSID);
             [[NSUserDefaults standardUserDefaults] setObject:packageVer forKey:savedKey];
         }
-    }];
+    };
+#ifdef THEBOOTSTRAP
+    // Pass block as id type to objc_msgSend (blocks are id-compatible in ObjC runtime)
+    ((void (*)(id, SEL, id, id))objc_msgSend)(manager, applySel, config, completionHandler);
+#endif
 }
 
 - (void)dealloc {
