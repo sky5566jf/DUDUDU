@@ -234,7 +234,7 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     // CRITICAL: Copy block to heap before passing via objc_msgSend.
     // Unlike normal ObjC method calls, objc_msgSend does not auto-copy stack blocks.
     // Without this, the async completionHandler would access freed stack memory -> crash.
-    void (^completionHandler)(NSError *) = [^(NSError *error) {
+    void (^completionHandler)(NSError *) = ^(NSError *error) {
 #else
     // Non-bootstrap build: SDK headers have full NEHotspotConfiguration declarations
     NEHotspotConfiguration *config;
