@@ -2,6 +2,15 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.44] – 2026-07-09
+
+### Fixed
+- **iOS 15 以太网重启后无法启动服务**: 当设备使用以太网（非WiFi）时，NEHotspotHelper 不会触发导致开机后服务无法自动启动。修复：在有 jbroot (/var/jb) 的环境下，自动创建 LaunchDaemon plist 到 `/var/jb/Library/LaunchDaemons/com.82flex.trollvnc.plist`，系统启动时由 launchd 直接拉起 trollvncserver，不依赖 WiFi 事件
+- **Bootstrap 编译修复**: `registerForTaskWithIdentifier:usingQueue:` 参数标签 `handler:` 修正为 `launchHandler:`
+
+### Changed
+- **LaunchDaemon 管理**: trollvncmanager 启动时自动检测 jbroot，创建/更新 LaunchDaemon plist，运行身份为 root
+
 ## [3.2-273-iOS13] – 2026-05-03
 
 ### Added

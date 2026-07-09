@@ -276,6 +276,37 @@ int main(int argc, const char *argv[]) {
                     }
                 }
             }
+
+            // v3.43: 创建 LaunchDaemon plist，确保以太网环境开机自启动
+            NSString *launchDaemonDir = [jbRoot stringByAppendingPathComponent:@"Library/LaunchDaemons"];
+            NSString *plistPath = [launchDaemonDir stringByAppendingPathComponent:@"com.82flex.trollvnc.plist"];
+            [fm createDirectoryAtPath:launchDaemonDir withIntermediateDirectories:YES attributes:nil error:nil];
+
+            NSDictionary *plist = @{
+                @"Label": @"com.82flex.trollvnc",
+                @"ProgramArguments": @[dstPath, @"-daemon"],
+                @"RunAtLoad": @YES,
+                @"KeepAlive": @YES,
+                @"UserName": @"root",
+                @"GroupName": @"wheel",
+                @"ExitTimeOut": @3,
+                @"ThrottleInterval": @5,
+                @"ProcessType": @"Interactive",
+                @"EnvironmentVariables": @{
+                    @"TROLLVNC_REPEATER_RETRY_INTERVAL": @"30.0",
+                },
+                @"StandardOutPath": @"/tmp/trollvnc-stdout.log",
+                @"StandardErrorPath": @"/tmp/trollvnc-stderr.log",
+            };
+
+            // 仅在 plist 不存在或内容不同时写入
+            NSDictionary *existing = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+            if (![plist isEqualToDictionary:existing]) {
+                if ([plist writeToFile:plistPath atomically:YES]) {
+                    chmod([plistPath UTF8String], 0644);
+                    NSLog(@"[TrollVNC] 已创建 LaunchDaemon: %@", plistPath);
+                }
+            }
         }
 #endif
 
