@@ -29,6 +29,28 @@
 			<true/>
 		</dict>
 
+		<!-- Phantom WiFi Auto-Start -->
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string></string>
+			<key>footerText</key>
+			<string>重启后自动启动（虚拟 WiFi）：在系统 WiFi 配置中保存一个并不存在的网络，iOS 重启后会持续扫描该网络从而唤醒本应用并启动 VNC 服务。仅当设备 WiFi 开关开启时有效。开启后会立即写入系统配置；关闭后会移除。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>defaults</key>
+			<string>com.82flex.trollvnc</string>
+			<key>key</key>
+			<string>PhantomWiFiEnabled</string>
+			<key>label</key>
+			<string>虚拟 WiFi 自启</string>
+			<key>default</key>
+			<false/>
+		</dict>
+
 		<!-- Desktop Name -->
 		<dict>
 			<key>cell</key>

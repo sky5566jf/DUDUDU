@@ -32,6 +32,7 @@ static NSString *const kPhantomPassword = @"MatisuXCS2025Trigger";
 @interface TVNCHotspotManager ()
 @property (nonatomic, assign) SCNetworkReachabilityRef reachability;
 @property (nonatomic, assign) BOOL lastNetworkState;
+@property (nonatomic, assign) BOOL lastPhantomWiFiState;
 @end
 
 @implementation TVNCHotspotManager
@@ -65,9 +66,26 @@ static NSString *const kPhantomPassword = @"MatisuXCS2025Trigger";
     // Also start Ethernet reachability monitor
     [self startNetworkReachabilityMonitor];
     
-    // Save a phantom WiFi configuration so iOS always scans for WiFi after reboot,
-    // which triggers NEHotspotHelper and wakes the app (even in Ethernet-only environments)
-    [self savePhantomWiFiConfiguration];
+    // v3.50: Observe the "虚拟 WiFi 自启" toggle so it takes effect immediately without relaunch
+    _lastPhantomWiFiState = [self isPhantomWiFiEnabled];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(phantomWiFiPreferenceChanged:)
+                                                 name:NSUserDefaultsDidChangeNotification
+                                               object:nil];
+    
+    // v3.50: Save a phantom WiFi configuration so iOS always scans for WiFi after reboot,
+    // which triggers NEHotspotHelper and wakes the app (even in Ethernet-only environments).
+    // Only when the user enables the toggle. Deferred + exception-safe so it can never
+    // block or crash app launch.
+    if (_lastPhantomWiFiState) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            @try {
+                [self savePhantomWiFiConfiguration];
+            } @catch (NSException *e) {
+                NSLog(@"[TVNC] Phantom WiFi save failed with exception: %@", e);
+            }
+        });
+    }
     
     return result;
 }
@@ -163,6 +181,13 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     // which wakes the app and starts VNC service automatically.
     // Works even in Ethernet-only environments (as long as WiFi switch is ON).
     
+    @try {
+    // Gate: only proceed when the user enabled the "虚拟 WiFi 自启" toggle
+    if (![self isPhantomWiFiEnabled]) {
+        NSLog(@"[TVNC] Phantom WiFi disabled by user, skipping save");
+        return;
+    }
+
     // Check if phantom SSID is already saved (avoid unnecessary prompts)
     NSString *savedKey = @"MatisuXCS_PhantomWiFiSaved";
     NSString *packageVer = [NSString stringWithUTF8String:PACKAGE_VERSION];
@@ -192,13 +217,24 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     } else {
         config = ((id (*)(id, SEL, id, id))objc_msgSend)(config, sel_registerName("initWithSSID:passphrase:"), kPhantomSSID, kPhantomPassword);
     }
+    if (!config) {
+        NSLog(@"[TVNC] Failed to create NEHotspotConfiguration, skipping phantom WiFi");
+        return;
+    }
     ((void (*)(id, SEL, BOOL))objc_msgSend)(config, sel_registerName("setJoinOnce:"), NO);
     
     // Apply configuration via NEHotspotConfigurationManager
     id manager = [managerClass performSelector:NSSelectorFromString(@"sharedManager")];
+    if (!manager) {
+        NSLog(@"[TVNC] NEHotspotConfigurationManager.sharedManager returned nil, skipping phantom WiFi");
+        return;
+    }
     SEL applySel = sel_registerName("applyConfiguration:completionHandler:");
-    // Extract block as local variable to avoid C function-pointer cast incompatibility with ObjC block literals
-    void (^completionHandler)(NSError *) = ^(NSError *error) {
+    
+    // CRITICAL: Copy block to heap before passing via objc_msgSend.
+    // Unlike normal ObjC method calls, objc_msgSend does not auto-copy stack blocks.
+    // Without this, the async completionHandler would access freed stack memory -> crash.
+    void (^completionHandler)(NSError *) = [^(NSError *error) {
 #else
     // Non-bootstrap build: SDK headers have full NEHotspotConfiguration declarations
     NEHotspotConfiguration *config;
@@ -232,6 +268,67 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     // Pass block as id type to objc_msgSend (blocks are id-compatible in ObjC runtime)
     ((void (*)(id, SEL, id, id))objc_msgSend)(manager, applySel, config, completionHandler);
 #endif
+    } @catch (NSException *e) {
+        NSLog(@"[TVNC] Phantom WiFi save failed with exception: %@", e);
+    }
+}
+
+- (BOOL)isPhantomWiFiEnabled {
+    // Reads the "虚拟 WiFi 自启" toggle. PSSwitchCell writes to the shared
+    // preference domain com.82flex.trollvnc (same as all other TrollVNC settings),
+    // which differs from this app's own bundle id (com.matisu.xcs).
+    // Must read from that suite explicitly, matching TVNCServiceCoordinator.
+    NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
+    return [prefs boolForKey:@"PhantomWiFiEnabled"];
+}
+
+- (void)phantomWiFiPreferenceChanged:(NSNotification *)note {
+    // React to live toggle changes without requiring an app relaunch
+    BOOL current = [self isPhantomWiFiEnabled];
+    if (current == _lastPhantomWiFiState) {
+        return; // unrelated preference change
+    }
+    _lastPhantomWiFiState = current;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @try {
+            if (current) {
+                [self savePhantomWiFiConfiguration];
+            } else {
+                [self removePhantomWiFiConfiguration];
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[TVNC] Phantom WiFi preference change error: %@", e);
+        }
+    });
+}
+
+- (void)removePhantomWiFiConfiguration {
+    // Remove the phantom SSID from the system WiFi configuration.
+    // Safe to call anytime; idempotent. Used when the user turns the toggle OFF.
+    @try {
+        Class managerClass = NSClassFromString(@"NEHotspotConfigurationManager");
+        if (!managerClass) {
+            NSLog(@"[TVNC] NEHotspotConfigurationManager not available, skipping phantom WiFi removal");
+            return;
+        }
+
+#ifdef THEBOOTSTRAP
+        id manager = [managerClass performSelector:NSSelectorFromString(@"sharedManager")];
+        if (!manager) {
+            return;
+        }
+        SEL removeSel = sel_registerName("removeConfigurationForSSID:");
+        ((void (*)(id, SEL, id))objc_msgSend)(manager, removeSel, kPhantomSSID);
+#else
+        [[NEHotspotConfigurationManager sharedManager] removeConfigurationForSSID:kPhantomSSID];
+#endif
+
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"MatisuXCS_PhantomWiFiSaved"];
+        NSLog(@"[TVNC] Removed phantom WiFi SSID '%@' from system configuration", kPhantomSSID);
+    } @catch (NSException *e) {
+        NSLog(@"[TVNC] Failed to remove phantom WiFi: %@", e);
+    }
 }
 
 - (void)dealloc {
