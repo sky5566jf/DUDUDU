@@ -84,10 +84,15 @@ jobs:
 
       - name: Install dependencies
         run: |
-          # Install xcbeautify for build output formatting
           # Install ldid for iOS code signing
           # Install 7zip for compression
-          brew install xcbeautify ldid-procursus p7zip make
+          brew install ldid-procursus p7zip make
+
+      - name: Disable xcbeautify (debug CI failure)
+        run: |
+          # Temporarily remove xcbeautify to see raw compiler errors
+          brew uninstall --ignore-dependencies xcbeautify 2>/dev/null || true
+          rm -f /opt/homebrew/bin/xcbeautify /usr/local/bin/xcbeautify 2>/dev/null || true
 
       - name: Checkout roothide/theos
         uses: actions/checkout@v4
