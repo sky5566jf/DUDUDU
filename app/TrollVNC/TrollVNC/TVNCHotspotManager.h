@@ -24,6 +24,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)sharedManager;
 - (BOOL)registerWithName:(NSString *)name;
 - (void)executeAutoStartupTaskIfNecessary;
+- (void)startNetworkReachabilityMonitor;
 
 @end
 

@@ -18,7 +18,13 @@
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
 #import <NetworkExtension/NetworkExtension.h>
+#import <SystemConfiguration/SystemConfiguration.h>
 #import <UIKit/UIKit.h>
+
+@interface TVNCHotspotManager ()
+@property (nonatomic, assign) SCNetworkReachabilityRef reachability;
+@property (nonatomic, assign) BOOL lastNetworkState;
+@end
 
 @implementation TVNCHotspotManager
 
@@ -34,18 +40,69 @@
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _lastNetworkState = NO;
     }
     return self;
 }
 
 - (BOOL)registerWithName:(NSString *)name {
+    // Register NEHotspotHelper for WiFi events
     NSDictionary *options = @{kNEHotspotHelperOptionDisplayName: name};
     __weak typeof(self) weakSelf = self;
     BOOL result = [NEHotspotHelper registerWithOptions:options queue:dispatch_get_main_queue() handler:^(NEHotspotHelperCommand * _Nonnull cmd) {
         __strong typeof(self) strongSelf = weakSelf;
         [strongSelf handleCommand:cmd];
     }];
+    
+    // Also start Ethernet reachability monitor
+    [self startNetworkReachabilityMonitor];
+    
     return result;
+}
+
+- (void)startNetworkReachabilityMonitor {
+    // Monitor ANY network connection (WiFi, Ethernet, Cellular)
+    // This fixes the issue where Ethernet-only connections don't trigger NEHotspotHelper
+    struct sockaddr_in zeroAddress;
+    memset(&zeroAddress, 0, sizeof(zeroAddress));
+    zeroAddress.sin_len = sizeof(zeroAddress);
+    zeroAddress.sin_family = AF_INET;
+    
+    self.reachability = SCNetworkReachabilityCreateWithAddress(NULL, (const struct sockaddr *)&zeroAddress);
+    
+    if (self.reachability) {
+        SCNetworkReachabilityContext context = {0, (__bridge void *)self, NULL, NULL, NULL};
+        SCNetworkReachabilitySetCallback(self.reachability, ReachabilityCallback, &context);
+        SCNetworkReachabilitySetDispatchQueue(self.reachability, dispatch_get_main_queue());
+        
+        // Check initial state
+        SCNetworkReachabilityFlags flags;
+        if (SCNetworkReachabilityGetFlags(self.reachability, &flags)) {
+            BOOL initialConnected = (flags & kSCNetworkReachabilityFlagsReachable) != 0;
+            if (initialConnected) {
+                NSLog(@"[TVNC] Network: initial state = connected (Ethernet/WiFi)");
+                [self executeAutoStartupTaskIfNecessary];
+            }
+        }
+        
+        NSLog(@"[TVNC] Network: reachability monitor started");
+    }
+}
+
+static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReachabilityFlags flags, void *info) {
+    TVNCHotspotManager *manager = (__bridge TVNCHotspotManager *)info;
+    
+    BOOL isConnected = (flags & kSCNetworkReachabilityFlagsReachable) != 0;
+    BOOL wasConnected = manager.lastNetworkState;
+    manager.lastNetworkState = isConnected;
+    
+    NSLog(@"[TVNC] Network: reachability changed, connected=%d (was=%d)", isConnected, wasConnected);
+    
+    if (isConnected && !wasConnected) {
+        // Network just became available (WiFi or Ethernet)
+        NSLog(@"[TVNC] Network: connection detected, triggering service startup");
+        [manager executeAutoStartupTaskIfNecessary];
+    }
 }
 
 - (void)handleCommand:(NEHotspotHelperCommand *)command {
@@ -85,6 +142,15 @@
             bgTaskId = UIBackgroundTaskInvalid;
         }
     });
+}
+
+- (void)dealloc {
+    if (self.reachability) {
+        SCNetworkReachabilitySetCallback(self.reachability, NULL, NULL);
+        SCNetworkReachabilitySetDispatchQueue(self.reachability, NULL);
+        CFRelease(self.reachability);
+        self.reachability = NULL;
+    }
 }
 
 @end
