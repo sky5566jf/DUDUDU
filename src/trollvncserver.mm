@@ -151,14 +151,16 @@ static BOOL gUserSingleNotifsEnabled = YES;
 // Auto-unlock after boot (no-passcode devices only: Home wake → Home unlock)
 static BOOL gAutoUnlockEnabled = YES; // default on in daemon mode
 
-// Check if WiFi (en0) has an IPv4 address
+// Check if any network interface (WiFi en0, Ethernet en1+, etc.) has an IPv4 address
+// Supports both WiFi and Ethernet connections
 static BOOL isWiFiConnected() {
     struct ifaddrs *ifaddr = NULL;
     if (getifaddrs(&ifaddr) != 0) return NO;
     BOOL connected = NO;
     for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        // Check any "en" interface (en0=WiFi, en1+=Ethernet) that is UP and RUNNING
         if ((ifa->ifa_flags & IFF_UP) && (ifa->ifa_flags & IFF_RUNNING) &&
-            strcmp(ifa->ifa_name, "en0") == 0 && ifa->ifa_addr != NULL &&
+            strncmp(ifa->ifa_name, "en", 2) == 0 && ifa->ifa_addr != NULL &&
             ifa->ifa_addr->sa_family == AF_INET) {
             struct sockaddr_in *sa = (struct sockaddr_in *)ifa->ifa_addr;
             if (sa->sin_addr.s_addr != 0) {
@@ -5643,19 +5645,19 @@ int main(int argc, const char *argv[]) {
 
                 TVLog(@"AutoUnlock: sequence complete.");
 
-                // Step 7: Check WiFi connectivity after unlock
+                // Step 7: Check network connectivity after unlock (WiFi or Ethernet)
                 STAccurateSleep(3.0);
                 if (isWiFiConnected()) {
-                    TVLog(@"WiFi: already connected after unlock.");
+                    TVLog(@"Network: already connected after unlock (WiFi or Ethernet).");
                 } else {
-                    TVLog(@"WiFi: not connected after unlock, attempting reconnect...");
+                    TVLog(@"Network: not connected after unlock, attempting WiFi reconnect...");
                     triggerWiFiReconnect();
                     // Wait and check again
                     STAccurateSleep(5.0);
                     if (isWiFiConnected()) {
-                        TVLog(@"WiFi: reconnected successfully.");
+                        TVLog(@"Network: reconnected successfully.");
                     } else {
-                        TVLog(@"WiFi: still not connected after reconnect attempt.");
+                        TVLog(@"Network: still not connected after reconnect attempt.");
                     }
                 }
             });
