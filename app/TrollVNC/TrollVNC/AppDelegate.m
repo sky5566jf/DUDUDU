@@ -60,9 +60,13 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
 #pragma mark - Background Task Scheduler (v3.43)
 
 - (void)registerBackgroundTask {
-    // 仅测试 BGTaskScheduler 类是否存在
-    BGTaskScheduler *scheduler = [BGTaskScheduler sharedScheduler];
-    (void)scheduler;
+    BOOL registered = [[BGTaskScheduler sharedScheduler]
+        registerForTaskWithIdentifier:kTVNCBGTaskIdentifier
+                          usingQueue:nil
+                           handler:^void(BGTask *task) {
+        // minimal handler
+    }];
+    (void)registered;
 }
 
 #pragma mark - UISceneSession lifecycle
