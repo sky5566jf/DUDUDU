@@ -63,10 +63,34 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
     BOOL registered = [[BGTaskScheduler sharedScheduler]
         registerForTaskWithIdentifier:kTVNCBGTaskIdentifier
                           usingQueue:nil
-                           handler:^void(BGTask *task) {
-        // minimal handler
+                       launchHandler:^void(BGTask *task) {
+        [self handleBackgroundTask:task];
     }];
-    (void)registered;
+    if (registered) {
+        [self scheduleNextBackgroundTask];
+    }
+}
+
+- (void)scheduleNextBackgroundTask {
+    BGAppRefreshTaskRequest *request = [[BGAppRefreshTaskRequest alloc] initWithIdentifier:kTVNCBGTaskIdentifier];
+    request.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:60];
+    NSError *error = nil;
+    [[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error];
+}
+
+- (void)handleBackgroundTask:(BGTask *)task {
+    [self scheduleNextBackgroundTask];
+    UIApplication *app = [UIApplication sharedApplication];
+    __block UIBackgroundTaskIdentifier bgTaskId = [app beginBackgroundTaskWithExpirationHandler:^{
+        [app endBackgroundTask:bgTaskId];
+        bgTaskId = UIBackgroundTaskInvalid;
+    }];
+    [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+    [task setTaskCompletedWithSuccess:YES];
+    if (bgTaskId != UIBackgroundTaskInvalid) {
+        [app endBackgroundTask:bgTaskId];
+        bgTaskId = UIBackgroundTaskInvalid;
+    }
 }
 
 #pragma mark - UISceneSession lifecycle
