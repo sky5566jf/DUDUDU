@@ -18,6 +18,7 @@
 #import "AppDelegate.h"
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
+#import <BackgroundTasks/BackgroundTasks.h>
 
 #ifdef THEBOOTSTRAP
 #import "GitHubReleaseUpdater.h"
