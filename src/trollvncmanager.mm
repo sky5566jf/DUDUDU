@@ -248,30 +248,17 @@ int main(int argc, const char *argv[]) {
         executablePath = [executablePath stringByAppendingPathComponent:@"trollvncserver"];
 
 #ifdef THEBOOTSTRAP
-        // v3.44: 支持两种环境的 LaunchDaemon:
-        //   1. 越狱环境 (/var/jb 存在): 写入 /var/jb/Library/LaunchDaemons/
-        //   2. 纯 TrollStore (无 /var/jb): 直接写入 /Library/LaunchDaemons/
-        //   TrollStore 有 platform-application + rootless.install 权限，可写系统路径
+        // TrollStore (bootstrap/tipa) version:
+        // - TrollStore cannot write /Library/LaunchDaemons/ (no root access)
+        // - WiFi (NEHotspotHelper) is the only viable auto-start mechanism for reboot
+        // - Jailbreak (deb) version already has LaunchDaemon plist from layout/ directory
+        //   which auto-starts on boot with RunAtLoad=true + KeepAlive=true
+        // Therefore: only copy daemon binary for TrollStore path, no LaunchDaemon plist creation
         NSString *srcPath = executablePath;
-        NSString *dstPath = nil;
-        NSString *launchDaemonDir = nil;
-        NSString *plistPath = nil;
-
-        if (access("/var/jb", F_OK) == 0) {
-            // 越狱环境
-            dstPath = @"/var/jb/usr/bin/trollvncserver";
-            launchDaemonDir = @"/var/jb/Library/LaunchDaemons";
-            plistPath = [launchDaemonDir stringByAppendingPathComponent:@"com.82flex.trollvnc.plist"];
-        } else {
-            // 纯 TrollStore 环境（无越狱）
-            dstPath = @"/usr/bin/trollvncserver";
-            launchDaemonDir = @"/Library/LaunchDaemons";
-            plistPath = [launchDaemonDir stringByAppendingPathComponent:@"com.82flex.trollvnc.plist"];
-        }
+        NSString *dstPath = @"/usr/bin/trollvncserver";
 
         NSFileManager *fm = [NSFileManager defaultManager];
         if ([fm fileExistsAtPath:srcPath]) {
-            // 比较版本，只有不同时才覆盖
             NSDictionary *srcAttrs = [fm attributesOfItemAtPath:srcPath error:nil];
             NSDictionary *dstAttrs = [fm attributesOfItemAtPath:dstPath error:nil];
             if (![srcAttrs isEqualToDictionary:dstAttrs]) {
@@ -286,45 +273,6 @@ int main(int argc, const char *argv[]) {
                 } else {
                     NSLog(@"[TrollVNC] 拷贝 daemon 失败: %@ -> %@ error:%@", srcPath, dstPath, copyErr);
                 }
-            }
-        }
-
-        // 创建 LaunchDaemon plist
-        [fm createDirectoryAtPath:launchDaemonDir withIntermediateDirectories:YES attributes:nil error:nil];
-
-        NSDictionary *plist = @{
-            @"Label": @"com.82flex.trollvnc",
-            @"ProgramArguments": @[dstPath, @"-daemon"],
-            @"RunAtLoad": @YES,
-            @"KeepAlive": @YES,
-            @"UserName": @"root",
-            @"GroupName": @"wheel",
-            @"ExitTimeOut": @3,
-            @"ThrottleInterval": @5,
-            @"ProcessType": @"Interactive",
-            @"EnvironmentVariables": @{
-                @"TROLLVNC_REPEATER_RETRY_INTERVAL": @"30.0",
-            },
-            @"StandardOutPath": @"/tmp/trollvnc-stdout.log",
-            @"StandardErrorPath": @"/tmp/trollvnc-stderr.log",
-        };
-
-        // 仅在 plist 不存在或内容不同时写入
-        NSDictionary *existing = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-        if (![plist isEqualToDictionary:existing]) {
-            if ([plist writeToFile:plistPath atomically:YES]) {
-                chmod([plistPath UTF8String], 0644);
-                NSLog(@"[TrollVNC] 已创建 LaunchDaemon: %@", plistPath);
-                // 立即加载 LaunchDaemon（下次重启也会自动加载）
-                pid_t pid = 0;
-                if (posix_spawn(&pid, "/bin/launchctl", NULL, NULL,
-                                (char *[]){"/bin/launchctl", "load", "-w", (char *)[plistPath UTF8String], NULL}, NULL) == 0) {
-                    int status;
-                    waitpid(pid, &status, 0);
-                    NSLog(@"[TrollVNC] launchctl load 完成");
-                }
-            } else {
-                NSLog(@"[TrollVNC] 写入 LaunchDaemon plist 失败: %@", plistPath);
             }
         }
 #endif
