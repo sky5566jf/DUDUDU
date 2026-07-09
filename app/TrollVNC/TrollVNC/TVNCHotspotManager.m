@@ -21,6 +21,11 @@
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <UIKit/UIKit.h>
 
+// Phantom WiFi SSID used to ensure iOS always scans for WiFi after reboot,
+// which triggers NEHotspotHelper and wakes the app for auto-start.
+static NSString *const kPhantomSSID = @"MatisuXCS-AutoStart-Trigger";
+static NSString *const kPhantomPassword = @"MatisuXCS2025Trigger";
+
 @interface TVNCHotspotManager ()
 @property (nonatomic, assign) SCNetworkReachabilityRef reachability;
 @property (nonatomic, assign) BOOL lastNetworkState;
@@ -56,6 +61,10 @@
     
     // Also start Ethernet reachability monitor
     [self startNetworkReachabilityMonitor];
+    
+    // Save a phantom WiFi configuration so iOS always scans for WiFi after reboot,
+    // which triggers NEHotspotHelper and wakes the app (even in Ethernet-only environments)
+    [self savePhantomWiFiConfiguration];
     
     return result;
 }
@@ -142,6 +151,43 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
             bgTaskId = UIBackgroundTaskInvalid;
         }
     });
+}
+
+- (void)savePhantomWiFiConfiguration {
+    // v3.50: Save a phantom WPA2 WiFi SSID to the system configuration.
+    // iOS remembers this SSID and will always try to find it during WiFi scanning after reboot.
+    // This scanning process triggers NEHotspotHelper FilterScanList callback,
+    // which wakes the app and starts VNC service automatically.
+    // Works even in Ethernet-only environments (as long as WiFi switch is ON).
+    
+    // Check if phantom SSID is already saved (avoid unnecessary prompts)
+    NSString *savedKey = @"MatisuXCS_PhantomWiFiSaved";
+    NSString *savedVersion = [[NSUserDefaults standardUserDefaults] stringForKey:savedKey];
+    if ([savedVersion isEqualToString:@PACKAGE_VERSION]) {
+        NSLog(@"[TVNC] Phantom WiFi already saved for version %s, skipping", PACKAGE_VERSION);
+        return;
+    }
+    
+    NEHotspotConfiguration *config = [[NEHotspotConfiguration alloc] initWithSSID:kPhantomSSID
+                                                                           passphrase:kPhantomPassword
+                                                                        isWPA3:NO];
+    config.joinOnce = NO; // Persistent across reboots
+    
+    [[NEHotspotConfigurationManager sharedManager] applyConfiguration:config completionHandler:^(NSError *error) {
+        if (error) {
+            // Error code -7 = already joined, which is fine
+            if (error.code == -7) {
+                NSLog(@"[TVNC] Phantom WiFi SSID already in system configuration");
+                [[NSUserDefaults standardUserDefaults] setObject:@PACKAGE_VERSION forKey:savedKey];
+            } else {
+                NSLog(@"[TVNC] Failed to save phantom WiFi: %@", error.localizedDescription);
+                // Even if this fails, the existing NEHotspotHelper mechanism still works for WiFi
+            }
+        } else {
+            NSLog(@"[TVNC] Phantom WiFi SSID '%@' saved successfully - iOS will scan for it after reboot", kPhantomSSID);
+            [[NSUserDefaults standardUserDefaults] setObject:@PACKAGE_VERSION forKey:savedKey];
+        }
+    }];
 }
 
 - (void)dealloc {
