@@ -15,6 +15,8 @@ endif
 endif
 
 GO_EASY_ON_ME := 1
+DEBUG := 0
+_THEOS_VERBOSE := 1
 
 include $(THEOS)/makefiles/common.mk
 
