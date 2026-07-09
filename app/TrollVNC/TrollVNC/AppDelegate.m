@@ -46,7 +46,7 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
 
 #ifdef THEBOOTSTRAP
     // Initialize Version Checker (manual only, no background check)
-    [[TVNCVersionChecker shared] setCurrentVersion:@PACKAGE_VERSION];
+    [[TVNCVersionChecker shared] setCurrentVersion:@"3.43"];
 #endif
 
     // 延迟释放 background task，给服务启动留出时间
