@@ -60,37 +60,9 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
 #pragma mark - Background Task Scheduler (v3.43)
 
 - (void)registerBackgroundTask {
-    BOOL registered = [[BGTaskScheduler sharedScheduler]
-        registerForTaskWithIdentifier:kTVNCBGTaskIdentifier
-                          usingQueue:nil
-                           handler:^void(BGTask *task) {
-        [self handleBackgroundTask:task];
-    }];
-    if (registered) {
-        [self scheduleNextBackgroundTask];
-    }
-}
-
-- (void)scheduleNextBackgroundTask {
-    BGAppRefreshTaskRequest *request = [[BGAppRefreshTaskRequest alloc] initWithIdentifier:kTVNCBGTaskIdentifier];
-    request.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:60];
-    NSError *error = nil;
-    [[BGTaskScheduler sharedScheduler] submitTaskRequest:request error:&error];
-}
-
-- (void)handleBackgroundTask:(BGTask *)task {
-    [self scheduleNextBackgroundTask];
-    UIApplication *app = [UIApplication sharedApplication];
-    __block UIBackgroundTaskIdentifier bgTaskId = [app beginBackgroundTaskWithExpirationHandler:^{
-        [app endBackgroundTask:bgTaskId];
-        bgTaskId = UIBackgroundTaskInvalid;
-    }];
-    [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
-    [task setTaskCompletedWithSuccess:YES];
-    if (bgTaskId != UIBackgroundTaskInvalid) {
-        [app endBackgroundTask:bgTaskId];
-        bgTaskId = UIBackgroundTaskInvalid;
-    }
+    // 仅测试 BGTaskScheduler 类是否存在
+    BGTaskScheduler *scheduler = [BGTaskScheduler sharedScheduler];
+    (void)scheduler;
 }
 
 #pragma mark - UISceneSession lifecycle
