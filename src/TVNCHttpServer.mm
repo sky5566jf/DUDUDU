@@ -5685,6 +5685,7 @@ static NSString *wsReadFrame(int sock) {
     
     // 尝试多种写入方式
     NSError *writeError = nil;
+    int spawnRootCpResult = -999;  // 记录 spawnRoot cp 的退出码
     BOOL writeOK = [plistData writeToFile:prefsPath options:NSDataWritingAtomic error:&writeError];
     
     if (!writeOK) {
@@ -5730,6 +5731,31 @@ static NSString *wsReadFrame(int sock) {
                 unlink([tmpPath UTF8String]);
             }
         }
+        
+        // 方案4: spawnRoot cp - 用 posix_spawn 以 root 身份执行 cp，绕过沙盒限制
+        if (!writeOK) {
+            NSString *tmpPath = @"/tmp/preferences.plist.tmp";
+            BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
+            if (tmpOK) {
+                TVLog(@"HTTP Server: trying spawnRoot cp...");
+                spawnRootCpResult = spawnRoot(@"/bin/cp", @[@"-f", tmpPath, prefsPath]);
+                TVLog(@"HTTP Server: spawnRoot cp exit code: %d", spawnRootCpResult);
+                if (spawnRootCpResult == 0) {
+                    spawnRoot(@"/bin/chmod", @[@"644", prefsPath]);
+                    // 验证文件确实更新了
+                    struct stat verifySt;
+                    if (stat([prefsPath UTF8String], &verifySt) == 0 && verifySt.st_size == (off_t)plistData.length) {
+                        writeOK = YES;
+                        TVLog(@"HTTP Server: spawnRoot cp write succeeded (size=%lld)", verifySt.st_size);
+                    } else {
+                        TVLog(@"HTTP Server: spawnRoot cp verification failed - size=%lld expected=%lu", verifySt.st_size, (unsigned long)plistData.length);
+                    }
+                }
+                unlink([tmpPath UTF8String]);
+            } else {
+                TVLog(@"HTTP Server: failed to write temp file for spawnRoot cp");
+            }
+        }
     }
     
     if (!writeOK) {
@@ -5749,7 +5775,8 @@ static NSString *wsReadFrame(int sock) {
             @"method": @"direct_plist",
             @"path": prefsPath,
             @"file_stat": statInfo,
-            @"data_size": @(plistData.length)
+            @"data_size": @(plistData.length),
+            @"spawn_root_cp_exit": @(spawnRootCpResult)
         } options:0 error:nil];
         return response;
     }
