@@ -80,6 +80,71 @@ static int spawnAsRoot(NSString *path, NSArray *args) {
     waitpid(pid, &status, 0);
     return WEXITSTATUS(status);
 }
+
+// 以 root 身份执行命令并捕获 stdout（用于诊断 persona API 是否生效）
+static int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **output) {
+    if (!path) return -1;
+    
+    NSMutableArray *fullArgv = [NSMutableArray arrayWithObject:path];
+    if (args) [fullArgv addObjectsFromArray:args];
+    
+    char **argv = (char **)malloc((fullArgv.count + 1) * sizeof(char *));
+    for (NSUInteger i = 0; i < fullArgv.count; i++) {
+        argv[i] = (char *)[fullArgv[i] UTF8String];
+    }
+    argv[fullArgv.count] = NULL;
+    
+    // 创建 pipe 捕获 stdout
+    int pipefd[2];
+    if (pipe(pipefd) != 0) { free(argv); return -1; }
+    
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+    posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+    
+    pid_t pid;
+    posix_spawnattr_t attr;
+    int err = posix_spawnattr_init(&attr);
+    if (err != 0) { posix_spawn_file_actions_destroy(&actions); free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+    if (err != 0) { posix_spawnattr_destroy(&attr); posix_spawn_file_actions_destroy(&actions); free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_uid_np(&attr, 0);
+    if (err != 0) { posix_spawnattr_destroy(&attr); posix_spawn_file_actions_destroy(&actions); free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_gid_np(&attr, 0);
+    if (err != 0) { posix_spawnattr_destroy(&attr); posix_spawn_file_actions_destroy(&actions); free(argv); return err; }
+    
+    err = posix_spawn(&pid, [path UTF8String], &actions, &attr, argv, NULL);
+    posix_spawnattr_destroy(&attr);
+    posix_spawn_file_actions_destroy(&actions);
+    free(argv);
+    
+    if (err != 0) { close(pipefd[0]); close(pipefd[1]); return err; }
+    
+    close(pipefd[1]); // 关闭写端
+    
+    // 读取子进程输出
+    NSMutableData *outData = [NSMutableData data];
+    char buf[4096];
+    ssize_t n;
+    while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
+        [outData appendBytes:buf length:n];
+    }
+    close(pipefd[0]);
+    
+    if (output) {
+        *output = [[NSString alloc] initWithData:outData encoding:NSUTF8StringEncoding];
+    }
+    
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WEXITSTATUS(status);
+}
 #import <CommonCrypto/CommonDigest.h> // SHA-1 for WebSocket handshake
 #import <dlfcn.h>
 #import <notify.h>
@@ -5422,6 +5487,84 @@ static NSString *wsReadFrame(int sock) {
         @"pid": @(getpid())
     };
     
+    // 6. 检查关键命令是否存在
+    NSArray *cmds = @[
+        @"/bin/cp", @"/usr/bin/cp",
+        @"/bin/chmod", @"/usr/bin/chmod",
+        @"/usr/bin/plutil", @"/usr/bin/defaults",
+        @"/bin/launchctl", @"/usr/bin/launchctl",
+        @"/usr/bin/id", @"/bin/id",
+        @"/bin/ls", @"/usr/bin/ls",
+        @"/usr/bin/cat", @"/bin/cat"
+    ];
+    NSMutableDictionary *cmdCheck = [NSMutableDictionary dictionary];
+    for (NSString *cmd in cmds) {
+        cmdCheck[cmd] = @(access([cmd UTF8String], X_OK) == 0);
+    }
+    result[@"commands"] = cmdCheck;
+    
+    // 7. spawnAsRoot 测试 - 执行 id 命令验证 persona API 是否生效
+    NSString *idOutput = nil;
+    NSString *idPath = access("/usr/bin/id", X_OK) == 0 ? @"/usr/bin/id" : 
+                       (access("/bin/id", X_OK) == 0 ? @"/bin/id" : nil);
+    if (idPath) {
+        int idExit = spawnAsRootWithOutput(idPath, nil, &idOutput);
+        result[@"spawnAsRoot_test"] = @{
+            @"command": idPath,
+            @"exit_code": @(idExit),
+            @"output": idOutput ?: @"(no output)"
+        };
+    } else {
+        result[@"spawnAsRoot_test"] = @{@"error": @"id command not found"};
+    }
+    
+    // 8. 读取 preferences.plist 结构（CurrentSet 和 Service 列表）
+    NSString *prefsPath = @"/Library/Preferences/SystemConfiguration/preferences.plist";
+    NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:prefsPath];
+    if (prefs) {
+        NSMutableDictionary *prefsInfo = [NSMutableDictionary dictionary];
+        prefsInfo[@"top_keys"] = prefs.allKeys;
+        
+        NSString *currentSet = prefs[@"CurrentSet"]; // e.g. "/Sets/A1B2C3..."
+        prefsInfo[@"current_set"] = currentSet ?: @"(not found)";
+        
+        // 读取 Sets -> CurrentSet -> Network -> Service
+        if (currentSet) {
+            NSDictionary *sets = prefs[@"Sets"];
+            if (sets && [sets isKindOfClass:[NSDictionary class]]) {
+                NSDictionary *currentSetDict = sets[currentSet];
+                if (currentSetDict && [currentSetDict isKindOfClass:[NSDictionary class]]) {
+                    NSDictionary *network = currentSetDict[@"Network"];
+                    if (network && [network isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary *services = network[@"Service"];
+                        if (services && [services isKindOfClass:[NSDictionary class]]) {
+                            NSMutableDictionary *svcInfo = [NSMutableDictionary dictionary];
+                            for (NSString *svcID in services) {
+                                NSDictionary *svc = services[svcID];
+                                if ([svc isKindOfClass:[NSDictionary class]]) {
+                                    NSString *name = svc[@"UserDefinedName"] ?: @"(no name)";
+                                    NSDictionary *ipv4 = svc[@"IPv4"];
+                                    NSDictionary *iface = svc[@"Interface"];
+                                    NSString *type = iface[@"Type"] ?: @"(no type)";
+                                    svcInfo[svcID] = @{
+                                        @"name": name,
+                                        @"type": type,
+                                        @"has_ipv4": @(ipv4 != nil),
+                                        @"ipv4_keys": ipv4 ? ipv4.allKeys : @[]
+                                    };
+                                }
+                            }
+                            prefsInfo[@"services"] = svcInfo;
+                        }
+                    }
+                }
+            }
+        }
+        result[@"preferences_plist"] = prefsInfo;
+    } else {
+        result[@"preferences_plist"] = @{@"error": @"cannot read preferences.plist"};
+    }
+    
     response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONReadingAllowFragments error:nil];
     return response;
 }
@@ -5924,19 +6067,34 @@ static NSString *wsReadFrame(int sock) {
             NSString *tmpPath = @"/tmp/preferences.plist.tmp";
             BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
             if (tmpOK) {
-                TVLog(@"HTTP Server: trying spawnAsRoot cp...");
-                spawnRootCpResult = spawnAsRoot(@"/bin/cp", @[@"-f", tmpPath, prefsPath]);
-                TVLog(@"HTTP Server: spawnAsRoot cp exit code: %d", spawnRootCpResult);
-                if (spawnRootCpResult == 0) {
-                    spawnAsRoot(@"/bin/chmod", @[@"644", prefsPath]);
-                    // 验证文件确实更新了
-                    struct stat verifySt;
-                    if (stat([prefsPath UTF8String], &verifySt) == 0 && verifySt.st_size == (off_t)plistData.length) {
-                        writeOK = YES;
-                        TVLog(@"HTTP Server: spawnRoot cp write succeeded (size=%lld)", verifySt.st_size);
-                    } else {
-                        TVLog(@"HTTP Server: spawnRoot cp verification failed - size=%lld expected=%lu", verifySt.st_size, (unsigned long)plistData.length);
+                // 自动找到可用的 cp 和 chmod 路径
+                NSString *cpPath = nil;
+                for (NSString *p in @[@"/bin/cp", @"/usr/bin/cp"]) {
+                    if (access([p UTF8String], X_OK) == 0) { cpPath = p; break; }
+                }
+                NSString *chmodPath = nil;
+                for (NSString *p in @[@"/bin/chmod", @"/usr/bin/chmod"]) {
+                    if (access([p UTF8String], X_OK) == 0) { chmodPath = p; break; }
+                }
+                
+                if (cpPath) {
+                    TVLog(@"HTTP Server: trying spawnAsRoot cp with %@...", cpPath);
+                    spawnRootCpResult = spawnAsRoot(cpPath, @[@"-f", tmpPath, prefsPath]);
+                    TVLog(@"HTTP Server: spawnAsRoot cp exit code: %d", spawnRootCpResult);
+                    if (spawnRootCpResult == 0) {
+                        if (chmodPath) spawnAsRoot(chmodPath, @[@"644", prefsPath]);
+                        // 验证文件确实更新了
+                        struct stat verifySt;
+                        if (stat([prefsPath UTF8String], &verifySt) == 0 && verifySt.st_size == (off_t)plistData.length) {
+                            writeOK = YES;
+                            TVLog(@"HTTP Server: spawnRoot cp write succeeded (size=%lld)", verifySt.st_size);
+                        } else {
+                            TVLog(@"HTTP Server: spawnRoot cp verification failed - size=%lld expected=%lu", verifySt.st_size, (unsigned long)plistData.length);
+                        }
                     }
+                } else {
+                    TVLog(@"HTTP Server: no cp command found on device");
+                    spawnRootCpResult = -999;
                 }
                 unlink([tmpPath UTF8String]);
             } else {
