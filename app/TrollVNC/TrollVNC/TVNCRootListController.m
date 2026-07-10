@@ -1526,24 +1526,63 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         return;
     }
 
-    NSError *err = nil;
-    BOOL ok = TVNCApplyStaticIPConfiguration(enabled, net, &err);
-    if (!ok) {
-        [self tvnc_revertStaticIPSwitch:specifier];
-        [self tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                               message:(err.localizedDescription ?: @"写入系统网络配置失败，请重试或重启设备。")];
-        return;
+    // 方案A: 由 daemon(root) 代理写入 SCPreferences
+    NSString *httpPort = [[NSUserDefaults standardUserDefaults] stringForKey:@"HttpPort"];
+    if (!httpPort.length) httpPort = @"5801";
+    NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort];
+    NSURL *url = [NSURL URLWithString:urlStr];
+
+    NSMutableDictionary *body = [NSMutableDictionary dictionary];
+    body[@"enabled"] = @(enabled);
+    if (net) {
+        body[@"ip"] = net[@"ip"] ?: @"";
+        body[@"mask"] = net[@"mask"] ?: @"";
+        body[@"router"] = net[@"router"] ?: @"";
     }
 
-    if (enabled) {
-        [self tvnc_showAlertWithTitle:@"已锁定为静态 IP"
-                               message:[NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@",
-                                        net[@"ip"], net[@"mask"], net[@"router"]]];
-    } else {
-        [self tvnc_showAlertWithTitle:@"已恢复自动 DHCP"
-                               message:@"网络接口已切换回自动获取 IP 地址。"];
-    }
-    [self updateFirstGroupAndReload:YES];
+    NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = @"POST";
+    req.HTTPBody = json;
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    req.timeoutInterval = 10.0;
+
+    PSSpecifier *capturedSpecifier = specifier;
+    __weak typeof(self) weakSelf = self;
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *taskError) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            if (!strongSelf) return;
+
+            if (taskError) {
+                [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
+                [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
+                                             message:[NSString stringWithFormat:@"无法连接本地服务 (端口 %@)。请确认 VNC 服务已启动。", httpPort]];
+                return;
+            }
+
+            NSInteger statusCode = [(NSHTTPURLResponse *)resp statusCode];
+            NSDictionary *res = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+
+            if (statusCode == 200 && [res[@"success"] boolValue]) {
+                if (enabled) {
+                    [strongSelf tvnc_showAlertWithTitle:@"已锁定为静态 IP"
+                                                 message:[NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@",
+                                                          net[@"ip"], net[@"mask"], net[@"router"]]];
+                } else {
+                    [strongSelf tvnc_showAlertWithTitle:@"已恢复自动 DHCP"
+                                                 message:@"网络接口已切换回自动获取 IP 地址。"];
+                }
+                [strongSelf updateFirstGroupAndReload:YES];
+            } else {
+                [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
+                NSString *errMsg = res[@"error"] ?: @"写入网络配置失败";
+                [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
+                                             message:errMsg];
+            }
+        });
+    }];
+    [task resume];
 }
 
 - (void)tvnc_revertStaticIPSwitch:(PSSpecifier *)specifier {
