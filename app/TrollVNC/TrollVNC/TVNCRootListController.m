@@ -1527,10 +1527,8 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     }
 
     // 方案A: 由 daemon(root) 代理写入 SCPreferences
-    // 默认HTTP端口5801；如果可能从NSUserDefaults读取（兼容用户自定义端口）
+    // TVNCHttpServer REST API 固定端口 8182 (非 noVNC 的 5801)
     NSString *httpPort = @"8182";
-    NSString *configPort = [[NSUserDefaults standardUserDefaults] stringForKey:@"HttpPort"];
-    if (configPort.length && configPort.intValue > 0) httpPort = configPort;
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort];
     NSURL *url = [NSURL URLWithString:urlStr];
 
