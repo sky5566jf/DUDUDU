@@ -31,6 +31,7 @@
 #import <errno.h>
 #import <stdio.h>  // 用于 popen(), fgets(), pclose()
 #import <spawn.h>
+#import <fcntl.h>  // 用于 open(), O_WRONLY, O_TRUNC
 #import <sys/wait.h>
 #import <CommonCrypto/CommonDigest.h> // SHA-1 for WebSocket handshake
 #import <dlfcn.h>
@@ -5682,15 +5683,68 @@ static NSString *wsReadFrame(int sock) {
         return response;
     }
     
-    BOOL writeOK = [plistData writeToFile:prefsPath atomically:YES];
+    // 尝试多种写入方式
+    NSError *writeError = nil;
+    BOOL writeOK = [plistData writeToFile:prefsPath options:NSDataWritingAtomic error:&writeError];
+    
     if (!writeOK) {
+        TVLog(@"HTTP Server: NSData write failed: %@", writeError);
+        
+        // 方案2: C 级 open()/write()，可能绕过 Foundation 文件保护
+        const char *cPath = [prefsPath UTF8String];
+        
+        // 先 chmod 确保可写
+        chmod(cPath, 0644);
+        
+        int fd = open(cPath, O_WRONLY | O_TRUNC, 0644);
+        if (fd >= 0) {
+            ssize_t written = write(fd, [plistData bytes], [plistData length]);
+            close(fd);
+            if (written == (ssize_t)[plistData length]) {
+                writeOK = YES;
+                TVLog(@"HTTP Server: C-level write succeeded (%zd bytes)", written);
+            } else {
+                TVLog(@"HTTP Server: C-level write failed: written=%zd, expected=%lu, errno=%s", written, (unsigned long)[plistData length], strerror(errno));
+            }
+        } else {
+            TVLog(@"HTTP Server: open() failed: errno=%s", strerror(errno));
+        }
+        
+        // 方案3: 写临时文件再替换
+        if (!writeOK) {
+            NSString *tmpPath = @"/tmp/preferences.plist.tmp";
+            BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
+            if (tmpOK) {
+                // 用 system() cp 替换
+                NSString *cmd = [NSString stringWithFormat:@"cp -f \"%@\" \"%@\" && chmod 644 \"%@\"", tmpPath, prefsPath, prefsPath];
+                int sysResult = system([cmd UTF8String]);
+                if (sysResult == 0) {
+                    writeOK = YES;
+                    TVLog(@"HTTP Server: system() cp write succeeded");
+                }
+                unlink([tmpPath UTF8String]);
+            }
+        }
+    }
+    
+    if (!writeOK) {
+        // 获取文件权限信息用于调试
+        struct stat st;
+        NSString *statInfo = @"unknown";
+        if (stat([prefsPath UTF8String], &st) == 0) {
+            statInfo = [NSString stringWithFormat:@"mode=%o uid=%d gid=%d size=%lld", st.st_mode, st.st_uid, st.st_gid, st.st_size];
+        }
+        
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
             @"error": @"Failed to write preferences.plist",
+            @"error_detail": writeError ? [writeError localizedDescription] : [NSString stringWithFormat:@"errno=%s", strerror(errno)],
             @"step": @"plist_write",
             @"method": @"direct_plist",
-            @"path": prefsPath
+            @"path": prefsPath,
+            @"file_stat": statInfo,
+            @"data_size": @(plistData.length)
         } options:0 error:nil];
         return response;
     }
