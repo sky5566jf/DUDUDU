@@ -5668,7 +5668,7 @@ static NSString *wsReadFrame(int sock) {
         NSString *tif = @"en0";
         if (dynCreate && dynCopy) {
             CFTypeRef s = dynCreate(kCFAllocatorDefault, CFSTR("TVNC-If"), NULL, NULL);
-            if (s) { NSDictionary *d = (__bridge NSDictionary *)dynCopy(s, CFSTR("State:/Network/Global/IPv4")); if (d[@"PrimaryInterface"]) tif = d[@"PrimaryInterface"]; if (d) CFRelease(d); CFRelease(s); }
+            if (s) { NSDictionary *d = (__bridge NSDictionary *)dynCopy(s, CFSTR("State:/Network/Global/IPv4")); if (d[@"PrimaryInterface"]) tif = d[@"PrimaryInterface"]; if (d) CFRelease((__bridge CFTypeRef)d); CFRelease(s); }
         }
 
         NSString *mid = nil; NSDictionary *msvc = nil;
