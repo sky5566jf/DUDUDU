@@ -17,6 +17,7 @@
 
 #import "TVNCDeviceInfoController.h"
 #import <dlfcn.h>
+#import <sys/sysctl.h>
 #import <unistd.h>
 
 #ifndef PACKAGE_VERSION
@@ -30,10 +31,16 @@ NS_INLINE NSString *TVNCGetDeviceModel(void) {
     return [NSString stringWithCString:systemInfo.machine encoding:NSUTF8StringEncoding];
 }
 
-// v3.41: 获取真实设备名（iOS 16+ 修复）
+// v3.43: 获取真实设备名（与服务端 tvncGetRealDeviceName 保持一致，修复 iOS 16+ 主界面返回 "iPhone" 的问题）
 NS_INLINE NSString *TVNCGetRealDeviceName(void) {
     NSString *uidName = [[UIDevice currentDevice] name];
-    if (uidName && uidName.length > 0 && ![uidName isEqualToString:@"iPhone"]) return uidName;
+
+    // 1. UIDevice 返回非泛化 "iPhone" 直接用
+    if (uidName && uidName.length > 0 && ![uidName isEqualToString:@"iPhone"]) {
+        return uidName;
+    }
+
+    // 2. MGCopyAnswer("DeviceName") 私有 API
     void *mg = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
     if (mg) {
         CFStringRef (*MGCopyAnswerPtr)(CFStringRef) = (CFStringRef (*)(CFStringRef))dlsym(mg, "MGCopyAnswer");
@@ -42,10 +49,29 @@ NS_INLINE NSString *TVNCGetRealDeviceName(void) {
             if (mgName) {
                 NSString *result = [(__bridge_transfer NSString *)mgName
                     stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-                if (result.length > 0) return result;
+                if (result.length > 0 && ![result isEqualToString:@"iPhone"]) {
+                    return result;
+                }
             }
         }
     }
+
+    // 3. 读 MobileGestalt cache plist（纯文件读取，不需要 entitlement）—— 这是 iOS 16+ 拿真名的关键兜底
+    NSMutableArray *mgCachePaths = [NSMutableArray array];
+    if (access("/var/jb", F_OK) == 0) {
+        [mgCachePaths addObject:@"/var/jb/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist"];
+    }
+    [mgCachePaths addObject:@"/var/containers/Shared/SystemGroup/systemgroup.com.apple.mobilegestaltcache/Library/Caches/com.apple.MobileGestalt.plist"];
+    for (NSString *mgPath in mgCachePaths) {
+        NSDictionary *mgCache = [NSDictionary dictionaryWithContentsOfFile:mgPath];
+        NSDictionary *cacheExtra = mgCache[@"CacheExtra"];
+        NSString *devName = cacheExtra[@"DeviceName"];
+        if ([devName isKindOfClass:[NSString class]] && devName.length > 0 && ![devName isEqualToString:@"iPhone"]) {
+            return devName;
+        }
+    }
+
+    // 4. 读 SystemConfiguration preferences.plist 的 DeviceName
     NSMutableArray *plistPaths = [NSMutableArray array];
     if (access("/var/jb", F_OK) == 0) {
         [plistPaths addObject:@"/var/jb/var/mobile/Library/Preferences/SystemConfiguration/preferences.plist"];
@@ -56,11 +82,27 @@ NS_INLINE NSString *TVNCGetRealDeviceName(void) {
     for (NSString *plistPath in plistPaths) {
         NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:plistPath];
         NSString *devName = prefs[@"Controller"][@"DeviceName"];
-        if (devName && devName.length > 0) return devName;
+        if (devName && devName.length > 0 && ![devName isEqualToString:@"iPhone"]) {
+            return devName;
+        }
     }
+
+    // 5. sysctl kern.hostname（iOS 上 hostname 通常由设备名派生）
+    char hostname[256] = {0};
+    size_t hsize = sizeof(hostname);
+    if (sysctlbyname("kern.hostname", hostname, &hsize, NULL, 0) == 0) {
+        NSString *hn = [[NSString stringWithUTF8String:hostname]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (hn.length > 0 && ![hn isEqualToString:@"iPhone"] && ![hn isEqualToString:@"localhost"]) {
+            return hn;
+        }
+    }
+
+    // 6. 兜底
     if (uidName && uidName.length > 0) return uidName;
-    NSString *hostname = [[NSProcessInfo processInfo] hostName];
-    if (hostname && hostname.length > 0) return hostname;
+    NSString *procHostname = [[NSProcessInfo processInfo] hostName];
+    if (procHostname && procHostname.length > 0) return procHostname;
+
     return @"iPhone";
 }
 

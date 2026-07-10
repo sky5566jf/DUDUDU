@@ -145,3 +145,17 @@ build_output/
 /tmp/
 .workbuddy/
 TrollVNC/.workbuddy/
+
+# 构建产物与根目录日志/临时 dump（非源码，禁止入库）
+artifacts/
+bootstrap_log.txt
+ci_log.zip
+ci_log2.zip
+job_log.txt
+log.txt
+raw_log.txt
+roothide_log.txt
+rootless_log.txt
+hdr.txt
+headers.txt
+/nul
