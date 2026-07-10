@@ -5616,83 +5616,16 @@ static NSString *wsReadFrame(int sock) {
     BOOL enabled = [query[@"enabled"] intValue] != 0;
     NSString *ip = query[@"ip"];
     NSString *mask = query[@"mask"] ?: @"";
-    NSString *router = query[@"router"] ?: @"";
 
-    if (!ip || ip.length == 0) {
-        response.statusCode = 400;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Missing IP address"} options:0 error:nil];
-        return response;
-    }
-
-    @try {
-        typedef struct __SCPreferences *SPref;
-        static SPref (*mkPrefs)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *) = NULL;
-        static CFTypeRef (*getVal)(SPref, CFStringRef) = NULL;
-        static Boolean (*setVal)(SPref, CFStringRef, CFTypeRef) = NULL;
-        static Boolean (*commit)(SPref) = NULL;
-        static Boolean (*apply)(SPref) = NULL;
-        static CFTypeRef (*dynCopy)(CFTypeRef, CFStringRef) = NULL;
-        static CFTypeRef (*dynCreate)(CFAllocatorRef, CFStringRef, void *, void *) = NULL;
-        static dispatch_once_t once;
-        dispatch_once(&once, ^{
-            void *h = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
-            if (h) {
-                mkPrefs  = (SPref (*)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *))dlsym(h, "SCPreferencesCreateWithOptions");
-                getVal   = (CFTypeRef (*)(SPref, CFStringRef))dlsym(h, "SCPreferencesPathGetValue");
-                setVal   = (Boolean (*)(SPref, CFStringRef, CFTypeRef))dlsym(h, "SCPreferencesPathSetValue");
-                commit   = (Boolean (*)(SPref))dlsym(h, "SCPreferencesCommitChanges");
-                apply    = (Boolean (*)(SPref))dlsym(h, "SCPreferencesApplyChanges");
-                dynCopy  = (CFTypeRef (*)(CFTypeRef, CFStringRef))dlsym(h, "SCDynamicStoreCopyValue");
-                dynCreate = (CFTypeRef (*)(CFAllocatorRef, CFStringRef, void *, void *))dlsym(h, "SCDynamicStoreCreate");
-            }
-        });
-        if (!mkPrefs || !getVal || !setVal || !commit || !apply) {
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"SCPreferences unavailable"} options:0 error:nil];
-            return response;
-        }
-
-        CFErrorRef e = NULL;
-        SPref p = mkPrefs(kCFAllocatorDefault, CFSTR("TVNC-Net"), CFSTR("com.apple.SystemConfiguration"), (CFOptionFlags)1, &e);
-        if (!p) {
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":e ? [(__bridge_transfer NSError *)e localizedDescription] : @"Cannot open config"} options:0 error:nil];
-            return response;
-        }
-
-        NSDictionary *setup = (__bridge NSDictionary *)getVal(p, CFSTR("Setup:/"));
-        NSDictionary *svcs = setup[@"Network"] ? setup[@"Network"][@"Service"] : nil;
-        if (![svcs isKindOfClass:[NSDictionary class]]) { CFRelease(p);
-            response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"No services"} options:0 error:nil]; return response; }
-
-        NSString *tif = @"en0";
-        if (dynCreate && dynCopy) {
-            CFTypeRef s = dynCreate(kCFAllocatorDefault, CFSTR("TVNC-If"), NULL, NULL);
-            if (s) { NSDictionary *d = (__bridge NSDictionary *)dynCopy(s, CFSTR("State:/Network/Global/IPv4")); if (d[@"PrimaryInterface"]) tif = d[@"PrimaryInterface"]; if (d) CFRelease((__bridge CFTypeRef)d); CFRelease(s); }
-        }
-
-        NSString *mid = nil; NSDictionary *msvc = nil;
-        for (NSString *sid in svcs) { NSDictionary *svc = svcs[sid]; if (![svc isKindOfClass:[NSDictionary class]]) continue; NSString *dev = svc[@"Interface"] ? svc[@"Interface"][@"DeviceName"] : nil; if ([dev isKindOfClass:[NSString class]] && [dev isEqualToString:tif]) { mid = sid; msvc = svc; break; } }
-        if (!mid) { CFRelease(p); response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Not found: %@", tif]} options:0 error:nil]; return response; }
-
-        NSString *sp = [NSString stringWithFormat:@"Setup:/Network/Service/%@", mid];
-        NSDictionary *v4 = msvc[@"IPv4"];
-        if (v4 && [v4 isKindOfClass:[NSDictionary class]]) setVal(p, (__bridge CFStringRef)[NSString stringWithFormat:@"State:/Network/TVNCBackup/%@", mid], (__bridge CFDictionaryRef)v4);
-
-        NSMutableDictionary *nv4 = [NSMutableDictionary dictionaryWithDictionary:([msvc[@"IPv4"] isKindOfClass:[NSDictionary class]] ? msvc[@"IPv4"] : @{})];
-        if (enabled) { nv4[@"ConfigMethod"] = @"Manual"; nv4[@"Addresses"] = @[ip]; nv4[@"SubnetMasks"] = @[mask.length?mask:@"255.255.255.0"]; if (router.length) nv4[@"Router"] = router; [nv4 removeObjectForKey:@"RouterHardwareAddress"]; }
-        else { nv4[@"ConfigMethod"] = @"DHCP"; [nv4 removeObjectForKey:@"Addresses"]; [nv4 removeObjectForKey:@"SubnetMasks"]; [nv4 removeObjectForKey:@"Router"]; }
-
-        setVal(p, (__bridge CFStringRef)[NSString stringWithFormat:@"%@/IPv4", sp], (__bridge CFDictionaryRef)nv4);
-        if (!commit(p) || !apply(p)) { CFRelease(p); response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Commit failed"} options:0 error:nil]; return response; }
-        CFRelease(p);
-
-        response.statusCode = 200;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@YES, @"interface":tif, @"enabled":@(enabled)} options:0 error:nil];
-    } @catch (NSException *ex) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Crash: %@", ex.reason]} options:0 error:nil];
-    }
+    // Step1: 空实现验证路由和响应通路（暂不调SCPreferences）
+    response.statusCode = 200;
+    response.body = [NSJSONSerialization dataWithJSONObject:@{
+        @"success": @YES,
+        @"enabled": @(enabled),
+        @"ip": ip ?: @"",
+        @"mask": mask,
+        @"step": @"handler_routing_ok"
+    } options:0 error:nil];
     return response;
 }
 
