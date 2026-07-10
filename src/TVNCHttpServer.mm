@@ -193,6 +193,7 @@ static NSString * const kWebDAVHTMLBase64 =
 // v3.54 (方案A): daemon 代理写入网络配置
 - (TVNCHttpResponse *)handlePing;
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query;
+- (TVNCHttpResponse *)handleNetworkDebug;
 
 @end
 
@@ -592,6 +593,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handlePlist:method query:query body:body];
     } else if ([path isEqualToString:@"/api/network/static_ip"]) {
         return [self handleNetworkStaticIP:query];
+    } else if ([path isEqualToString:@"/api/network/debug"]) {
+        return [self handleNetworkDebug];
     } else if ([path isEqualToString:@"/api/group/start"]) {
         return [self handleGroupStart:query];
     } else if ([path isEqualToString:@"/api/group/stop"]) {
@@ -5284,6 +5287,143 @@ static NSString *wsReadFrame(int sock) {
     r.contentType = @"application/json";
     r.body = [@"{\"ok\":true}" dataUsingEncoding:NSUTF8StringEncoding];
     return r;
+}
+
+// GET /api/network/debug - 读取网络配置文件结构和目录列表
+- (TVNCHttpResponse *)handleNetworkDebug {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    response.contentType = @"application/json";
+    response.statusCode = 200;
+    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    
+    // 1. 列出所有 SystemConfiguration 目录
+    NSArray *dirs = @[
+        @"/Library/Preferences/SystemConfiguration",
+        @"/var/preferences/SystemConfiguration",
+        @"/var/jb/Library/Preferences/SystemConfiguration",
+        @"/var/jb/var/preferences/SystemConfiguration"
+    ];
+    
+    NSMutableDictionary *dirInfo = [NSMutableDictionary dictionary];
+    for (NSString *dir in dirs) {
+        NSError *dirErr = nil;
+        NSArray *files = [fm contentsOfDirectoryAtPath:dir error:&dirErr];
+        if (files) {
+            NSMutableDictionary *fileDetails = [NSMutableDictionary dictionary];
+            for (NSString *file in files) {
+                NSString *fullPath = [dir stringByAppendingPathComponent:file];
+                NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+                if (attrs) {
+                    struct stat st;
+                    NSString *statInfo = @"";
+                    if (stat([fullPath UTF8String], &st) == 0) {
+                        statInfo = [NSString stringWithFormat:@"mode=%o uid=%d gid=%d size=%lld",
+                                    st.st_mode, st.st_uid, st.st_gid, st.st_size];
+                    }
+                    fileDetails[file] = @{
+                        @"size": attrs[NSFileSize] ?: @0,
+                        @"stat": statInfo
+                    };
+                }
+            }
+            dirInfo[dir] = fileDetails;
+        } else {
+            dirInfo[dir] = @{@"error": dirErr.localizedDescription ?: @"not found"};
+        }
+    }
+    result[@"directories"] = dirInfo;
+    
+    // 2. 读取 com.apple.wifi.plist
+    NSArray *wifiPaths = @[
+        @"/var/preferences/SystemConfiguration/com.apple.wifi.plist",
+        @"/Library/Preferences/SystemConfiguration/com.apple.wifi.plist",
+        @"/var/jb/var/preferences/SystemConfiguration/com.apple.wifi.plist"
+    ];
+    
+    for (NSString *wifiPath in wifiPaths) {
+        if ([fm fileExistsAtPath:wifiPath]) {
+            NSDictionary *wifiPlist = [NSDictionary dictionaryWithContentsOfFile:wifiPath];
+            if (wifiPlist) {
+                result[@"wifi_plist_path"] = wifiPath;
+                result[@"wifi_plist_top_keys"] = wifiPlist.allKeys;
+                
+                // 返回每个顶层 key 的值类型和摘要
+                NSMutableDictionary *structure = [NSMutableDictionary dictionary];
+                for (NSString *key in wifiPlist) {
+                    id value = wifiPlist[key];
+                    if ([value isKindOfClass:[NSDictionary class]]) {
+                        NSDictionary *d = value;
+                        structure[key] = [NSString stringWithFormat:@"dict(%lu keys): %@",
+                                          (unsigned long)d.count, d.allKeys.description];
+                    } else if ([value isKindOfClass:[NSArray class]]) {
+                        NSArray *a = value;
+                        structure[key] = [NSString stringWithFormat:@"array(%lu items)",
+                                          (unsigned long)a.count];
+                    } else if ([value isKindOfClass:[NSData class]]) {
+                        structure[key] = [NSString stringWithFormat:@"data(%lu bytes)",
+                                          (unsigned long)[value length]];
+                    } else {
+                        structure[key] = [value description];
+                    }
+                }
+                result[@"wifi_plist_structure"] = structure;
+            } else {
+                result[@"wifi_plist_error"] = [NSString stringWithFormat:@"Found %@ but cannot read as plist", wifiPath];
+            }
+            break;
+        }
+    }
+    
+    // 3. 读取 com.apple.wifi-manager.plist (如果存在)
+    NSArray *wifiMgrPaths = @[
+        @"/var/preferences/SystemConfiguration/com.apple.wifi-manager.plist",
+        @"/Library/Preferences/SystemConfiguration/com.apple.wifi-manager.plist"
+    ];
+    for (NSString *mgrPath in wifiMgrPaths) {
+        if ([fm fileExistsAtPath:mgrPath]) {
+            NSDictionary *mgrPlist = [NSDictionary dictionaryWithContentsOfFile:mgrPath];
+            if (mgrPlist) {
+                result[@"wifi_manager_path"] = mgrPath;
+                result[@"wifi_manager_keys"] = mgrPlist.allKeys;
+            }
+            break;
+        }
+    }
+    
+    // 4. 测试写入权限
+    NSMutableDictionary *writeTest = [NSMutableDictionary dictionary];
+    NSArray *testPaths = @[
+        @"/var/preferences/SystemConfiguration/",
+        @"/Library/Preferences/SystemConfiguration/",
+        @"/var/jb/var/preferences/SystemConfiguration/",
+        @"/tmp/"
+    ];
+    for (NSString *testDir in testPaths) {
+        NSString *testFile = [testDir stringByAppendingPathComponent:@".trollvnc_write_test"];
+        NSString *testData = @"test";
+        NSError *writeErr = nil;
+        BOOL ok = [testData writeToFile:testFile atomically:YES encoding:NSUTF8StringEncoding error:&writeErr];
+        writeTest[testDir] = @{
+            @"can_write": @(ok),
+            @"error": writeErr ? writeErr.localizedDescription : @"ok"
+        };
+        if (ok) {
+            [fm removeItemAtPath:testFile error:nil];
+        }
+    }
+    result[@"write_test"] = writeTest;
+    
+    // 5. 当前进程信息
+    result[@"process"] = @{
+        @"uid": @(getuid()),
+        @"gid": @(getgid()),
+        @"pid": @(getpid())
+    };
+    
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONReadingAllowFragments error:nil];
+    return response;
 }
 
 // GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
