@@ -1527,75 +1527,50 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     }
 
     NSString *httpPort = @"8182";
-    NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort];
-    NSURL *url = [NSURL URLWithString:urlStr];
 
-    NSMutableDictionary *body = [NSMutableDictionary dictionary];
-    body[@"enabled"] = @(enabled);
+    // 用 GET + query 参数（避免 POST body 在 daemon HTTP 解析器的兼容问题）
+    NSURLComponents *comp = [NSURLComponents componentsWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort]];
+    NSMutableArray *items = [NSMutableArray array];
+    [items addObject:[NSURLQueryItem queryItemWithName:@"enabled" value:enabled ? @"1" : @"0"]];
     if (net) {
-        body[@"ip"] = net[@"ip"] ?: @"";
-        body[@"mask"] = net[@"mask"] ?: @"";
-        body[@"router"] = net[@"router"] ?: @"";
+        [items addObject:[NSURLQueryItem queryItemWithName:@"ip" value:net[@"ip"] ?: @""]];
+        [items addObject:[NSURLQueryItem queryItemWithName:@"mask" value:net[@"mask"] ?: @""]];
+        [items addObject:[NSURLQueryItem queryItemWithName:@"router" value:net[@"router"] ?: @""]];
     }
-
-    NSData *json = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
-    req.HTTPMethod = @"POST";
-    req.HTTPBody = json;
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    req.timeoutInterval = 10.0;
+    comp.queryItems = items;
+    NSURL *url = comp.URL;
 
     PSSpecifier *capturedSpecifier = specifier;
     __weak typeof(self) weakSelf = self;
 
-    NSMutableURLRequest *healthReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/api/status", httpPort]]];
-    healthReq.timeoutInterval = 3.0;
-
-    NSURLSessionDataTask *healthTask = [[NSURLSession sharedSession] dataTaskWithRequest:healthReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *resp, NSError *taskError) {
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
 
-            if (e || [(NSHTTPURLResponse *)r statusCode] != 200) {
+            if (taskError) {
                 [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
-                NSString *reason = e ? [NSString stringWithFormat:@"TCP 连接失败: %@", e.localizedDescription] : [NSString stringWithFormat:@"HTTP %ld", (long)[(NSHTTPURLResponse *)r statusCode]];
                 [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                             message:[NSString stringWithFormat:@"daemon API 不可达\nhttp://127.0.0.1:%@/api/status\n\n%@\n\n请确认已安装 v3.56+ 并重启 VNC 服务", httpPort, reason]];
+                                             message:[NSString stringWithFormat:@"请求失败: %@\nURL: %@", taskError.localizedDescription, url.absoluteString]];
                 return;
             }
 
-            NSURLSessionDataTask *postTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *taskError) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) strongSelf2 = weakSelf;
-                    if (!strongSelf2) return;
+            NSInteger sc = [(NSHTTPURLResponse *)resp statusCode];
+            NSDictionary *res = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
 
-                    if (taskError) {
-                        [strongSelf2 tvnc_revertStaticIPSwitch:capturedSpecifier];
-                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                                     message:[NSString stringWithFormat:@"POST 失败: %@", taskError.localizedDescription]];
-                        return;
-                    }
-
-                    NSInteger sc = [(NSHTTPURLResponse *)resp statusCode];
-                    NSDictionary *res = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-
-                    if (sc == 200 && [res[@"success"] boolValue]) {
-                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"已锁定为静态 IP" : @"已恢复自动 DHCP")
-                                                     message:enabled ? [NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@", net[@"ip"], net[@"mask"], net[@"router"]]
-                                                                    : @"网络接口已切换回自动获取 IP 地址。"];
-                        [strongSelf2 updateFirstGroupAndReload:YES];
-                    } else {
-                        [strongSelf2 tvnc_revertStaticIPSwitch:capturedSpecifier];
-                        NSString *errDetail = res[@"error"] ?: [NSString stringWithFormat:@"HTTP %ld", (long)sc];
-                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                                     message:errDetail];
-                    }
-                });
-            }];
-            [postTask resume];
+            if (sc == 200 && [res[@"success"] boolValue]) {
+                [strongSelf tvnc_showAlertWithTitle:(enabled ? @"已锁定为静态 IP" : @"已恢复自动 DHCP")
+                                             message:enabled ? [NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@", net[@"ip"], net[@"mask"], net[@"router"]]
+                                                           : @"网络接口已切换回自动获取 IP 地址。"];
+                [strongSelf updateFirstGroupAndReload:YES];
+            } else {
+                [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
+                NSString *errDetail = res[@"error"] ?: [NSString stringWithFormat:@"HTTP %ld", (long)sc];
+                [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败") message:errDetail];
+            }
         });
     }];
-    [healthTask resume];
+    [task resume];
 }
 
 - (void)tvnc_revertStaticIPSwitch:(PSSpecifier *)specifier {

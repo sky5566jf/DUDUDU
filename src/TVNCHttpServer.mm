@@ -142,7 +142,7 @@ static NSString * const kWebDAVHTMLBase64 =
 }
 
 // v3.54 (方案A): daemon 代理写入网络配置
-- (TVNCHttpResponse *)handleNetworkStaticIP:(NSData *)body;
+- (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query;
 
 @end
 
@@ -539,7 +539,7 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     } else if ([path isEqualToString:@"/api/plist"]) {
         return [self handlePlist:method query:query body:body];
     } else if ([path isEqualToString:@"/api/network/static_ip"]) {
-        return [self handleNetworkStaticIP:body];
+        return [self handleNetworkStaticIP:query];
     } else if ([path isEqualToString:@"/api/group/start"]) {
         return [self handleGroupStart:query];
     } else if ([path isEqualToString:@"/api/group/stop"]) {
@@ -5608,29 +5608,15 @@ static NSString *wsReadFrame(int sock) {
     } // end send_response block
 }
 
-// POST /api/network/static_ip  (body JSON: {enabled: bool, ip, mask, router})
-// daemon(root) 通过 SCPreferences 写入网络配置，巨魔版 App(mobile) 经此代理绕过沙盒限制。
-- (TVNCHttpResponse *)handleNetworkStaticIP:(NSData *)body {
+// GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
+- (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     response.contentType = @"application/json";
 
-    if (!body || body.length == 0) {
-        response.statusCode = 400;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Missing request body"} options:0 error:nil];
-        return response;
-    }
-    NSError *jsonErr = nil;
-    NSDictionary *req = [NSJSONSerialization JSONObjectWithData:body options:0 error:&jsonErr];
-    if (!req || jsonErr) {
-        response.statusCode = 400;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Invalid JSON"} options:0 error:nil];
-        return response;
-    }
-
-    BOOL enabled = [req[@"enabled"] boolValue];
-    NSString *ip = [req[@"ip"] isKindOfClass:[NSString class]] ? req[@"ip"] : nil;
-    NSString *mask = [req[@"mask"] isKindOfClass:[NSString class]] ? req[@"mask"] : @"";
-    NSString *router = [req[@"router"] isKindOfClass:[NSString class]] ? req[@"router"] : @"";
+    BOOL enabled = [query[@"enabled"] intValue] != 0;
+    NSString *ip = query[@"ip"];
+    NSString *mask = query[@"mask"] ?: @"";
+    NSString *router = query[@"router"] ?: @"";
 
     if (!ip || ip.length == 0) {
         response.statusCode = 400;
