@@ -661,6 +661,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleNetworkStaticIP:query];
     } else if ([path isEqualToString:@"/api/network/debug"]) {
         return [self handleNetworkDebug];
+    } else if ([path isEqualToString:@"/api/network/test_helper"]) {
+        return [self handleNetworkTestHelper];
     } else if ([path isEqualToString:@"/api/group/start"]) {
         return [self handleGroupStart:query];
     } else if ([path isEqualToString:@"/api/group/stop"]) {
@@ -5355,6 +5357,55 @@ static NSString *wsReadFrame(int sock) {
     return r;
 }
 
+// GET /api/network/test_helper - 测试 root helper（spawn 自身以 root 身份执行 test 操作）
+- (TVNCHttpResponse *)handleNetworkTestHelper {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    response.contentType = @"application/json";
+    
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"parent_uid"] = @(getuid());
+    result[@"parent_gid"] = @(getgid());
+    
+    // 获取自身路径
+    char selfPath[PATH_MAX];
+    uint32_t pathSize = sizeof(selfPath);
+    if (_NSGetExecutablePath(selfPath, &pathSize) != 0) {
+        result[@"success"] = @NO;
+        result[@"error"] = @"_NSGetExecutablePath failed";
+        response.statusCode = 500;
+        response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+        return response;
+    }
+    
+    NSString *execPath = [NSString stringWithUTF8String:selfPath];
+    result[@"execPath"] = execPath;
+    
+    // spawn 自身带 --root-helper test 参数
+    NSString *helperOutput = nil;
+    int helperExit = spawnAsRootWithOutput(execPath, @[@"--root-helper", @"test", @"{}"], &helperOutput);
+    
+    result[@"helperExit"] = @(helperExit);
+    result[@"helperOutput"] = helperOutput ?: @"";
+    result[@"helperOutputLength"] = @(helperOutput.length);
+    
+    // 尝试解析 helper 输出
+    if (helperOutput.length > 0) {
+        NSData *outData = [helperOutput dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *outJson = [NSJSONSerialization JSONObjectWithData:outData options:0 error:nil];
+        if (outJson) {
+            result[@"helperParsed"] = outJson;
+            result[@"helperUid"] = outJson[@"uid"];
+            result[@"success"] = @([outJson[@"success"] boolValue]);
+        }
+    }
+    
+    result[@"spawnWorked"] = @(helperExit != -1);
+    
+    response.statusCode = 200;
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 // GET /api/network/debug - 读取网络配置文件结构和目录列表
 - (TVNCHttpResponse *)handleNetworkDebug {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -5713,6 +5764,9 @@ static NSString *wsReadFrame(int sock) {
         }
         
         // 1c. 如果 Lock 失败，fallback 到 root helper（spawn 自身以 root 身份直接修改 preferences.plist）
+        int rootHelperExitCode = -999;
+        NSString *rootHelperOutputStr = @"";
+        NSString *rootHelperExecPath = @"";
         if (!lockOK) {
             char selfPath[PATH_MAX];
             uint32_t pathSize = sizeof(selfPath);
@@ -5733,6 +5787,10 @@ static NSString *wsReadFrame(int sock) {
                 int helperExit = spawnAsRootWithOutput(execPath, @[@"--root-helper", @"static_ip", helperJsonStr], &helperOutput);
                 TVLog(@"HTTP Server: root helper exit=%d, output=%@", helperExit, helperOutput);
                 
+                rootHelperExitCode = helperExit;
+                rootHelperOutputStr = helperOutput ?: @"";
+                rootHelperExecPath = execPath;
+                
                 if (helperExit == 0 && helperOutput.length > 0) {
                     CFRelease((CFTypeRef)prefs);
                     response.statusCode = 200;
@@ -5741,9 +5799,10 @@ static NSString *wsReadFrame(int sock) {
                 }
                 
                 // root helper 也失败，继续 SCPreferences 路径（commit 会失败但提供诊断信息）
-                TVLog(@"HTTP Server: root helper failed (exit=%d), falling through to SCPreferences for diagnostics", helperExit);
+                TVLog(@"HTTP Server: root helper failed (exit=%d, output=%@), falling through to SCPreferences for diagnostics", helperExit, helperOutput);
             } else {
                 TVLog(@"HTTP Server: _NSGetExecutablePath failed, cannot try root helper");
+                rootHelperOutputStr = @"_NSGetExecutablePath failed";
             }
         }
         
@@ -5952,7 +6011,10 @@ static NSString *wsReadFrame(int sock) {
             @"createMethod": createMethod,
             @"notify_post": @(notifyResult),
             @"api": @"SCPreferences",
-            @"rootHelperAttempted": @YES
+            @"rootHelperAttempted": @YES,
+            @"rootHelperExit": @(rootHelperExitCode),
+            @"rootHelperOutput": rootHelperOutputStr,
+            @"rootHelperPath": rootHelperExecPath
         } options:0 error:nil];
         return response;
     }

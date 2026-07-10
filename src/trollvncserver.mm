@@ -5260,6 +5260,14 @@ static int rootHelperMain(int argc, const char *argv[]) {
             return 1;
         }
 
+        // test 操作：只输出 uid 和基本信息，验证 persona API 是否生效
+        if ([operation isEqualToString:@"test"]) {
+            printf("{\"success\":true,\"uid\":%d,\"gid\":%d,\"euid\":%d,\"pid\":%d,\"operation\":\"test\"}",
+                   getuid(), getgid(), geteuid(), getpid());
+            fflush(stdout);
+            return 0;
+        }
+
         if ([operation isEqualToString:@"static_ip"]) {
             NSString *prefsPath = @"/var/preferences/SystemConfiguration/preferences.plist";
             NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:prefsPath];
