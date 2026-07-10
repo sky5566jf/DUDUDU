@@ -5688,7 +5688,7 @@ static NSString *wsReadFrame(int sock) {
             return response;
         }
         NSDictionary *setsDict = (__bridge NSDictionary *)setsVal;
-        CFRelease(setsVal);
+        // 注意：SCPreferencesGetValue 遵循 Get 规则，不释放返回值
         
         // 4. 导航到 CurrentSet/Network/Service
         NSDictionary *currentSetDict = setsDict[currentSet];
@@ -5779,7 +5779,7 @@ static NSString *wsReadFrame(int sock) {
         
         // 7. 深拷贝 Sets → 修改 IPv4 → SetValue 写回整个 Sets
         NSMutableDictionary *mutableSets = [setsDict mutableCopy];
-        NSMutableDictionary *mutableCurrentSet = [[mutableSets[currentSet] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSet] mutableCopy] : [NSMutableDictionary dictionary]];
+        NSMutableDictionary *mutableCurrentSet = [mutableSets[currentSet] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSet] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableNetwork = [mutableCurrentSet[@"Network"] isKindOfClass:[NSDictionary class]] ? [mutableCurrentSet[@"Network"] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableServices = [mutableNetwork[@"Service"] isKindOfClass:[NSDictionary class]] ? [mutableNetwork[@"Service"] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableService = [mutableServices[targetServiceID] isKindOfClass:[NSDictionary class]] ? [mutableServices[targetServiceID] mutableCopy] : [NSMutableDictionary dictionary];
