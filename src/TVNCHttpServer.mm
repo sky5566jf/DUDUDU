@@ -5637,13 +5637,13 @@ static NSString *wsReadFrame(int sock) {
         dispatch_once(&once, ^{
             void *h = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
             if (h) {
-                mkPrefs = dlsym(h, "SCPreferencesCreateWithOptions");
-                getVal  = dlsym(h, "SCPreferencesPathGetValue");
-                setVal  = dlsym(h, "SCPreferencesPathSetValue");
-                commit  = dlsym(h, "SCPreferencesCommitChanges");
-                apply   = dlsym(h, "SCPreferencesApplyChanges");
-                dynCopy = dlsym(h, "SCDynamicStoreCopyValue");
-                dynCreate = dlsym(h, "SCDynamicStoreCreate");
+                mkPrefs  = (SPref (*)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *))dlsym(h, "SCPreferencesCreateWithOptions");
+                getVal   = (CFTypeRef (*)(SPref, CFStringRef))dlsym(h, "SCPreferencesPathGetValue");
+                setVal   = (Boolean (*)(SPref, CFStringRef, CFTypeRef))dlsym(h, "SCPreferencesPathSetValue");
+                commit   = (Boolean (*)(SPref))dlsym(h, "SCPreferencesCommitChanges");
+                apply    = (Boolean (*)(SPref))dlsym(h, "SCPreferencesApplyChanges");
+                dynCopy  = (CFTypeRef (*)(CFTypeRef, CFStringRef))dlsym(h, "SCDynamicStoreCopyValue");
+                dynCreate = (CFTypeRef (*)(CFAllocatorRef, CFStringRef, void *, void *))dlsym(h, "SCDynamicStoreCreate");
             }
         });
         if (!mkPrefs || !getVal || !setVal || !commit || !apply) {
