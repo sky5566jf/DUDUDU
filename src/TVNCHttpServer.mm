@@ -5557,11 +5557,12 @@ static NSString *wsReadFrame(int sock) {
         return response;
     }
     
-    // 遍历服务，找到有 IPv4 的（优先 Wi-Fi）
+    // 遍历服务，找到目标服务（优先 Wi-Fi，不要求 IPv4 存在）
     NSString *targetServiceID = nil;
     NSString *targetServiceName = nil;
+    NSMutableArray *serviceDebug = [NSMutableArray array];
     for (NSString *serviceID in services) {
-        NSMutableDictionary *serviceInfo = [services[serviceID] mutableCopy];
+        NSDictionary *serviceInfo = services[serviceID];
         if (![serviceInfo isKindOfClass:[NSDictionary class]]) continue;
         
         NSDictionary *ipv4 = serviceInfo[@"IPv4"];
@@ -5571,7 +5572,13 @@ static NSString *wsReadFrame(int sock) {
         
         TVLog(@"HTTP Server: plist service %@ type=%@ name=%@ ipv4=%@", serviceID, hardwareType, devName, ipv4 ? @"yes" : @"no");
         
-        if (!ipv4) continue;
+        [serviceDebug addObject:@{
+            @"id": serviceID,
+            @"type": hardwareType ?: @"(null)",
+            @"name": devName,
+            @"has_ipv4": ipv4 ? @YES : @NO,
+            @"keys": [serviceInfo allKeys]
+        }];
         
         BOOL isWiFi = [hardwareType isEqualToString:@"AirPort"] ||
                       [hardwareType isEqualToString:@"Wi-Fi"] ||
@@ -5593,10 +5600,11 @@ static NSString *wsReadFrame(int sock) {
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
-            @"error": @"No network service with IPv4 found",
+            @"error": @"No network service found in preferences.plist",
             @"step": @"find_service",
             @"method": @"direct_plist",
-            @"services": [services allKeys]
+            @"services": [services allKeys],
+            @"service_details": serviceDebug
         } options:0 error:nil];
         return response;
     }
