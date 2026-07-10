@@ -5613,6 +5613,9 @@ static NSString *wsReadFrame(int sock) {
     Boolean (*pSCPreferencesCommitChanges)(SCPrefsRef) = NULL;
     Boolean (*pSCPreferencesApplyChanges)(SCPrefsRef) = NULL;
     Boolean (*pSCPreferencesSynchronize)(SCPrefsRef) = NULL;
+    Boolean (*pSCPreferencesLock)(SCPrefsRef, Boolean) = NULL;
+    Boolean (*pSCPreferencesUnlock)(SCPrefsRef) = NULL;
+    SCPrefsRef (*pSCPreferencesCreateWithAuthorization)(CFAllocatorRef, CFStringRef, CFStringRef, void *) = NULL;
     
     if (sc) {
         pSCPreferencesCreate = (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef))dlsym(sc, "SCPreferencesCreate");
@@ -5623,6 +5626,19 @@ static NSString *wsReadFrame(int sock) {
         pSCPreferencesCommitChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesCommitChanges");
         pSCPreferencesApplyChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesApplyChanges");
         pSCPreferencesSynchronize = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesSynchronize");
+        pSCPreferencesLock = (Boolean (*)(SCPrefsRef, Boolean))dlsym(sc, "SCPreferencesLock");
+        pSCPreferencesUnlock = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesUnlock");
+        pSCPreferencesCreateWithAuthorization = (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef, void *))dlsym(sc, "SCPreferencesCreateWithAuthorization");
+    }
+    
+    // 尝试加载 Security framework 的 AuthorizationCreate
+    void *sec = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW);
+    if (!sec) {
+        sec = dlopen("/System/Library/Frameworks/Security.framework/Versions/Current/Security", RTLD_NOW);
+    }
+    int (*pAuthorizationCreate)(const void *, const void *, unsigned int, void **) = NULL;
+    if (sec) {
+        pAuthorizationCreate = (int (*)(const void *, const void *, unsigned int, void **))dlsym(sec, "AuthorizationCreate");
     }
     
     // 收集诊断信息
@@ -5635,6 +5651,12 @@ static NSString *wsReadFrame(int sock) {
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesSetValue=%@", pSCPreferencesSetValue ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCommitChanges=%@", pSCPreferencesCommitChanges ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesApplyChanges=%@", pSCPreferencesApplyChanges ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesSynchronize=%@", pSCPreferencesSynchronize ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesLock=%@", pSCPreferencesLock ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesUnlock=%@", pSCPreferencesUnlock ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCreateWithAuthorization=%@", pSCPreferencesCreateWithAuthorization ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"Security.framework=%@", sec ? @"ok" : @"failed"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"AuthorizationCreate=%@", pAuthorizationCreate ? @"ok" : @"null"]];
     TVLog(@"HTTP Server: dlsym diagnostics: %@", [dlsymResults componentsJoinedByString:@", "]);
     
     // 如果核心 dlsym 函数可用，用 SCPreferences API
@@ -5645,23 +5667,55 @@ static NSString *wsReadFrame(int sock) {
         TVLog(@"HTTP Server: Using SCPreferences API path");
         
         // 1. 创建 SCPreferences session
-        SCPrefsRef prefs = pSCPreferencesCreate(NULL, CFSTR("TrollVNC"), NULL);
+        // 优先用 Authorization（需要 SCPreferencesCreateWithAuthorization + AuthorizationCreate）
+        SCPrefsRef prefs = NULL;
+        void *authRef = NULL;
+        BOOL usedAuthorization = NO;
+        NSString *createMethod = @"SCPreferencesCreate";
+        
+        if (pSCPreferencesCreateWithAuthorization && pAuthorizationCreate) {
+            int authStatus = pAuthorizationCreate(NULL, NULL, 0, &authRef);
+            TVLog(@"HTTP Server: AuthorizationCreate status=%d, authRef=%p", authStatus, authRef);
+            if (authStatus == 0 && authRef) {
+                prefs = pSCPreferencesCreateWithAuthorization(NULL, CFSTR("TrollVNC"), NULL, authRef);
+                if (prefs) {
+                    usedAuthorization = YES;
+                    createMethod = @"SCPreferencesCreateWithAuthorization";
+                }
+            }
+        }
+        
         if (!prefs) {
-            TVLog(@"HTTP Server: SCPreferencesCreate failed");
+            prefs = pSCPreferencesCreate(NULL, CFSTR("TrollVNC"), NULL);
+        }
+        
+        if (!prefs) {
+            TVLog(@"HTTP Server: SCPreferencesCreate failed (both methods)");
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
                 @"error": @"SCPreferencesCreate returned NULL (permission denied?)",
                 @"step": @"SCPreferencesCreate",
-                @"method": @"SCPreferences"
+                @"method": @"SCPreferences",
+                @"createMethod": createMethod
             } options:0 error:nil];
             return response;
+        }
+        
+        TVLog(@"HTTP Server: SCPreferences created via %@, usedAuth=%d", createMethod, usedAuthorization);
+        
+        // 1b. Lock preferences for exclusive write access
+        BOOL lockOK = NO;
+        if (pSCPreferencesLock) {
+            lockOK = pSCPreferencesLock(prefs, YES);  // YES = blocking wait
+            TVLog(@"HTTP Server: SCPreferencesLock result=%d", lockOK);
         }
         
         // 2. 获取 CurrentSet 路径
         CFPropertyListRef currentSetVal = pSCPreferencesGetValue(prefs, CFSTR("CurrentSet"));
         if (!currentSetVal) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5679,7 +5733,8 @@ static NSString *wsReadFrame(int sock) {
         // 3. 获取 Sets 字典（GetValue 只能取顶层 key）
         CFPropertyListRef setsVal = pSCPreferencesGetValue(prefs, CFSTR("Sets"));
         if (!setsVal) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5695,7 +5750,8 @@ static NSString *wsReadFrame(int sock) {
         // 4. 导航到 CurrentSet/Network/Service
         NSDictionary *currentSetDict = setsDict[currentSetKey];
         if (![currentSetDict isKindOfClass:[NSDictionary class]]) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5710,7 +5766,8 @@ static NSString *wsReadFrame(int sock) {
         }
         NSDictionary *networkDict = currentSetDict[@"Network"];
         if (![networkDict isKindOfClass:[NSDictionary class]]) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5722,7 +5779,8 @@ static NSString *wsReadFrame(int sock) {
         }
         NSDictionary *servicesDict = networkDict[@"Service"];
         if (![servicesDict isKindOfClass:[NSDictionary class]]) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5761,7 +5819,8 @@ static NSString *wsReadFrame(int sock) {
         }
         
         if (!targetServiceID) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5797,7 +5856,8 @@ static NSString *wsReadFrame(int sock) {
         Boolean writeOK = pSCPreferencesSetValue(prefs, CFSTR("Sets"), (__bridge CFPropertyListRef)mutableSets);
         
         if (!writeOK) {
-            CFRelease((CFTypeRef)prefs);
+            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
+        CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
@@ -5808,10 +5868,12 @@ static NSString *wsReadFrame(int sock) {
             return response;
         }
         
-        // 8. 提交 + 应用（ApplyChanges 可选）
+        // 8. 提交 + 应用 + 解锁（ApplyChanges 可选）
         Boolean commitOK = pSCPreferencesCommitChanges(prefs);
         Boolean applyOK = pSCPreferencesApplyChanges ? pSCPreferencesApplyChanges(prefs) : false;
         if (pSCPreferencesSynchronize) pSCPreferencesSynchronize(prefs);
+        Boolean unlockOK = pSCPreferencesUnlock ? pSCPreferencesUnlock(prefs) : false;
+        TVLog(@"HTTP Server: commit=%d apply=%d unlock=%d", commitOK, applyOK, unlockOK);
         CFRelease((CFTypeRef)prefs);
         
         // 如果 ApplyChanges 不可用，手动通知 configd 重新加载
@@ -5848,6 +5910,10 @@ static NSString *wsReadFrame(int sock) {
             @"service": targetServiceID,
             @"serviceName": targetServiceName ?: @"",
             @"commit": @(commitOK), @"apply": @(applyOK),
+            @"unlock": @(unlockOK),
+            @"lock": @(lockOK),
+            @"usedAuthorization": @(usedAuthorization),
+            @"createMethod": createMethod,
             @"notify_post": @(notifyResult),
             @"api": @"SCPreferences"
         } options:0 error:nil];
