@@ -1526,8 +1526,6 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         return;
     }
 
-    // 方案A: 由 daemon(root) 代理写入 SCPreferences
-    // TVNCHttpServer REST API 固定端口 8182 (非 noVNC 的 5801)
     NSString *httpPort = @"8182";
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort];
     NSURL *url = [NSURL URLWithString:urlStr];
@@ -1550,31 +1548,30 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     PSSpecifier *capturedSpecifier = specifier;
     __weak typeof(self) weakSelf = self;
 
-    // 先健康检查 daemon 是否可达
     NSMutableURLRequest *healthReq = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%@/api/status", httpPort]]];
     healthReq.timeoutInterval = 3.0;
-    [[NSURLSession sharedSession] dataTaskWithRequest:healthReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
+
+    NSURLSessionDataTask *healthTask = [[NSURLSession sharedSession] dataTaskWithRequest:healthReq completionHandler:^(NSData *d, NSURLResponse *r, NSError *e) {
         dispatch_async(dispatch_get_main_queue(), ^{
             __strong typeof(weakSelf) strongSelf = weakSelf;
             if (!strongSelf) return;
 
             if (e || [(NSHTTPURLResponse *)r statusCode] != 200) {
                 [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
-                NSString *reason = e ? [NSString stringWithFormat:@"TCP 连接失败: %@ (code %ld)", e.localizedDescription, (long)e.code] : [NSString stringWithFormat:@"HTTP %ld", (long)[(NSHTTPURLResponse *)r statusCode]];
+                NSString *reason = e ? [NSString stringWithFormat:@"TCP 连接失败: %@", e.localizedDescription] : [NSString stringWithFormat:@"HTTP %ld", (long)[(NSHTTPURLResponse *)r statusCode]];
                 [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                             message:[NSString stringWithFormat:@"daemon API 不可达\nhttp://127.0.0.1:%@/api/status\n\n%@\n\n请确认:\n① 已安装 v3.55 并重启了 VNC 服务\n② 旧 daemon 进程已被替换", httpPort, reason]];
+                                             message:[NSString stringWithFormat:@"daemon API 不可达\nhttp://127.0.0.1:%@/api/status\n\n%@\n\n请确认已安装 v3.56+ 并重启 VNC 服务", httpPort, reason]];
                 return;
             }
 
-            // daemon 可达，发送静态 IP 请求
-            [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *taskError) {
+            NSURLSessionDataTask *postTask = [[NSURLSession sharedSession] dataTaskWithRequest:req completionHandler:^(NSData *data, NSURLResponse *resp, NSError *taskError) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    __strong typeof(weakSelf) strongSelf = weakSelf;
-                    if (!strongSelf) return;
+                    __strong typeof(weakSelf) strongSelf2 = weakSelf;
+                    if (!strongSelf2) return;
 
                     if (taskError) {
-                        [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
-                        [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
+                        [strongSelf2 tvnc_revertStaticIPSwitch:capturedSpecifier];
+                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
                                                      message:[NSString stringWithFormat:@"POST 失败: %@", taskError.localizedDescription]];
                         return;
                     }
@@ -1583,20 +1580,22 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                     NSDictionary *res = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
 
                     if (sc == 200 && [res[@"success"] boolValue]) {
-                        [strongSelf tvnc_showAlertWithTitle:(enabled ? @"已锁定为静态 IP" : @"已恢复自动 DHCP")
+                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"已锁定为静态 IP" : @"已恢复自动 DHCP")
                                                      message:enabled ? [NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@", net[@"ip"], net[@"mask"], net[@"router"]]
                                                                     : @"网络接口已切换回自动获取 IP 地址。"];
-                        [strongSelf updateFirstGroupAndReload:YES];
+                        [strongSelf2 updateFirstGroupAndReload:YES];
                     } else {
-                        [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
+                        [strongSelf2 tvnc_revertStaticIPSwitch:capturedSpecifier];
                         NSString *errDetail = res[@"error"] ?: [NSString stringWithFormat:@"HTTP %ld", (long)sc];
-                        [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                                     message:[NSString stringWithFormat:@"%@\n\nHTTP %ld\n%@", (enabled?@"锁定":@"恢复"), (long)sc, errDetail]];
+                        [strongSelf2 tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
+                                                     message:errDetail];
                     }
                 });
-            }] resume];
+            }];
+            [postTask resume];
         });
-    }] resume];
+    }];
+    [healthTask resume];
 }
 
 - (void)tvnc_revertStaticIPSwitch:(PSSpecifier *)specifier {
