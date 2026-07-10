@@ -1527,8 +1527,10 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     }
 
     // 方案A: 由 daemon(root) 代理写入 SCPreferences
-    NSString *httpPort = [[NSUserDefaults standardUserDefaults] stringForKey:@"HttpPort"];
-    if (!httpPort.length) httpPort = @"5801";
+    // 默认HTTP端口5801；如果可能从NSUserDefaults读取（兼容用户自定义端口）
+    NSString *httpPort = @"5801";
+    NSString *configPort = [[NSUserDefaults standardUserDefaults] stringForKey:@"HttpPort"];
+    if (configPort.length && configPort.intValue > 0) httpPort = configPort;
     NSString *urlStr = [NSString stringWithFormat:@"http://127.0.0.1:%@/api/network/static_ip", httpPort];
     NSURL *url = [NSURL URLWithString:urlStr];
 
@@ -1557,7 +1559,7 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
             if (taskError) {
                 [strongSelf tvnc_revertStaticIPSwitch:capturedSpecifier];
                 [strongSelf tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
-                                             message:[NSString stringWithFormat:@"无法连接本地服务 (端口 %@)。请确认 VNC 服务已启动。", httpPort]];
+                                             message:[NSString stringWithFormat:@"无法连接本地服务\n%@\n\n请确认：\n① VNC服务端口 %@ 已开启\n② HTTP(noVNC)端口未设为0", urlStr, httpPort]];
                 return;
             }
 
