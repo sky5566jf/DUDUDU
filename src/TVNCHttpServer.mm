@@ -5609,6 +5609,7 @@ static NSString *wsReadFrame(int sock) {
     CFPropertyListRef (*pSCPreferencesGetValue)(SCPrefsRef, CFStringRef) = NULL;
     CFPropertyListRef (*pSCPreferencesPathGet)(SCPrefsRef, CFStringRef) = NULL;
     Boolean (*pSCPreferencesPathSetValue)(SCPrefsRef, CFStringRef, CFPropertyListRef) = NULL;
+    Boolean (*pSCPreferencesSetValue)(SCPrefsRef, CFStringRef, CFPropertyListRef) = NULL;
     Boolean (*pSCPreferencesCommitChanges)(SCPrefsRef) = NULL;
     Boolean (*pSCPreferencesApplyChanges)(SCPrefsRef) = NULL;
     Boolean (*pSCPreferencesSynchronize)(SCPrefsRef) = NULL;
@@ -5618,6 +5619,7 @@ static NSString *wsReadFrame(int sock) {
         pSCPreferencesGetValue = (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesGetValue");
         pSCPreferencesPathGet = (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesPathGet");
         pSCPreferencesPathSetValue = (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesPathSetValue");
+        pSCPreferencesSetValue = (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesSetValue");
         pSCPreferencesCommitChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesCommitChanges");
         pSCPreferencesApplyChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesApplyChanges");
         pSCPreferencesSynchronize = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesSynchronize");
@@ -5630,13 +5632,15 @@ static NSString *wsReadFrame(int sock) {
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesGetValue=%@", pSCPreferencesGetValue ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesPathGet=%@", pSCPreferencesPathGet ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesPathSetValue=%@", pSCPreferencesPathSetValue ? @"ok" : @"null"]];
+    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesSetValue=%@", pSCPreferencesSetValue ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCommitChanges=%@", pSCPreferencesCommitChanges ? @"ok" : @"null"]];
     [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesApplyChanges=%@", pSCPreferencesApplyChanges ? @"ok" : @"null"]];
     TVLog(@"HTTP Server: dlsym diagnostics: %@", [dlsymResults componentsJoinedByString:@", "]);
     
-    // 如果 dlsym 全部成功，用 SCPreferences API
-    if (pSCPreferencesCreate && pSCPreferencesGetValue && pSCPreferencesPathGet &&
-        pSCPreferencesPathSetValue && pSCPreferencesCommitChanges && pSCPreferencesApplyChanges) {
+    // 如果核心 dlsym 函数可用，用 SCPreferences API
+    // 只需要 Create + GetValue + SetValue + CommitChanges（ApplyChanges 可选）
+    if (pSCPreferencesCreate && pSCPreferencesGetValue && pSCPreferencesSetValue &&
+        pSCPreferencesCommitChanges) {
         
         TVLog(@"HTTP Server: Using SCPreferences API path");
         
@@ -5670,38 +5674,71 @@ static NSString *wsReadFrame(int sock) {
         NSString *currentSet = [(__bridge_transfer NSString *)currentSetVal stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         TVLog(@"HTTP Server: CurrentSet = %@", currentSet);
         
-        // 3. 获取所有网络服务
-        NSString *servicesPath = [NSString stringWithFormat:@"%@/Network/Service", currentSet];
-        CFPropertyListRef servicesVal = pSCPreferencesPathGet(prefs, (__bridge CFStringRef)servicesPath);
-        if (!servicesVal) {
+        // 3. 获取 Sets 字典（GetValue 只能取顶层 key）
+        CFPropertyListRef setsVal = pSCPreferencesGetValue(prefs, CFSTR("Sets"));
+        if (!setsVal) {
             CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
-                @"error": @"Cannot get Network/Service",
-                @"step": @"PathGet_services",
+                @"error": @"Cannot get Sets dictionary",
+                @"step": @"GetValue_Sets",
+                @"method": @"SCPreferences"
+            } options:0 error:nil];
+            return response;
+        }
+        NSDictionary *setsDict = (__bridge NSDictionary *)setsVal;
+        CFRelease(setsVal);
+        
+        // 4. 导航到 CurrentSet/Network/Service
+        NSDictionary *currentSetDict = setsDict[currentSet];
+        if (![currentSetDict isKindOfClass:[NSDictionary class]]) {
+            CFRelease((CFTypeRef)prefs);
+            response.statusCode = 500;
+            response.body = [NSJSONSerialization dataWithJSONObject:@{
+                @"success": @NO,
+                @"error": @"CurrentSet not found in Sets",
+                @"step": @"navigate_currentSet",
                 @"currentSet": currentSet,
                 @"method": @"SCPreferences"
             } options:0 error:nil];
             return response;
         }
+        NSDictionary *networkDict = currentSetDict[@"Network"];
+        if (![networkDict isKindOfClass:[NSDictionary class]]) {
+            CFRelease((CFTypeRef)prefs);
+            response.statusCode = 500;
+            response.body = [NSJSONSerialization dataWithJSONObject:@{
+                @"success": @NO,
+                @"error": @"Network dict not found in CurrentSet",
+                @"step": @"navigate_network",
+                @"method": @"SCPreferences"
+            } options:0 error:nil];
+            return response;
+        }
+        NSDictionary *servicesDict = networkDict[@"Service"];
+        if (![servicesDict isKindOfClass:[NSDictionary class]]) {
+            CFRelease((CFTypeRef)prefs);
+            response.statusCode = 500;
+            response.body = [NSJSONSerialization dataWithJSONObject:@{
+                @"success": @NO,
+                @"error": @"Service dict not found in Network",
+                @"step": @"navigate_service",
+                @"method": @"SCPreferences"
+            } options:0 error:nil];
+            return response;
+        }
         
-        NSDictionary *servicesDict = (__bridge NSDictionary *)servicesVal;
-        CFRelease(servicesVal);
-        
-        // 4. 遍历服务，找到有 IPv4 的（优先 Wi-Fi）
+        // 5. 遍历服务，找到目标（优先 Wi-Fi，不要求 IPv4 已存在）
         NSString *targetServiceID = nil;
         NSString *targetServiceName = nil;
         for (NSString *serviceID in servicesDict) {
             NSDictionary *serviceInfo = servicesDict[serviceID];
             if (![serviceInfo isKindOfClass:[NSDictionary class]]) continue;
             
-            NSDictionary *ipv4 = serviceInfo[@"IPv4"];
             NSDictionary *interface = serviceInfo[@"Interface"];
             NSString *hardwareType = interface[@"Type"];
             NSString *devName = serviceInfo[@"UserDefinedName"] ?: @"";
-            
-            if (!ipv4) continue;
             
             BOOL isWiFi = [hardwareType isEqualToString:@"AirPort"] ||
                           [hardwareType isEqualToString:@"Wi-Fi"] ||
@@ -5724,14 +5761,14 @@ static NSString *wsReadFrame(int sock) {
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
-                @"error": @"No network service with IPv4 found",
+                @"error": @"No network service found",
                 @"step": @"find_service",
                 @"method": @"SCPreferences"
             } options:0 error:nil];
             return response;
         }
         
-        // 5. 构造新的 IPv4 配置
+        // 6. 构造新的 IPv4 配置
         NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
         newIPv4[@"method"] = enabled ? @"Manual" : @"DHCP";
         if (enabled) {
@@ -5740,27 +5777,63 @@ static NSString *wsReadFrame(int sock) {
             newIPv4[@"SubnetMasks"] = @[mask];
         }
         
-        // 6. 写入
-        NSString *ipv4Path = [NSString stringWithFormat:@"%@/Network/Service/%@/IPv4", currentSet, targetServiceID];
-        Boolean writeOK = pSCPreferencesPathSetValue(prefs, (__bridge CFStringRef)ipv4Path, (__bridge CFPropertyListRef)newIPv4);
+        // 7. 深拷贝 Sets → 修改 IPv4 → SetValue 写回整个 Sets
+        NSMutableDictionary *mutableSets = [setsDict mutableCopy];
+        NSMutableDictionary *mutableCurrentSet = [[mutableSets[currentSet] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSet] mutableCopy] : [NSMutableDictionary dictionary]];
+        NSMutableDictionary *mutableNetwork = [mutableCurrentSet[@"Network"] isKindOfClass:[NSDictionary class]] ? [mutableCurrentSet[@"Network"] mutableCopy] : [NSMutableDictionary dictionary];
+        NSMutableDictionary *mutableServices = [mutableNetwork[@"Service"] isKindOfClass:[NSDictionary class]] ? [mutableNetwork[@"Service"] mutableCopy] : [NSMutableDictionary dictionary];
+        NSMutableDictionary *mutableService = [mutableServices[targetServiceID] isKindOfClass:[NSDictionary class]] ? [mutableServices[targetServiceID] mutableCopy] : [NSMutableDictionary dictionary];
+        
+        mutableService[@"IPv4"] = newIPv4;
+        mutableServices[targetServiceID] = mutableService;
+        mutableNetwork[@"Service"] = mutableServices;
+        mutableCurrentSet[@"Network"] = mutableNetwork;
+        mutableSets[currentSet] = mutableCurrentSet;
+        
+        Boolean writeOK = pSCPreferencesSetValue(prefs, CFSTR("Sets"), (__bridge CFPropertyListRef)mutableSets);
         
         if (!writeOK) {
             CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
             response.body = [NSJSONSerialization dataWithJSONObject:@{
                 @"success": @NO,
-                @"error": @"SCPreferencesPathSetValue failed",
-                @"step": @"PathSetValue",
+                @"error": @"SCPreferencesSetValue failed",
+                @"step": @"SetValue",
                 @"method": @"SCPreferences"
             } options:0 error:nil];
             return response;
         }
         
-        // 7. 提交 + 应用
+        // 8. 提交 + 应用（ApplyChanges 可选）
         Boolean commitOK = pSCPreferencesCommitChanges(prefs);
-        Boolean applyOK = pSCPreferencesApplyChanges(prefs);
+        Boolean applyOK = pSCPreferencesApplyChanges ? pSCPreferencesApplyChanges(prefs) : false;
         if (pSCPreferencesSynchronize) pSCPreferencesSynchronize(prefs);
         CFRelease((CFTypeRef)prefs);
+        
+        // 如果 ApplyChanges 不可用，手动通知 configd 重新加载
+        int notifyResult = -1;
+        if (!applyOK) {
+            notifyResult = notify_post("com.apple.system.config");
+            TVLog(@"HTTP Server: notify_post com.apple.system.config = %d (ApplyChanges unavailable)", notifyResult);
+            
+            // 尝试 SCDynamicStoreNotifyValue
+            if (sc) {
+                typedef void* SCDynamicStoreRef;
+                SCDynamicStoreRef (*pSCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
+                    (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
+                if (pSCDynamicStoreCreate) {
+                    SCDynamicStoreRef store = pSCDynamicStoreCreate(NULL, CFSTR("TrollVNC"), NULL, NULL);
+                    if (store) {
+                        Boolean (*pSCDynamicStoreNotifyValue)(SCDynamicStoreRef, CFStringRef) =
+                            (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreNotifyValue");
+                        if (pSCDynamicStoreNotifyValue) {
+                            pSCDynamicStoreNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
+                        }
+                        CFRelease((CFTypeRef)store);
+                    }
+                }
+            }
+        }
         
         response.statusCode = 200;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
@@ -5771,13 +5844,14 @@ static NSString *wsReadFrame(int sock) {
             @"service": targetServiceID,
             @"serviceName": targetServiceName ?: @"",
             @"commit": @(commitOK), @"apply": @(applyOK),
+            @"notify_post": @(notifyResult),
             @"api": @"SCPreferences"
         } options:0 error:nil];
         return response;
     }
     
     // ---- 方案2: 直接编辑 preferences.plist ----
-    TVLog(@"HTTP Server: dlsym failed, falling back to direct plist editing");
+    TVLog(@"HTTP Server: SCPreferences core functions not available, falling back to direct plist editing");
     
     // preferences.plist 路径（iOS 标准）
     NSString *prefsPath = @"/Library/Preferences/SystemConfiguration/preferences.plist";
