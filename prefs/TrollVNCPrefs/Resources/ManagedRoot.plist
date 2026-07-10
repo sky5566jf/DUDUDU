@@ -87,6 +87,30 @@
 			<string>storageSpaceValue</string>
 		</dict>
 
+		<!-- Network Settings -->
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>网络</string>
+			<key>footerText</key>
+			<string>将当前 DHCP 租约固定为静态 IP。开启时自动冻结当前 IP/子网/路由器。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>default</key>
+			<false/>
+			<key>defaults</key>
+			<string>com.82flex.trollvnc</string>
+			<key>key</key>
+			<string>StaticIPEnabled</string>
+			<key>label</key>
+			<string>锁定 DHCP 为静态 IP</string>
+			<key>PostNotification</key>
+			<string>com.82flex.trollvnc/prefsChanged</string>
+		</dict>
+
 	</array>
 </dict>
 </plist>
