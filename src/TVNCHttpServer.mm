@@ -536,6 +536,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleInstallUrl:query];
     } else if ([path isEqualToString:@"/api/install/deb"]) {
         return [self handleInstallDeb:query body:body];
+    } else if ([path isEqualToString:@"/api/ping"]) {
+        return [self handlePing];
     } else if ([path isEqualToString:@"/api/plist"]) {
         return [self handlePlist:method query:query body:body];
     } else if ([path isEqualToString:@"/api/network/static_ip"]) {
@@ -5606,6 +5608,15 @@ static NSString *wsReadFrame(int sock) {
     
     close(_clientSocket);
     } // end send_response block
+}
+
+// GET /api/ping - 飞越测试
+- (TVNCHttpResponse *)handlePing {
+    TVNCHttpResponse *r = [[TVNCHttpResponse alloc] init];
+    r.statusCode = 200;
+    r.contentType = @"application/json";
+    r.body = [@"{\"ok\":true}" dataUsingEncoding:NSUTF8StringEncoding];
+    return r;
 }
 
 // GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
