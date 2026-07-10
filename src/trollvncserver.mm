@@ -5361,7 +5361,7 @@ static int rootHelperMain(int argc, const char *argv[]) {
             newPrefs[@"Sets"] = mutableSets;
 
             // 写回 preferences.plist (binary plist format)
-            NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:newPrefs format:NSPropertyListBinaryFormat_v1 options:0 error:nil];
+            NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:newPrefs format:NSPropertyListBinaryFormat_v1_0 options:0 error:nil];
             if (!plistData) {
                 printf("{\"success\":false,\"error\":\"failed to serialize plist\"}");
                 return 1;

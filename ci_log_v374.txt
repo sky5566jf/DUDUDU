@@ -1,0 +1,8 @@
+﻿python.exe : usage: gh [-h] [--home] [-p] [-b] [-s] [-r] [-t] [-c] [-w] [-i] [-d] [-v]
+所在位置 行:439 字符: 1
++ & "C:\Program Files\Python312\python.exe" "C:\Program Files\Python312 ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (usage: gh [-h] ... [-i] [-d] [-v]:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+gh: error: unrecognized arguments: run view 29115782554 --log-failed
