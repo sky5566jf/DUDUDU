@@ -33,6 +33,7 @@
 #import <spawn.h>
 #import <fcntl.h>  // 用于 open(), O_WRONLY, O_TRUNC
 #import <sys/wait.h>
+#import <mach-o/dyld.h>  // _NSGetExecutablePath
 
 // iOS 私有 persona API（用于以 root 身份执行命令）
 extern "C" int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
@@ -5711,6 +5712,41 @@ static NSString *wsReadFrame(int sock) {
             TVLog(@"HTTP Server: SCPreferencesLock result=%d", lockOK);
         }
         
+        // 1c. 如果 Lock 失败，fallback 到 root helper（spawn 自身以 root 身份直接修改 preferences.plist）
+        if (!lockOK) {
+            char selfPath[PATH_MAX];
+            uint32_t pathSize = sizeof(selfPath);
+            if (_NSGetExecutablePath(selfPath, &pathSize) == 0) {
+                NSString *execPath = [NSString stringWithUTF8String:selfPath];
+                TVLog(@"HTTP Server: Lock failed, trying root helper via %@", execPath);
+                
+                NSDictionary *helperParams = @{
+                    @"enabled": @(enabled),
+                    @"ip": ip,
+                    @"mask": mask,
+                    @"router": router
+                };
+                NSData *helperJson = [NSJSONSerialization dataWithJSONObject:helperParams options:0 error:nil];
+                NSString *helperJsonStr = [[NSString alloc] initWithData:helperJson encoding:NSUTF8StringEncoding];
+                
+                NSString *helperOutput = nil;
+                int helperExit = spawnAsRootWithOutput(execPath, @[@"--root-helper", @"static_ip", helperJsonStr], &helperOutput);
+                TVLog(@"HTTP Server: root helper exit=%d, output=%@", helperExit, helperOutput);
+                
+                if (helperExit == 0 && helperOutput.length > 0) {
+                    CFRelease((CFTypeRef)prefs);
+                    response.statusCode = 200;
+                    response.body = [helperOutput dataUsingEncoding:NSUTF8StringEncoding];
+                    return response;
+                }
+                
+                // root helper 也失败，继续 SCPreferences 路径（commit 会失败但提供诊断信息）
+                TVLog(@"HTTP Server: root helper failed (exit=%d), falling through to SCPreferences for diagnostics", helperExit);
+            } else {
+                TVLog(@"HTTP Server: _NSGetExecutablePath failed, cannot try root helper");
+            }
+        }
+        
         // 2. 获取 CurrentSet 路径
         CFPropertyListRef currentSetVal = pSCPreferencesGetValue(prefs, CFSTR("CurrentSet"));
         if (!currentSetVal) {
@@ -5915,7 +5951,8 @@ static NSString *wsReadFrame(int sock) {
             @"usedAuthorization": @(usedAuthorization),
             @"createMethod": createMethod,
             @"notify_post": @(notifyResult),
-            @"api": @"SCPreferences"
+            @"api": @"SCPreferences",
+            @"rootHelperAttempted": @YES
         } options:0 error:nil];
         return response;
     }

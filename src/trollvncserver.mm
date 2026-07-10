@@ -5237,6 +5237,173 @@ static void rfbCustomLog(const char *format, ...) {
 
 static void setupRfbLogging(void) { rfbLog = rfbErr = rfbCustomLog; }
 
+#pragma mark - Root Helper Mode
+
+// Root helper: 以 root 身份直接修改 preferences.plist
+// 通过 posix_spawn + persona API 以 root 身份 spawn daemon 自身
+// 用法: trollvncserver --root-helper <operation> <json_params>
+static int rootHelperMain(int argc, const char *argv[]) {
+    @autoreleasepool {
+        if (argc < 4) {
+            printf("{\"success\":false,\"error\":\"missing arguments\"}");
+            return 1;
+        }
+
+        NSString *operation = [NSString stringWithUTF8String:argv[2]];
+        NSString *jsonParams = [NSString stringWithUTF8String:argv[3]];
+
+        NSData *jsonData = [jsonParams dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *params = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+
+        if (!params) {
+            printf("{\"success\":false,\"error\":\"invalid JSON params\"}");
+            return 1;
+        }
+
+        if ([operation isEqualToString:@"static_ip"]) {
+            NSString *prefsPath = @"/var/preferences/SystemConfiguration/preferences.plist";
+            NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:prefsPath];
+            if (!prefs) {
+                printf("{\"success\":false,\"error\":\"cannot read preferences.plist\",\"path\":\"%s\"}", [prefsPath UTF8String]);
+                return 1;
+            }
+
+            NSString *currentSet = prefs[@"CurrentSet"];
+            if (!currentSet || ![currentSet isKindOfClass:[NSString class]]) {
+                printf("{\"success\":false,\"error\":\"CurrentSet not found\"}");
+                return 1;
+            }
+
+            NSString *currentSetKey = [currentSet hasPrefix:@"/Sets/"] ? [currentSet substringFromIndex:6] : currentSet;
+
+            NSDictionary *setsDict = prefs[@"Sets"];
+            if (![setsDict isKindOfClass:[NSDictionary class]]) {
+                printf("{\"success\":false,\"error\":\"Sets not found\"}");
+                return 1;
+            }
+
+            NSDictionary *currentSetDict = setsDict[currentSetKey];
+            if (![currentSetDict isKindOfClass:[NSDictionary class]]) {
+                printf("{\"success\":false,\"error\":\"CurrentSet key not in Sets\",\"currentSetKey\":\"%s\"}", [currentSetKey UTF8String]);
+                return 1;
+            }
+
+            NSDictionary *networkDict = currentSetDict[@"Network"];
+            if (![networkDict isKindOfClass:[NSDictionary class]]) {
+                printf("{\"success\":false,\"error\":\"Network not found\"}");
+                return 1;
+            }
+
+            NSDictionary *servicesDict = networkDict[@"Service"];
+            if (![servicesDict isKindOfClass:[NSDictionary class]]) {
+                printf("{\"success\":false,\"error\":\"Service not found\"}");
+                return 1;
+            }
+
+            // 找 Wi-Fi service
+            NSString *targetServiceID = nil;
+            NSString *targetServiceName = nil;
+            for (NSString *serviceID in servicesDict) {
+                NSDictionary *serviceInfo = servicesDict[serviceID];
+                if (![serviceInfo isKindOfClass:[NSDictionary class]]) continue;
+
+                NSDictionary *interface = serviceInfo[@"Interface"];
+                NSString *hardwareType = interface[@"Type"];
+                NSString *devName = serviceInfo[@"UserDefinedName"] ?: @"";
+
+                BOOL isWiFi = [hardwareType isEqualToString:@"AirPort"] ||
+                              [hardwareType isEqualToString:@"Wi-Fi"] ||
+                              [devName.lowercaseString containsString:@"wi-fi"] ||
+                              [devName.lowercaseString containsString:@"wifi"];
+
+                if (isWiFi) {
+                    targetServiceID = serviceID;
+                    targetServiceName = devName;
+                    break;
+                }
+                if (!targetServiceID) {
+                    targetServiceID = serviceID;
+                    targetServiceName = devName;
+                }
+            }
+
+            if (!targetServiceID) {
+                printf("{\"success\":false,\"error\":\"no network service found\"}");
+                return 1;
+            }
+
+            BOOL enabled = [params[@"enabled"] boolValue];
+            NSString *ip = params[@"ip"] ?: @"";
+            NSString *mask = params[@"mask"] ?: @"";
+            NSString *router = params[@"router"] ?: @"";
+
+            // 深拷贝修改
+            NSMutableDictionary *mutableSets = [setsDict mutableCopy];
+            NSMutableDictionary *mutableCurrentSet = [mutableSets[currentSetKey] mutableCopy];
+            NSMutableDictionary *mutableNetwork = [mutableCurrentSet[@"Network"] mutableCopy];
+            NSMutableDictionary *mutableServices = [mutableNetwork[@"Service"] mutableCopy];
+            NSMutableDictionary *mutableService = [mutableServices[targetServiceID] mutableCopy];
+
+            NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
+            newIPv4[@"method"] = enabled ? @"Manual" : @"DHCP";
+            if (enabled) {
+                newIPv4[@"Router"] = router;
+                newIPv4[@"Addresses"] = @[ip];
+                newIPv4[@"SubnetMasks"] = @[mask];
+            }
+            mutableService[@"IPv4"] = newIPv4;
+            mutableServices[targetServiceID] = mutableService;
+            mutableNetwork[@"Service"] = mutableServices;
+            mutableCurrentSet[@"Network"] = mutableNetwork;
+            mutableSets[currentSetKey] = mutableCurrentSet;
+
+            NSMutableDictionary *newPrefs = [prefs mutableCopy];
+            newPrefs[@"Sets"] = mutableSets;
+
+            // 写回 preferences.plist (binary plist format)
+            NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:newPrefs format:NSPropertyListBinaryFormat_v1 options:0 error:nil];
+            if (!plistData) {
+                printf("{\"success\":false,\"error\":\"failed to serialize plist\"}");
+                return 1;
+            }
+
+            BOOL writeOK = [plistData writeToFile:prefsPath atomically:YES];
+            if (!writeOK) {
+                printf("{\"success\":false,\"error\":\"failed to write preferences.plist\",\"uid\":%d}", getuid());
+                return 1;
+            }
+
+            // 通知系统重新加载配置
+            notify_post("com.apple.system.config");
+
+            // 输出 JSON 结果到 stdout
+            NSMutableDictionary *result = [NSMutableDictionary dictionary];
+            result[@"success"] = @YES;
+            result[@"method"] = @"root_helper";
+            result[@"service"] = targetServiceID;
+            result[@"serviceName"] = targetServiceName ?: @"";
+            result[@"currentSet"] = currentSet;
+            result[@"currentSetKey"] = currentSetKey;
+            result[@"ip"] = ip;
+            result[@"mask"] = mask;
+            result[@"router"] = router;
+            result[@"enabled"] = @(enabled);
+            result[@"uid"] = @(getuid());
+            result[@"prefsPath"] = prefsPath;
+            result[@"notifyPosted"] = @YES;
+
+            NSData *resultData = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+            NSString *resultStr = [[NSString alloc] initWithData:resultData encoding:NSUTF8StringEncoding];
+            printf("%s", [resultStr UTF8String]);
+            fflush(stdout);
+            return 0;
+        }
+
+        printf("{\"success\":false,\"error\":\"unknown operation\"}");
+        return 1;
+    }
+}
+
 #pragma mark - Main Procedure
 
 #define REQUIRED_UID 501
@@ -5530,6 +5697,12 @@ static void tvncSetupCrashLogger(void) {
 }
 
 int main(int argc, const char *argv[]) {
+
+    // Root helper mode: 以 root 身份执行特权操作后直接退出
+    // 不走 dropPrivileges，保持 root 身份
+    if (argc >= 2 && strcmp(argv[1], "--root-helper") == 0) {
+        return rootHelperMain(argc, argv);
+    }
 
     /* Drop privileges: this program should run as mobile */
     dropPrivileges();
