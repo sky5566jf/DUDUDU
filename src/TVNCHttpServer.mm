@@ -21,7 +21,6 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <SystemConfiguration/SystemConfiguration.h>
 #import <UIKit/UIKit.h>
 #import <netinet/in.h>
 #import <arpa/inet.h>
@@ -5626,97 +5625,75 @@ static NSString *wsReadFrame(int sock) {
     }
 
     @try {
-        // 直接调用 SystemConfiguration (daemon 已链接 SystemConfiguration.framework)
-        CFErrorRef cfErr = NULL;
-        SCPreferencesRef prefs = SCPreferencesCreateWithOptions(kCFAllocatorDefault, CFSTR("TVNC-Net"), CFSTR("com.apple.SystemConfiguration"), kSCPreferencesOptionOpenStore, &cfErr);
-        if (!prefs) {
-            NSString *msg = cfErr ? [(__bridge_transfer NSError *)cfErr localizedDescription] : @"Cannot open SystemConfiguration";
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":msg} options:0 error:nil];
-            return response;
-        }
-
-        NSDictionary *setup = (__bridge NSDictionary *)SCPreferencesPathGetValue(prefs, CFSTR("Setup:/"));
-        NSDictionary *services = setup[@"Network"] ? setup[@"Network"][@"Service"] : nil;
-        if (!services || ![services isKindOfClass:[NSDictionary class]]) {
-            CFRelease(prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"No network services found"} options:0 error:nil];
-            return response;
-        }
-
-        // 取默认路由接口
-        NSString *targetIf = nil;
-        SCDynamicStoreRef store = SCDynamicStoreCreate(NULL, CFSTR("TVNC-Net-If"), NULL, NULL);
-        if (store) {
-            NSDictionary *ipv4 = (__bridge NSDictionary *)SCDynamicStoreCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
-            targetIf = ipv4[@"PrimaryInterface"];
-            if (ipv4) CFRelease((__bridge CFTypeRef)ipv4);
-            CFRelease(store);
-        }
-        if (!targetIf) targetIf = @"en0";
-
-        NSString *matchedID = nil;
-        NSDictionary *matchedSvc = nil;
-        for (NSString *sid in services) {
-            NSDictionary *svc = services[sid];
-            if (![svc isKindOfClass:[NSDictionary class]]) continue;
-            NSString *dev = svc[@"Interface"] ? svc[@"Interface"][@"DeviceName"] : nil;
-            if ([dev isKindOfClass:[NSString class]] && [dev isEqualToString:targetIf]) {
-                matchedID = sid;
-                matchedSvc = svc;
-                break;
+        typedef struct __SCPreferences *SPref;
+        static SPref (*mkPrefs)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *) = NULL;
+        static CFTypeRef (*getVal)(SPref, CFStringRef) = NULL;
+        static Boolean (*setVal)(SPref, CFStringRef, CFTypeRef) = NULL;
+        static Boolean (*commit)(SPref) = NULL;
+        static Boolean (*apply)(SPref) = NULL;
+        static CFTypeRef (*dynCopy)(CFTypeRef, CFStringRef) = NULL;
+        static CFTypeRef (*dynCreate)(CFAllocatorRef, CFStringRef, void *, void *) = NULL;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            void *h = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
+            if (h) {
+                mkPrefs = dlsym(h, "SCPreferencesCreateWithOptions");
+                getVal  = dlsym(h, "SCPreferencesPathGetValue");
+                setVal  = dlsym(h, "SCPreferencesPathSetValue");
+                commit  = dlsym(h, "SCPreferencesCommitChanges");
+                apply   = dlsym(h, "SCPreferencesApplyChanges");
+                dynCopy = dlsym(h, "SCDynamicStoreCopyValue");
+                dynCreate = dlsym(h, "SCDynamicStoreCreate");
             }
-        }
-        if (!matchedID) {
-            CFRelease(prefs);
+        });
+        if (!mkPrefs || !getVal || !setVal || !commit || !apply) {
             response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Service not found for %@", targetIf]} options:0 error:nil];
+            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"SCPreferences unavailable"} options:0 error:nil];
             return response;
         }
 
-        NSString *setupPath = [NSString stringWithFormat:@"Setup:/Network/Service/%@", matchedID];
-        NSDictionary *ipv4Section = matchedSvc[@"IPv4"];
-        if (ipv4Section && [ipv4Section isKindOfClass:[NSDictionary class]]) {
-            NSString *backupPath = [NSString stringWithFormat:@"State:/Network/TVNCBackup/%@", matchedID];
-            SCPreferencesPathSetValue(prefs, (__bridge CFStringRef)backupPath, (__bridge CFDictionaryRef)ipv4Section);
-        }
-
-        NSDictionary *currentIPv4 = [matchedSvc[@"IPv4"] isKindOfClass:[NSDictionary class]] ? matchedSvc[@"IPv4"] : @{};
-        NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionaryWithDictionary:currentIPv4];
-        NSString *ipv4Path = [NSString stringWithFormat:@"%@/IPv4", setupPath];
-
-        if (enabled) {
-            newIPv4[@"ConfigMethod"] = @"Manual";
-            newIPv4[@"Addresses"] = @[ip];
-            newIPv4[@"SubnetMasks"] = @[mask.length ? mask : @"255.255.255.0"];
-            if (router.length) newIPv4[@"Router"] = router;
-            [newIPv4 removeObjectForKey:@"RouterHardwareAddress"];
-        } else {
-            newIPv4[@"ConfigMethod"] = @"DHCP";
-            [newIPv4 removeObjectForKey:@"Addresses"];
-            [newIPv4 removeObjectForKey:@"SubnetMasks"];
-            [newIPv4 removeObjectForKey:@"Router"];
-        }
-
-        SCPreferencesPathSetValue(prefs, (__bridge CFStringRef)ipv4Path, (__bridge CFDictionaryRef)newIPv4);
-
-        if (!SCPreferencesCommitChanges(prefs) || !SCPreferencesApplyChanges(prefs)) {
-            CFRelease(prefs);
+        CFErrorRef e = NULL;
+        SPref p = mkPrefs(kCFAllocatorDefault, CFSTR("TVNC-Net"), CFSTR("com.apple.SystemConfiguration"), (CFOptionFlags)1, &e);
+        if (!p) {
             response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Failed to commit configuration"} options:0 error:nil];
+            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":e ? [(__bridge_transfer NSError *)e localizedDescription] : @"Cannot open config"} options:0 error:nil];
             return response;
         }
-        CFRelease(prefs);
+
+        NSDictionary *setup = (__bridge NSDictionary *)getVal(p, CFSTR("Setup:/"));
+        NSDictionary *svcs = setup[@"Network"] ? setup[@"Network"][@"Service"] : nil;
+        if (![svcs isKindOfClass:[NSDictionary class]]) { CFRelease(p);
+            response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"No services"} options:0 error:nil]; return response; }
+
+        NSString *tif = @"en0";
+        if (dynCreate && dynCopy) {
+            CFTypeRef s = dynCreate(kCFAllocatorDefault, CFSTR("TVNC-If"), NULL, NULL);
+            if (s) { NSDictionary *d = (__bridge NSDictionary *)dynCopy(s, CFSTR("State:/Network/Global/IPv4")); if (d[@"PrimaryInterface"]) tif = d[@"PrimaryInterface"]; if (d) CFRelease(d); CFRelease(s); }
+        }
+
+        NSString *mid = nil; NSDictionary *msvc = nil;
+        for (NSString *sid in svcs) { NSDictionary *svc = svcs[sid]; if (![svc isKindOfClass:[NSDictionary class]]) continue; NSString *dev = svc[@"Interface"] ? svc[@"Interface"][@"DeviceName"] : nil; if ([dev isKindOfClass:[NSString class]] && [dev isEqualToString:tif]) { mid = sid; msvc = svc; break; } }
+        if (!mid) { CFRelease(p); response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Not found: %@", tif]} options:0 error:nil]; return response; }
+
+        NSString *sp = [NSString stringWithFormat:@"Setup:/Network/Service/%@", mid];
+        NSDictionary *v4 = msvc[@"IPv4"];
+        if (v4 && [v4 isKindOfClass:[NSDictionary class]]) setVal(p, (__bridge CFStringRef)[NSString stringWithFormat:@"State:/Network/TVNCBackup/%@", mid], (__bridge CFDictionaryRef)v4);
+
+        NSMutableDictionary *nv4 = [NSMutableDictionary dictionaryWithDictionary:([msvc[@"IPv4"] isKindOfClass:[NSDictionary class]] ? msvc[@"IPv4"] : @{})];
+        if (enabled) { nv4[@"ConfigMethod"] = @"Manual"; nv4[@"Addresses"] = @[ip]; nv4[@"SubnetMasks"] = @[mask.length?mask:@"255.255.255.0"]; if (router.length) nv4[@"Router"] = router; [nv4 removeObjectForKey:@"RouterHardwareAddress"]; }
+        else { nv4[@"ConfigMethod"] = @"DHCP"; [nv4 removeObjectForKey:@"Addresses"]; [nv4 removeObjectForKey:@"SubnetMasks"]; [nv4 removeObjectForKey:@"Router"]; }
+
+        setVal(p, (__bridge CFStringRef)[NSString stringWithFormat:@"%@/IPv4", sp], (__bridge CFDictionaryRef)nv4);
+        if (!commit(p) || !apply(p)) { CFRelease(p); response.statusCode = 500; response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":@"Commit failed"} options:0 error:nil]; return response; }
+        CFRelease(p);
 
         response.statusCode = 200;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@YES, @"interface":targetIf, @"enabled":@(enabled)} options:0 error:nil];
-        return response;
-    } @catch (NSException *exception) {
+        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@YES, @"interface":tif, @"enabled":@(enabled)} options:0 error:nil];
+    } @catch (NSException *ex) {
         response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Exception: %@", exception.reason]} options:0 error:nil];
-        return response;
+        response.body = [NSJSONSerialization dataWithJSONObject:@{@"success":@NO, @"error":[NSString stringWithFormat:@"Crash: %@", ex.reason]} options:0 error:nil];
     }
+    return response;
 }
 
 @end
