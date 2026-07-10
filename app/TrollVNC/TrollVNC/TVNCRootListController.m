@@ -282,12 +282,58 @@ NS_INLINE NSDictionary *TVNCSelectPreferredNetwork(void) {
     };
 }
 
-// v3.54 (Step 1): 只读展示用，返回 ip/mask/router（复用 TVNCSelectPreferredNetwork 的确定性选择）
+// v3.54 (Step 1): 只读展示用，返回 ip/mask/router。
+// 优先走 TVNCSelectPreferredNetwork（需要 SCPreferences，root/daemon可通）；
+// 在 App 沙盒(mobile)内 SCPreferences 被拦时，回退到 getifaddrs + SCDynamicStore（App内可通）。
 NS_INLINE NSDictionary<NSString *, NSString *> *TVNCGetCurrentNetworkInfo(void) {
     NSDictionary *sel = TVNCSelectPreferredNetwork();
-    if (!sel)
+    if (sel)
+        return @{@"ip" : sel[@"ip"], @"mask" : sel[@"mask"], @"router" : sel[@"router"]};
+
+    // ---- 备用路径：仅依赖 getifaddrs + SCDynamicStore（无需 SCPreferences）----
+    struct ifaddrs *ifaList = NULL;
+    if (getifaddrs(&ifaList) != 0 || !ifaList)
         return nil;
-    return @{@"ip" : sel[@"ip"], @"mask" : sel[@"mask"], @"router" : sel[@"router"]};
+
+    NSString *defaultRouteInterface = GetDefaultRouteInterface();
+    const char *ifName = defaultRouteInterface ? [defaultRouteInterface UTF8String] : "en0";
+
+    NSString *ip = nil;
+    NSString *mask = nil;
+    for (struct ifaddrs *ifa = ifaList; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || !ifa->ifa_name)
+            continue;
+        if (strcmp(ifa->ifa_name, ifName) != 0)
+            continue;
+        if (!(ifa->ifa_flags & IFF_UP) || (ifa->ifa_flags & IFF_LOOPBACK))
+            continue;
+        if (ifa->ifa_addr->sa_family != AF_INET)
+            continue;
+
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)ifa->ifa_addr;
+        char buf[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+            ip = [NSString stringWithUTF8String:buf];
+        if (ifa->ifa_netmask) {
+            const struct sockaddr_in *nm = (const struct sockaddr_in *)ifa->ifa_netmask;
+            char mbuf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &nm->sin_addr, mbuf, sizeof(mbuf)))
+                mask = [NSString stringWithUTF8String:mbuf];
+        }
+        if (ip && mask)
+            break;
+    }
+    freeifaddrs(ifaList);
+
+    if (!ip)
+        return nil;
+
+    NSString *router = TVNCGetDefaultRouter();
+    return @{
+        @"ip" : ip,
+        @"mask" : (mask ?: @""),
+        @"router" : (router ?: @""),
+    };
 }
 
 // v3.54 (Step 2): 通过 SCPreferences API 将默认路由接口的 DHCP 配置锁定为静态（Manual）或回滚 DHCP。
