@@ -5710,17 +5710,22 @@ static NSString *wsReadFrame(int sock) {
             TVLog(@"HTTP Server: open() failed: errno=%s", strerror(errno));
         }
         
-        // 方案3: 写临时文件再替换
+        // 方案3: 写临时文件再用 NSFileManager 替换
         if (!writeOK) {
             NSString *tmpPath = @"/tmp/preferences.plist.tmp";
             BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
             if (tmpOK) {
-                // 用 system() cp 替换
-                NSString *cmd = [NSString stringWithFormat:@"cp -f \"%@\" \"%@\" && chmod 644 \"%@\"", tmpPath, prefsPath, prefsPath];
-                int sysResult = system([cmd UTF8String]);
-                if (sysResult == 0) {
+                // 用 NSFileManager copy 替换
+                NSFileManager *fm2 = [NSFileManager defaultManager];
+                [fm2 removeItemAtPath:prefsPath error:nil];
+                NSError *copyError = nil;
+                if ([fm2 copyItemAtPath:tmpPath toPath:prefsPath error:&copyError]) {
+                    NSDictionary *attrs = @{NSFilePosixPermissions: [NSNumber numberWithShort:0644]};
+                    [fm2 setAttributes:attrs ofItemAtPath:prefsPath error:nil];
                     writeOK = YES;
-                    TVLog(@"HTTP Server: system() cp write succeeded");
+                    TVLog(@"HTTP Server: NSFileManager copy write succeeded");
+                } else {
+                    TVLog(@"HTTP Server: NSFileManager copy failed: %@", copyError);
                 }
                 unlink([tmpPath UTF8String]);
             }
