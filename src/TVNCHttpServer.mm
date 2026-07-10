@@ -142,6 +142,7 @@ static NSString * const kWebDAVHTMLBase64 =
 }
 
 // v3.54 (方案A): daemon 代理写入网络配置
+- (TVNCHttpResponse *)handlePing;
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query;
 
 @end
