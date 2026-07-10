@@ -5228,6 +5228,35 @@ static NSString *wsReadFrame(int sock) {
     return response;
 }
 
+// GET /api/ping - 飞越测试
+- (TVNCHttpResponse *)handlePing {
+    TVNCHttpResponse *r = [[TVNCHttpResponse alloc] init];
+    r.statusCode = 200;
+    r.contentType = @"application/json";
+    r.body = [@"{\"ok\":true}" dataUsingEncoding:NSUTF8StringEncoding];
+    return r;
+}
+
+// GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
+- (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    response.contentType = @"application/json";
+
+    BOOL enabled = [query[@"enabled"] intValue] != 0;
+    NSString *ip = query[@"ip"];
+    NSString *mask = query[@"mask"] ?: @"";
+
+    response.statusCode = 200;
+    response.body = [NSJSONSerialization dataWithJSONObject:@{
+        @"success": @YES,
+        @"enabled": @(enabled),
+        @"ip": ip ?: @"",
+        @"mask": mask,
+        @"step": @"handler_routing_ok"
+    } options:0 error:nil];
+    return response;
+}
+
 @end
 
 #pragma mark - TVNCHttpConnection
@@ -5609,36 +5638,6 @@ static NSString *wsReadFrame(int sock) {
     
     close(_clientSocket);
     } // end send_response block
-}
-
-// GET /api/ping - 飞越测试
-- (TVNCHttpResponse *)handlePing {
-    TVNCHttpResponse *r = [[TVNCHttpResponse alloc] init];
-    r.statusCode = 200;
-    r.contentType = @"application/json";
-    r.body = [@"{\"ok\":true}" dataUsingEncoding:NSUTF8StringEncoding];
-    return r;
-}
-
-// GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
-- (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    response.contentType = @"application/json";
-
-    BOOL enabled = [query[@"enabled"] intValue] != 0;
-    NSString *ip = query[@"ip"];
-    NSString *mask = query[@"mask"] ?: @"";
-
-    // Step1: 空实现验证路由和响应通路（暂不调SCPreferences）
-    response.statusCode = 200;
-    response.body = [NSJSONSerialization dataWithJSONObject:@{
-        @"success": @YES,
-        @"enabled": @(enabled),
-        @"ip": ip ?: @"",
-        @"mask": mask,
-        @"step": @"handler_routing_ok"
-    } options:0 error:nil];
-    return response;
 }
 
 @end
