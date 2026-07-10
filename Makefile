@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.58
+export PACKAGE_VERSION := 3.59
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -97,6 +97,7 @@ trollvncserver_FRAMEWORKS += IOKit
 trollvncserver_FRAMEWORKS += IOSurface
 trollvncserver_FRAMEWORKS += ImageIO
 trollvncserver_FRAMEWORKS += QuartzCore
+trollvncserver_FRAMEWORKS += SystemConfiguration
 trollvncserver_FRAMEWORKS += UIKit
 trollvncserver_FRAMEWORKS += UserNotifications
 
