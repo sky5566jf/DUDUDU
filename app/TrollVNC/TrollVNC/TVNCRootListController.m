@@ -42,7 +42,8 @@
 #ifdef THEBOOTSTRAP
 #endif
 
-NS_INLINE NSString *GetDefaultRouteInterface(void) {
+// 读取 State:/Network/Global/IPv4（及 IPv6 兜底）的网络字典，供 GetDefaultRouteInterface / TVNCGetDefaultRouter 复用
+NS_INLINE NSDictionary *TVNCCopyGlobalIPDict(void) {
     static SCDynamicStoreRef (*_SCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack,
                                                       SCDynamicStoreContext *) = NULL;
     static CFPropertyListRef (*_SCDynamicStoreCopyValue)(SCDynamicStoreRef, CFStringRef) = NULL;
@@ -64,7 +65,7 @@ NS_INLINE NSString *GetDefaultRouteInterface(void) {
         return nil;
     }
 
-    SCDynamicStoreRef store = _SCDynamicStoreCreate(NULL, CFSTR("RouteInfo"), NULL, NULL);
+    SCDynamicStoreRef store = _SCDynamicStoreCreate(NULL, CFSTR("TVNCGlobalIP"), NULL, NULL);
     if (!store)
         return nil;
 
@@ -74,7 +75,17 @@ NS_INLINE NSString *GetDefaultRouteInterface(void) {
         dict = (NSDictionary *)CFBridgingRelease(_SCDynamicStoreCopyValue(store, CFSTR("State:/Network/Global/IPv6")));
     CFRelease(store);
 
-    return dict[@"PrimaryInterface"];
+    return dict;
+}
+
+// 默认路由接口名（Wi‑Fi en0 / 以太网 enX）
+NS_INLINE NSString *GetDefaultRouteInterface(void) {
+    return TVNCCopyGlobalIPDict()[@"PrimaryInterface"];
+}
+
+// 默认路由的网关（Router）
+NS_INLINE NSString *TVNCGetDefaultRouter(void) {
+    return TVNCCopyGlobalIPDict()[@"Router"];
 }
 
 // Resolve current IPv4/IPv6 address of interface en0 (Wi‑Fi). Prefer IPv4 if available.
@@ -123,6 +134,263 @@ NS_INLINE NSString *TVNCGetEn0IPAddress(void) {
     }
     freeifaddrs(ifaList);
     return ipv4 ?: ipv6; // prefer IPv4
+}
+
+typedef struct __SCPreferences *TVNCSCPreferencesRef;
+
+// v3.54: 确定性选择要锁定的目标网络接口，优先级：以太网(Ethernet) > Wi‑Fi。
+// 以太网 + Wi‑Fi 同时在线 → 锁以太网；仅 Wi‑Fi → 锁 Wi‑Fi；仅以太网 → 锁以太网。
+// 返回 @{@"interface", @"serviceID", @"type", @"ip", @"mask", @"router"}；无有效连接返回 nil。
+// 巨魔版(mobile) 经 configd 读 Setup（entitlement: SCPreferences-write-access），对 tipa/deb 通用。
+NS_INLINE NSDictionary *TVNCSelectPreferredNetwork(void) {
+    // 1) 读 Setup:/Network/Service，建立 DeviceName -> {serviceID, type}
+    static void *scHandle = NULL;
+    static dispatch_once_t once;
+    static TVNCSCPreferencesRef (*_SCPreferencesCreateWithOptions)(CFAllocatorRef, CFStringRef, CFStringRef,
+                                                                   CFOptionFlags, CFErrorRef *) = NULL;
+    static CFDictionaryRef (*_SCPreferencesPathGetValue)(TVNCSCPreferencesRef, CFStringRef) = NULL;
+    dispatch_once(&once, ^{
+        scHandle = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
+        if (scHandle) {
+            _SCPreferencesCreateWithOptions = dlsym(scHandle, "SCPreferencesCreateWithOptions");
+            _SCPreferencesPathGetValue = dlsym(scHandle, "SCPreferencesPathGetValue");
+        }
+    });
+    if (!_SCPreferencesCreateWithOptions || !_SCPreferencesPathGetValue)
+        return nil;
+
+    CFErrorRef createErr = NULL;
+    TVNCSCPreferencesRef prefs = _SCPreferencesCreateWithOptions(
+        kCFAllocatorDefault, CFSTR("TVNC-SelectNet"), CFSTR("com.apple.SystemConfiguration"), (CFOptionFlags)1,
+        &createErr);
+    if (!prefs) {
+        if (createErr)
+            CFRelease(createErr);
+        return nil;
+    }
+
+    NSDictionary *setup = (__bridge NSDictionary *)_SCPreferencesPathGetValue(prefs, CFSTR("Setup:/"));
+    NSDictionary *services = setup[@"Network"] ? setup[@"Network"][@"Service"] : nil;
+    NSMutableDictionary *devToService = [NSMutableDictionary dictionary];
+    for (NSString *sid in services) {
+        NSDictionary *svc = services[sid];
+        NSDictionary *iface = svc[@"Interface"];
+        NSString *dev = iface ? iface[@"DeviceName"] : nil;
+        NSString *type = iface ? iface[@"Type"] : nil;
+        if ([dev isKindOfClass:[NSString class]]) {
+            [devToService setObject:@{@"serviceID" : sid, @"type" : (type ?: @"")} forKey:dev];
+        }
+    }
+    CFRelease(prefs);
+
+    // 2) getifaddrs 收集所有有 IPv4 的物理接口（排除回环/链路本地/虚拟/蜂窝）
+    struct ifaddrs *ifaList = NULL;
+    if (getifaddrs(&ifaList) != 0 || !ifaList)
+        return nil;
+    NSMutableDictionary<NSString *, NSDictionary *> *ifIPv4 = [NSMutableDictionary dictionary];
+    for (struct ifaddrs *ifa = ifaList; ifa; ifa = ifa->ifa_next) {
+        if (!ifa->ifa_addr || !ifa->ifa_name)
+            continue;
+        if (!(ifa->ifa_flags & IFF_UP) || (ifa->ifa_flags & IFF_LOOPBACK))
+            continue;
+        if (ifa->ifa_addr->sa_family != AF_INET)
+            continue; // v1 仅 IPv4
+        NSString *name = [NSString stringWithUTF8String:ifa->ifa_name];
+        if ([name hasPrefix:@"lo"] || [name hasPrefix:@"pdp_ip"] || [name hasPrefix:@"bridge"] ||
+            [name hasPrefix:@"awdl"] || [name hasPrefix:@"llw"] || [name hasPrefix:@"utun"] ||
+            [name hasPrefix:@"ipsec"] || [name hasPrefix:@"anpi"] || [name hasPrefix:@"ap"] ||
+            [name hasPrefix:@"gif"] || [name hasPrefix:@"stf"] || [name hasPrefix:@"pktap"])
+            continue;
+        const struct sockaddr_in *sin = (const struct sockaddr_in *)ifa->ifa_addr;
+        char buf[INET_ADDRSTRLEN] = {0};
+        if (!inet_ntop(AF_INET, &sin->sin_addr, buf, sizeof(buf)))
+            continue;
+        NSString *ip = [NSString stringWithUTF8String:buf];
+        if ([ip isEqualToString:@"0.0.0.0"] || [ip hasPrefix:@"169.254."])
+            continue; // 排除无效/链路本地
+        NSString *mask = @"";
+        if (ifa->ifa_netmask) {
+            const struct sockaddr_in *nm = (const struct sockaddr_in *)ifa->ifa_netmask;
+            char mbuf[INET_ADDRSTRLEN] = {0};
+            if (inet_ntop(AF_INET, &nm->sin_addr, mbuf, sizeof(mbuf)))
+                mask = [NSString stringWithUTF8String:mbuf];
+        }
+        ifIPv4[name] = @{@"ip" : ip, @"mask" : mask};
+    }
+    freeifaddrs(ifaList);
+
+    // 3) 匹配 service 类型，以太网优先，其次 Wi‑Fi
+    NSString *ethIf = nil, *wifiIf = nil;
+    for (NSString *dev in ifIPv4) {
+        NSDictionary *svcInfo = devToService[dev];
+        NSString *type = svcInfo[@"type"] ?: @"";
+        BOOL isEthernet = [type rangeOfString:@"Ethernet" options:NSCaseInsensitiveSearch].location != NSNotFound;
+        BOOL isWiFi = [type rangeOfString:@"Wi‑Fi" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                      [type rangeOfString:@"AirPort" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                      [type rangeOfString:@"WiFi" options:NSCaseInsensitiveSearch].location != NSNotFound;
+        if (isEthernet && !ethIf)
+            ethIf = dev;
+        else if (isWiFi && !wifiIf)
+            wifiIf = dev;
+    }
+    NSString *selIf = ethIf ?: wifiIf;
+    if (!selIf)
+        return nil;
+
+    NSDictionary *addr = ifIPv4[selIf];
+    NSString *ip = addr[@"ip"];
+    NSString *mask = addr[@"mask"] ?: @"";
+
+    // 4) Router：优先取该接口自身的 State IPv4，回退全局默认路由
+    NSString *router = nil;
+    static void *scStoreHandle = NULL;
+    static dispatch_once_t onceStore;
+    static SCDynamicStoreRef (*_SCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack,
+                                                      SCDynamicStoreContext *) = NULL;
+    static CFPropertyListRef (*_SCDynamicStoreCopyValue)(SCDynamicStoreRef, CFStringRef) = NULL;
+    dispatch_once(&onceStore, ^{
+        scStoreHandle = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
+        if (scStoreHandle) {
+            _SCDynamicStoreCreate =
+                (SCDynamicStoreRef(*)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack, SCDynamicStoreContext *))dlsym(
+                    scStoreHandle, "SCDynamicStoreCreate");
+            _SCDynamicStoreCopyValue =
+                (CFPropertyListRef(*)(SCDynamicStoreRef, CFStringRef))dlsym(scStoreHandle, "SCDynamicStoreCopyValue");
+        }
+    });
+    if (_SCDynamicStoreCreate && _SCDynamicStoreCopyValue) {
+        SCDynamicStoreRef store = _SCDynamicStoreCreate(NULL, CFSTR("TVNC-SelectNet-Router"), NULL, NULL);
+        if (store) {
+            NSString *path = [NSString stringWithFormat:@"State:/Network/Interface/%@/IPv4", selIf];
+            NSDictionary *ifDict = (__bridge NSDictionary *)_SCDynamicStoreCopyValue(store, (__bridge CFStringRef)path);
+            if (ifDict[@"Router"])
+                router = ifDict[@"Router"];
+            CFRelease(store);
+        }
+    }
+    if (!router)
+        router = TVNCGetDefaultRouter();
+
+    NSDictionary *svcInfo = devToService[selIf];
+    return @{
+        @"interface" : selIf,
+        @"serviceID" : svcInfo[@"serviceID"] ?: @"",
+        @"type" : svcInfo[@"type"] ?: @"",
+        @"ip" : ip,
+        @"mask" : mask,
+        @"router" : router ?: @"",
+    };
+}
+
+// v3.54 (Step 1): 只读展示用，返回 ip/mask/router（复用 TVNCSelectPreferredNetwork 的确定性选择）
+NS_INLINE NSDictionary<NSString *, NSString *> *TVNCGetCurrentNetworkInfo(void) {
+    NSDictionary *sel = TVNCSelectPreferredNetwork();
+    if (!sel)
+        return nil;
+    return @{@"ip" : sel[@"ip"], @"mask" : sel[@"mask"], @"router" : sel[@"router"]};
+}
+
+// v3.54 (Step 2): 通过 SCPreferences API 将默认路由接口的 DHCP 配置锁定为静态（Manual）或回滚 DHCP。
+// 走 API 而非直接写 plist：巨魔版(mobile) 经 configd 写入（entitlement: SCPreferences-write-access），
+// API 自动抽象 /var/jb 前缀，对 tipa / default / rootless / roothide deb 通用。
+// 失败返回 NO，调用方负责把开关回滚，绝不锁死用户。
+NS_INLINE BOOL TVNCApplyStaticIPConfiguration(BOOL enabled, NSDictionary<NSString *, NSString *> *netInfo, NSError **outError) {
+    static void *scHandle = NULL;
+    static dispatch_once_t once;
+    static TVNCSCPreferencesRef (*_SCPreferencesCreateWithOptions)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *) = NULL;
+    static CFDictionaryRef (*_SCPreferencesPathGetValue)(TVNCSCPreferencesRef, CFStringRef) = NULL;
+    static Boolean (*_SCPreferencesPathSetValue)(TVNCSCPreferencesRef, CFStringRef, CFPropertyListRef) = NULL;
+    static Boolean (*_SCPreferencesCommitChanges)(TVNCSCPreferencesRef) = NULL;
+    static Boolean (*_SCPreferencesApplyChanges)(TVNCSCPreferencesRef) = NULL;
+
+    dispatch_once(&once, ^{
+        scHandle = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
+        if (scHandle) {
+            _SCPreferencesCreateWithOptions = dlsym(scHandle, "SCPreferencesCreateWithOptions");
+            _SCPreferencesPathGetValue = dlsym(scHandle, "SCPreferencesPathGetValue");
+            _SCPreferencesPathSetValue = dlsym(scHandle, "SCPreferencesPathSetValue");
+            _SCPreferencesCommitChanges = dlsym(scHandle, "SCPreferencesCommitChanges");
+            _SCPreferencesApplyChanges = dlsym(scHandle, "SCPreferencesApplyChanges");
+        }
+    });
+
+    if (!_SCPreferencesCreateWithOptions || !_SCPreferencesPathGetValue || !_SCPreferencesPathSetValue ||
+        !_SCPreferencesCommitChanges || !_SCPreferencesApplyChanges) {
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-1 userInfo:@{NSLocalizedDescriptionKey : @"SCPreferences API 不可用"}];
+        return NO;
+    }
+
+    CFErrorRef createErr = NULL;
+    TVNCSCPreferencesRef prefs = _SCPreferencesCreateWithOptions(
+        kCFAllocatorDefault,
+        CFSTR("TrollVNC-StaticIP"),
+        CFSTR("com.apple.SystemConfiguration"), // kSCPreferencesSystemApplicationID
+        (CFOptionFlags)1,                         // kSCPreferencesOptionOpenStore
+        &createErr);
+    if (!prefs) {
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-2 userInfo:@{NSLocalizedDescriptionKey : @"无法打开系统网络配置 (SCPreferences)"}];
+        if (createErr) CFRelease(createErr);
+        return NO;
+    }
+
+    NSDictionary *setup = (__bridge NSDictionary *)_SCPreferencesPathGetValue(prefs, CFSTR("Setup:/"));
+    NSDictionary *services = setup[@"Network"] ? setup[@"Network"][@"Service"] : nil;
+
+    // 确定性选择目标服务：以太网优先，其次 Wi‑Fi（与读取展示共用同一逻辑，保证一致）
+    NSDictionary *sel = TVNCSelectPreferredNetwork();
+    NSString *matchedID = sel[@"serviceID"];
+    NSDictionary *matchedSvc = (matchedID.length > 0) ? services[matchedID] : nil;
+    if (!matchedSvc) {
+        CFRelease(prefs);
+        NSString *ifName = sel[@"interface"] ?: @"?";
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-3 userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"未找到接口 %@ 对应的网络服务", ifName]}];
+        return NO;
+    }
+
+    // 写前备份原 IPv4 配置到 App 沙盒，便于极端恢复参考
+    @try {
+        NSString *docDir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        if (docDir) {
+            NSString *backupPath = [docDir stringByAppendingPathComponent:@"static_ip_backup.plist"];
+            NSDictionary *backup = @{ @"serviceID" : matchedID, @"ipv4" : (matchedSvc[@"IPv4"] ?: @{}) };
+            [backup writeToFile:backupPath atomically:YES];
+        }
+    } @catch (id e) {
+    }
+
+    NSMutableDictionary *ipv4 = [matchedSvc[@"IPv4"] mutableCopy] ?: [NSMutableDictionary dictionary];
+    if (enabled) {
+        ipv4[@"ConfigMethod"] = @"Manual";
+        ipv4[@"Addresses"] = @[ netInfo[@"ip"] ?: @"" ];
+        ipv4[@"SubnetMasks"] = @[ netInfo[@"mask"] ?: @"" ];
+        ipv4[@"Routers"] = @[ netInfo[@"router"] ?: @"" ];
+    } else {
+        ipv4[@"ConfigMethod"] = @"DHCP";
+        [ipv4 removeObjectForKey:@"Addresses"];
+        [ipv4 removeObjectForKey:@"SubnetMasks"];
+        [ipv4 removeObjectForKey:@"Routers"];
+    }
+
+    NSString *path = [NSString stringWithFormat:@"Setup:/Network/Service/%@/IPv4", matchedID];
+    Boolean setOk = _SCPreferencesPathSetValue(prefs, (__bridge CFStringRef)path, (__bridge CFPropertyListRef)ipv4);
+    if (!setOk) {
+        CFRelease(prefs);
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-4 userInfo:@{NSLocalizedDescriptionKey : @"写入 IPv4 配置失败"}];
+        return NO;
+    }
+    Boolean commitOk = _SCPreferencesCommitChanges(prefs);
+    if (!commitOk) {
+        CFRelease(prefs);
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-5 userInfo:@{NSLocalizedDescriptionKey : @"提交网络配置失败"}];
+        return NO;
+    }
+    Boolean applyOk = _SCPreferencesApplyChanges(prefs);
+    CFRelease(prefs);
+    if (!applyOk) {
+        if (outError) *outError = [NSError errorWithDomain:@"TrollVNC" code:-6 userInfo:@{NSLocalizedDescriptionKey : @"应用网络配置失败"}];
+        return NO;
+    }
+    return YES;
 }
 
 NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
@@ -397,12 +665,21 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         }
         text = [NSString stringWithFormat:modeFormat, revMode];
     } else {
-        // Append current en0 IP on a second line, if available
-        NSString *ip = TVNCGetEn0IPAddress();
-        NSString *ipUnavailable = NSLocalizedStringFromTableInBundle(@"unavailable", @"Localizable", self.bundle, nil);
-        NSString *ipFormat =
-            NSLocalizedStringFromTableInBundle(@"Current IP Address: %@", @"Localizable", self.bundle, nil);
-        text = [NSString stringWithFormat:ipFormat, (ip.length ? ip : ipUnavailable)];
+        // v3.54 (Step 1): 只读展示当前网络配置（IP / 子网掩码 / 路由器）
+        NSDictionary *net = TVNCGetCurrentNetworkInfo();
+        NSString *unavail = NSLocalizedStringFromTableInBundle(@"unavailable", @"Localizable", self.bundle, nil);
+        NSString *ip = (net[@"ip"].length ? net[@"ip"] : unavail);
+        NSString *mask = (net[@"mask"].length ? net[@"mask"] : unavail);
+        NSString *router = (net[@"router"].length ? net[@"router"] : unavail);
+
+        NSString *ipFmt = NSLocalizedStringFromTableInBundle(@"IP Address: %@", @"Localizable", self.bundle, nil);
+        NSString *maskFmt = NSLocalizedStringFromTableInBundle(@"Subnet Mask: %@", @"Localizable", self.bundle, nil);
+        NSString *routerFmt = NSLocalizedStringFromTableInBundle(@"Router: %@", @"Localizable", self.bundle, nil);
+
+        text = [NSString stringWithFormat:@"%@\n%@\n%@",
+                [NSString stringWithFormat:ipFmt, ip],
+                [NSString stringWithFormat:maskFmt, mask],
+                [NSString stringWithFormat:routerFmt, router]];
     }
 
     return text;
@@ -1182,6 +1459,63 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         }
     }
     return nil;
+}
+
+#pragma mark - 静态 IP（DHCP → Manual）
+
+- (void)setPreferenceValue:(id)value specifier:(PSSpecifier *)specifier {
+    [super setPreferenceValue:value specifier:specifier];
+    NSString *key = [specifier propertyForKey:@"key"];
+    if ([key isEqualToString:@"StaticIPEnabled"]) {
+        [self tvnc_handleStaticIPToggle:[value boolValue] specifier:specifier];
+    }
+}
+
+- (void)tvnc_handleStaticIPToggle:(BOOL)enabled specifier:(PSSpecifier *)specifier {
+    NSDictionary *net = TVNCGetCurrentNetworkInfo();
+    if (enabled && !net) {
+        [self tvnc_revertStaticIPSwitch:specifier];
+        [self tvnc_showAlertWithTitle:@"无法锁定静态 IP"
+                               message:@"当前没有有效的 IP 地址（Wi-Fi / 以太网未连接或未获取到 DHCP 租约）。请连接网络后重试。"];
+        return;
+    }
+
+    NSError *err = nil;
+    BOOL ok = TVNCApplyStaticIPConfiguration(enabled, net, &err);
+    if (!ok) {
+        [self tvnc_revertStaticIPSwitch:specifier];
+        [self tvnc_showAlertWithTitle:(enabled ? @"锁定失败" : @"恢复失败")
+                               message:(err.localizedDescription ?: @"写入系统网络配置失败，请重试或重启设备。")];
+        return;
+    }
+
+    if (enabled) {
+        [self tvnc_showAlertWithTitle:@"已锁定为静态 IP"
+                               message:[NSString stringWithFormat:@"IP: %@\n子网: %@\n路由器: %@",
+                                        net[@"ip"], net[@"mask"], net[@"router"]]];
+    } else {
+        [self tvnc_showAlertWithTitle:@"已恢复自动 DHCP"
+                               message:@"网络接口已切换回自动获取 IP 地址。"];
+    }
+    [self updateFirstGroupAndReload:YES];
+}
+
+- (void)tvnc_revertStaticIPSwitch:(PSSpecifier *)specifier {
+    [[NSUserDefaults standardUserDefaults] setBool:NO forKey:@"StaticIPEnabled"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    if ([self respondsToSelector:@selector(reloadSpecifier:animated:)]) {
+        [self reloadSpecifier:specifier animated:NO];
+    } else if ([self respondsToSelector:@selector(reloadSpecifiers)]) {
+        [self reloadSpecifiers];
+    }
+}
+
+- (void)tvnc_showAlertWithTitle:(NSString *)title message:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 @end

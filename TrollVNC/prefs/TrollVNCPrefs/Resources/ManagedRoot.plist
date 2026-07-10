@@ -15,6 +15,28 @@
 			<string></string>
 		</dict>
 
+		<!-- Network: DHCP -> Static IP -->
+		<dict>
+			<key>cell</key>
+			<string>PSGroupCell</string>
+			<key>label</key>
+			<string>网络</string>
+			<key>footerText</key>
+			<string>开启后将当前 Wi-Fi/以太网获取到的 IP、子网、路由器锁定为手动静态配置；关闭即恢复自动 DHCP。</string>
+		</dict>
+		<dict>
+			<key>cell</key>
+			<string>PSSwitchCell</string>
+			<key>defaults</key>
+			<string>com.82flex.trollvnc</string>
+			<key>key</key>
+			<string>StaticIPEnabled</string>
+			<key>label</key>
+			<string>锁定 DHCP 为静态 IP</string>
+			<key>default</key>
+			<false/>
+		</dict>
+
 		<!-- Logout Device -->
 		<dict>
 			<key>cell</key>
