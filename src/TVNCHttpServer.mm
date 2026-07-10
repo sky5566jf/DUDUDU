@@ -5276,21 +5276,22 @@ static NSString *wsReadFrame(int sock) {
         return response;
     }
 
-    // 获取函数指针
-    SCPreferencesRef (*pSCPreferencesCreate)(CFAllocatorRef, CFStringRef, CFStringRef) =
-        (SCPreferencesRef (*)(CFAllocatorRef, CFStringRef, CFStringRef))dlsym(sc, "SCPreferencesCreate");
-    CFPropertyListRef (*pSCPreferencesGetValue)(SCPreferencesRef, CFStringRef) =
-        (CFPropertyListRef (*)(SCPreferencesRef, CFStringRef))dlsym(sc, "SCPreferencesGetValue");
-    CFPropertyListRef (*pSCPreferencesPathGet)(SCPreferencesRef, CFStringRef) =
-        (CFPropertyListRef (*)(SCPreferencesRef, CFStringRef))dlsym(sc, "SCPreferencesPathGet");
-    Boolean (*pSCPreferencesPathSetValue)(SCPreferencesRef, CFStringRef, CFPropertyListRef) =
-        (Boolean (*)(SCPreferencesRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesPathSetValue");
-    Boolean (*pSCPreferencesCommitChanges)(SCPreferencesRef) =
-        (Boolean (*)(SCPreferencesRef))dlsym(sc, "SCPreferencesCommitChanges");
-    Boolean (*pSCPreferencesApplyChanges)(SCPreferencesRef) =
-        (Boolean (*)(SCPreferencesRef))dlsym(sc, "SCPreferencesApplyChanges");
-    Boolean (*pSCPreferencesSynchronize)(SCPreferencesRef) =
-        (Boolean (*)(SCPreferencesRef))dlsym(sc, "SCPreferencesSynchronize");
+    // 获取函数指针（SCPreferencesRef 在 iOS 头文件 unavailable，用 void* 代替）
+    typedef void *SCPrefsRef;
+    SCPrefsRef (*pSCPreferencesCreate)(CFAllocatorRef, CFStringRef, CFStringRef) =
+        (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef))dlsym(sc, "SCPreferencesCreate");
+    CFPropertyListRef (*pSCPreferencesGetValue)(SCPrefsRef, CFStringRef) =
+        (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesGetValue");
+    CFPropertyListRef (*pSCPreferencesPathGet)(SCPrefsRef, CFStringRef) =
+        (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesPathGet");
+    Boolean (*pSCPreferencesPathSetValue)(SCPrefsRef, CFStringRef, CFPropertyListRef) =
+        (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesPathSetValue");
+    Boolean (*pSCPreferencesCommitChanges)(SCPrefsRef) =
+        (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesCommitChanges");
+    Boolean (*pSCPreferencesApplyChanges)(SCPrefsRef) =
+        (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesApplyChanges");
+    Boolean (*pSCPreferencesSynchronize)(SCPrefsRef) =
+        (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesSynchronize");
 
     if (!pSCPreferencesCreate || !pSCPreferencesGetValue || !pSCPreferencesPathGet ||
         !pSCPreferencesPathSetValue || !pSCPreferencesCommitChanges || !pSCPreferencesApplyChanges) {
@@ -5305,7 +5306,7 @@ static NSString *wsReadFrame(int sock) {
     }
 
     // 1. 创建 SCPreferences session
-    SCPreferencesRef prefs = pSCPreferencesCreate(NULL, CFSTR("TrollVNC"), NULL);
+    SCPrefsRef prefs = pSCPreferencesCreate(NULL, CFSTR("TrollVNC"), NULL);
     if (!prefs) {
         TVLog(@"HTTP Server: SCPreferencesCreate failed");
         response.statusCode = 500;
@@ -5321,7 +5322,7 @@ static NSString *wsReadFrame(int sock) {
     CFPropertyListRef currentSetVal = pSCPreferencesGetValue(prefs, CFSTR("CurrentSet"));
     if (!currentSetVal) {
         TVLog(@"HTTP Server: SCPreferencesGetValue CurrentSet failed");
-        CFRelease(prefs);
+        CFRelease((CFTypeRef)prefs);
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
@@ -5338,7 +5339,7 @@ static NSString *wsReadFrame(int sock) {
     CFPropertyListRef servicesVal = pSCPreferencesPathGet(prefs, (__bridge CFStringRef)servicesPath);
     if (!servicesVal) {
         TVLog(@"HTTP Server: SCPreferencesPathGet %@ failed", servicesPath);
-        CFRelease(prefs);
+        CFRelease((CFTypeRef)prefs);
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
@@ -5389,7 +5390,7 @@ static NSString *wsReadFrame(int sock) {
 
     if (!targetServiceID) {
         TVLog(@"HTTP Server: No network service with IPv4 found");
-        CFRelease(prefs);
+        CFRelease((CFTypeRef)prefs);
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
@@ -5417,7 +5418,7 @@ static NSString *wsReadFrame(int sock) {
     TVLog(@"HTTP Server: SCPreferencesPathSetValue IPv4 path=%@ result=%d", ipv4Path, writeOK);
 
     if (!writeOK) {
-        CFRelease(prefs);
+        CFRelease((CFTypeRef)prefs);
         response.statusCode = 500;
         response.body = [NSJSONSerialization dataWithJSONObject:@{
             @"success": @NO,
@@ -5442,7 +5443,7 @@ static NSString *wsReadFrame(int sock) {
         pSCPreferencesSynchronize(prefs);
     }
 
-    CFRelease(prefs);
+    CFRelease((CFTypeRef)prefs);
 
     // 返回成功结果
     response.statusCode = 200;
