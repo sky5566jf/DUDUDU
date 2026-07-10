@@ -668,9 +668,9 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         // v3.54 (Step 1): 只读展示当前网络配置（IP / 子网掩码 / 路由器）
         NSDictionary *net = TVNCGetCurrentNetworkInfo();
         NSString *unavail = NSLocalizedStringFromTableInBundle(@"unavailable", @"Localizable", self.bundle, nil);
-        NSString *ip = (net[@"ip"].length ? net[@"ip"] : unavail);
-        NSString *mask = (net[@"mask"].length ? net[@"mask"] : unavail);
-        NSString *router = (net[@"router"].length ? net[@"router"] : unavail);
+        NSString *ip = net[@"ip"] ?: unavail;
+        NSString *mask = net[@"mask"] ?: unavail;
+        NSString *router = net[@"router"] ?: unavail;
 
         NSString *ipFmt = NSLocalizedStringFromTableInBundle(@"IP Address: %@", @"Localizable", self.bundle, nil);
         NSString *maskFmt = NSLocalizedStringFromTableInBundle(@"Subnet Mask: %@", @"Localizable", self.bundle, nil);
