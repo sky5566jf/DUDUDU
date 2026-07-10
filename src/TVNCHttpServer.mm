@@ -5672,7 +5672,9 @@ static NSString *wsReadFrame(int sock) {
             return response;
         }
         NSString *currentSet = [(__bridge_transfer NSString *)currentSetVal stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        TVLog(@"HTTP Server: CurrentSet = %@", currentSet);
+        // strip "/Sets/" prefix — Sets dict keys are bare UUIDs
+        NSString *currentSetKey = [currentSet hasPrefix:@"/Sets/"] ? [currentSet substringFromIndex:6] : currentSet;
+        TVLog(@"HTTP Server: CurrentSet = %@ (key=%@)", currentSet, currentSetKey);
         
         // 3. 获取 Sets 字典（GetValue 只能取顶层 key）
         CFPropertyListRef setsVal = pSCPreferencesGetValue(prefs, CFSTR("Sets"));
@@ -5691,7 +5693,7 @@ static NSString *wsReadFrame(int sock) {
         // 注意：SCPreferencesGetValue 遵循 Get 规则，不释放返回值
         
         // 4. 导航到 CurrentSet/Network/Service
-        NSDictionary *currentSetDict = setsDict[currentSet];
+        NSDictionary *currentSetDict = setsDict[currentSetKey];
         if (![currentSetDict isKindOfClass:[NSDictionary class]]) {
             CFRelease((CFTypeRef)prefs);
             response.statusCode = 500;
@@ -5700,6 +5702,8 @@ static NSString *wsReadFrame(int sock) {
                 @"error": @"CurrentSet not found in Sets",
                 @"step": @"navigate_currentSet",
                 @"currentSet": currentSet,
+                @"currentSetKey": currentSetKey,
+                @"sets_keys": setsDict.allKeys,
                 @"method": @"SCPreferences"
             } options:0 error:nil];
             return response;
@@ -5779,7 +5783,7 @@ static NSString *wsReadFrame(int sock) {
         
         // 7. 深拷贝 Sets → 修改 IPv4 → SetValue 写回整个 Sets
         NSMutableDictionary *mutableSets = [setsDict mutableCopy];
-        NSMutableDictionary *mutableCurrentSet = [mutableSets[currentSet] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSet] mutableCopy] : [NSMutableDictionary dictionary];
+        NSMutableDictionary *mutableCurrentSet = [mutableSets[currentSetKey] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSetKey] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableNetwork = [mutableCurrentSet[@"Network"] isKindOfClass:[NSDictionary class]] ? [mutableCurrentSet[@"Network"] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableServices = [mutableNetwork[@"Service"] isKindOfClass:[NSDictionary class]] ? [mutableNetwork[@"Service"] mutableCopy] : [NSMutableDictionary dictionary];
         NSMutableDictionary *mutableService = [mutableServices[targetServiceID] isKindOfClass:[NSDictionary class]] ? [mutableServices[targetServiceID] mutableCopy] : [NSMutableDictionary dictionary];
@@ -5788,7 +5792,7 @@ static NSString *wsReadFrame(int sock) {
         mutableServices[targetServiceID] = mutableService;
         mutableNetwork[@"Service"] = mutableServices;
         mutableCurrentSet[@"Network"] = mutableNetwork;
-        mutableSets[currentSet] = mutableCurrentSet;
+        mutableSets[currentSetKey] = mutableCurrentSet;
         
         Boolean writeOK = pSCPreferencesSetValue(prefs, CFSTR("Sets"), (__bridge CFPropertyListRef)mutableSets);
         
