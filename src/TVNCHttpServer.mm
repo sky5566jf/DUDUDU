@@ -5649,11 +5649,11 @@ static NSString *wsReadFrame(int sock) {
     dispatch_once(&onceToken, ^{
         void *h = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
         if (h) {
-            _SCPCreate  = dlsym(h, "SCPreferencesCreateWithOptions");
-            _SCPPathGet = dlsym(h, "SCPreferencesPathGetValue");
-            _SCPPathSet = dlsym(h, "SCPreferencesPathSetValue");
-            _SCPCommit  = dlsym(h, "SCPreferencesCommitChanges");
-            _SCPApply   = dlsym(h, "SCPreferencesApplyChanges");
+            _SCPCreate  = (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef, CFOptionFlags, CFErrorRef *))dlsym(h, "SCPreferencesCreateWithOptions");
+            _SCPPathGet = (CFDictionaryRef (*)(SCPrefsRef, CFStringRef))dlsym(h, "SCPreferencesPathGetValue");
+            _SCPPathSet = (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(h, "SCPreferencesPathSetValue");
+            _SCPCommit  = (Boolean (*)(SCPrefsRef))dlsym(h, "SCPreferencesCommitChanges");
+            _SCPApply   = (Boolean (*)(SCPrefsRef))dlsym(h, "SCPreferencesApplyChanges");
         }
     });
     if (!_SCPCreate || !_SCPPathGet || !_SCPPathSet || !_SCPCommit || !_SCPApply) {
@@ -5685,8 +5685,8 @@ static NSString *wsReadFrame(int sock) {
     {
         void *sc2 = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_LAZY);
         if (sc2) {
-            void *(*scCreate)(CFAllocatorRef, CFStringRef, void *, void *) = dlsym(sc2, "SCDynamicStoreCreate");
-            void *(*scCopy)(void *, CFStringRef) = dlsym(sc2, "SCDynamicStoreCopyValue");
+            void *(*scCreate)(CFAllocatorRef, CFStringRef, void *, void *) = (void *(*)(CFAllocatorRef, CFStringRef, void *, void *))dlsym(sc2, "SCDynamicStoreCreate");
+            void *(*scCopy)(void *, CFStringRef) = (void *(*)(void *, CFStringRef))dlsym(sc2, "SCDynamicStoreCopyValue");
             if (scCreate && scCopy) {
                 void *store = scCreate(NULL, CFSTR("TVNC-Net-If"), NULL, NULL);
                 if (store) {
