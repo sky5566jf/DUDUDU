@@ -33,6 +33,53 @@
 #import <spawn.h>
 #import <fcntl.h>  // 用于 open(), O_WRONLY, O_TRUNC
 #import <sys/wait.h>
+
+// iOS 私有 persona API（用于以 root 身份执行命令）
+extern "C" int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
+extern "C" int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
+extern "C" int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
+
+#ifndef POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE
+#define POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE 1
+#endif
+
+// 以 root 身份执行命令（posix_spawn + persona API）
+static int spawnAsRoot(NSString *path, NSArray *args) {
+    if (!path) return -1;
+    
+    NSMutableArray *fullArgv = [NSMutableArray arrayWithObject:path];
+    if (args) [fullArgv addObjectsFromArray:args];
+    
+    char **argv = (char **)malloc((fullArgv.count + 1) * sizeof(char *));
+    for (NSUInteger i = 0; i < fullArgv.count; i++) {
+        argv[i] = (char *)[fullArgv[i] UTF8String];
+    }
+    argv[fullArgv.count] = NULL;
+    
+    pid_t pid;
+    posix_spawnattr_t attr;
+    int err = posix_spawnattr_init(&attr);
+    if (err != 0) { free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_np(&attr, 99, POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE);
+    if (err != 0) { posix_spawnattr_destroy(&attr); free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_uid_np(&attr, 0);
+    if (err != 0) { posix_spawnattr_destroy(&attr); free(argv); return err; }
+    
+    err = posix_spawnattr_set_persona_gid_np(&attr, 0);
+    if (err != 0) { posix_spawnattr_destroy(&attr); free(argv); return err; }
+    
+    err = posix_spawn(&pid, [path UTF8String], NULL, &attr, argv, NULL);
+    posix_spawnattr_destroy(&attr);
+    free(argv);
+    
+    if (err != 0) return err;
+    
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return WEXITSTATUS(status);
+}
 #import <CommonCrypto/CommonDigest.h> // SHA-1 for WebSocket handshake
 #import <dlfcn.h>
 #import <notify.h>
@@ -5737,11 +5784,11 @@ static NSString *wsReadFrame(int sock) {
             NSString *tmpPath = @"/tmp/preferences.plist.tmp";
             BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
             if (tmpOK) {
-                TVLog(@"HTTP Server: trying spawnRoot cp...");
-                spawnRootCpResult = spawnRoot(@"/bin/cp", @[@"-f", tmpPath, prefsPath]);
-                TVLog(@"HTTP Server: spawnRoot cp exit code: %d", spawnRootCpResult);
+                TVLog(@"HTTP Server: trying spawnAsRoot cp...");
+                spawnRootCpResult = spawnAsRoot(@"/bin/cp", @[@"-f", tmpPath, prefsPath]);
+                TVLog(@"HTTP Server: spawnAsRoot cp exit code: %d", spawnRootCpResult);
                 if (spawnRootCpResult == 0) {
-                    spawnRoot(@"/bin/chmod", @[@"644", prefsPath]);
+                    spawnAsRoot(@"/bin/chmod", @[@"644", prefsPath]);
                     // 验证文件确实更新了
                     struct stat verifySt;
                     if (stat([prefsPath UTF8String], &verifySt) == 0 && verifySt.st_size == (off_t)plistData.length) {
