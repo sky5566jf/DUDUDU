@@ -5902,10 +5902,16 @@ static NSString *wsReadFrame(int sock) {
     return response;
 }
 
-#pragma mark - v3.79: Static IP Soft Lock (Ethernet-first, persistent, auto-apply on boot)
+#pragma mark - v3.81: Static IP Lock (Setup+Notify, Ethernet-first, cooldown timer)
 
 static NSString *kStaticIPLockConfigPath = @"/var/mobile/Library/Preferences/com.82flex.trollvnc.static_ip.plist";
 static dispatch_source_t gStaticIPLockTimer = NULL;
+
+// v3.81: Cooldown and retry tracking for timer re-apply
+static NSTimeInterval gLastReapplyTime = 0;
+static int gReapplyCount = 0;
+static const int kMaxReapplyAttempts = 3;
+static const NSTimeInterval kReapplyCooldown = 60.0; // 60 seconds between re-apply attempts
 
 // Read preferences.plist to find the Ethernet service ID (not just PrimaryService)
 // Returns: @{ @"serviceID": ..., @"interface": ..., @"type": ... } or nil
@@ -6087,13 +6093,21 @@ static BOOL TVNCApplyStaticIPViaSCDynamicStore(BOOL enabled, NSString *ip, NSStr
             [newIPv4 removeObjectForKey:@"Router"];
         }
 
-        // v3.80: Only write Setup key — State key write + notify_post triggers
-        // configd network reset, which breaks connectivity. Setup key is
-        // non-destructive: configd reads it when configuring the interface.
+        // v3.81: Write Setup key + targeted SCDynamicStoreNotifyValue on the
+        // specific Setup key. This tells configd "this one key changed, please
+        // re-read it" — the same mechanism Settings.app uses when you manually
+        // change an IP. It does NOT trigger a full interface reset like
+        // notify_post("com.apple.system.config") or writing State key would.
         Boolean setupOK = pSetValue(store, (__bridge CFStringRef)setupKey, (__bridge CFPropertyListRef)newIPv4);
 
-        // Do NOT write State key — it causes configd to reset the network interface
-        // Do NOT call notify_post or SCDynamicStoreNotifyValue — triggers configd reconfiguration
+        // v3.81: Targeted notification — only this specific key, not global
+        Boolean notifyOK = false;
+        if (pNotifyValue && setupOK) {
+            notifyOK = pNotifyValue(store, (__bridge CFStringRef)setupKey);
+        }
+
+        // Do NOT write State key — it causes configd to force-reset the interface
+        // Do NOT call notify_post("com.apple.system.config") — global notification triggers full reconfiguration
         Boolean stateOK = false;
 
         success = setupOK;
@@ -6101,12 +6115,13 @@ static BOOL TVNCApplyStaticIPViaSCDynamicStore(BOOL enabled, NSString *ip, NSStr
         if (outInfo) {
             outInfo[@"setup_write"] = @(setupOK);
             outInfo[@"state_write"] = @(stateOK);
+            outInfo[@"notify"] = @(notifyOK);
             outInfo[@"configMethod"] = newIPv4[@"ConfigMethod"];
             outInfo[@"setupKey"] = setupKey;
-            outInfo[@"note"] = @"Setup-only (v3.80): State key write disabled to prevent network reset";
+            outInfo[@"note"] = @"Setup+targeted-notify (v3.81): State key and global notify_post disabled";
         }
 
-        TVLog(@"StaticIP: SCDynamicStore apply svc=%@ iface=%@ setup=%d (state key skipped)", serviceID, interface, setupOK);
+        TVLog(@"StaticIP: SCDynamicStore apply svc=%@ iface=%@ setup=%d notify=%d (state key skipped)", serviceID, interface, setupOK, notifyOK);
     }
 
     CFRelease(store);
@@ -6183,19 +6198,41 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
         return;
     }
 
-    // v3.80: Timer is READ-ONLY — only check if IP matches, do NOT write
-    // SCDynamicStore. Writing State key + notify_post triggers configd to
-    // reset the network interface, causing permanent connectivity loss.
+    // v3.81: Check if IP matches — if yes, reset retry counter and return
     if (TVNCCheckStaticIPMatches(serviceID, ip)) {
-        return; // IP is correct, no action needed
+        // IP is correct — reset retry tracking
+        if (gReapplyCount > 0) {
+            TVLog(@"StaticIP: IP matches (%@), retry counter reset", ip);
+            gReapplyCount = 0;
+        }
+        return;
     }
 
-    // IP mismatch detected — log only, do NOT re-apply
-    TVLog(@"StaticIP: IP mismatch detected (expected=%@) — monitoring only, not re-applying to avoid network reset", ip);
+    // v3.81: IP mismatch — re-apply with cooldown and retry limit
+    // This prevents the v3.79 infinite loop: max 3 retries, 60s cooldown each
+    if (gReapplyCount >= kMaxReapplyAttempts) {
+        TVLog(@"StaticIP: IP mismatch (expected=%@) — max retries (%d) exceeded, monitoring only", ip, kMaxReapplyAttempts);
+        return;
+    }
+
+    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+    NSTimeInterval elapsed = now - gLastReapplyTime;
+    if (gLastReapplyTime > 0 && elapsed < kReapplyCooldown) {
+        TVLog(@"StaticIP: IP mismatch (expected=%@) — cooldown %.0fs/%.0fs, waiting", ip, elapsed, kReapplyCooldown);
+        return;
+    }
+
+    // Re-apply: write Setup key + targeted notify (no State key, no global notify_post)
+    TVLog(@"StaticIP: IP mismatch (expected=%@) — re-applying (attempt %d/%d)", ip, gReapplyCount + 1, kMaxReapplyAttempts);
+    NSMutableDictionary *applyInfo = [NSMutableDictionary dictionary];
+    TVNCApplyStaticIPViaSCDynamicStore(YES, ip, mask, router, serviceID, interface, applyInfo);
+    gLastReapplyTime = now;
+    gReapplyCount++;
+    TVLog(@"StaticIP: re-apply done (attempt %d/%d) info=%@", gReapplyCount, kMaxReapplyAttempts, applyInfo);
 }
 
-// Start the monitoring timer (10 second interval, read-only)
-// v3.80: Timer only checks and logs — does NOT write SCDynamicStore
+// Start the monitoring timer (10 second interval)
+// v3.81: Timer checks IP match, re-applies with 60s cooldown and max 3 retries
 + (void)startStaticIPLockTimer {
     if (gStaticIPLockTimer) return; // already running
 
@@ -6203,7 +6240,11 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
     NSDictionary *config = TVNCLoadStaticIPConfig();
     if (!config || ![config[@"enabled"] boolValue]) return;
 
-    TVLog(@"StaticIP: starting soft-lock timer (10s interval)");
+    // Reset retry tracking on timer start
+    gLastReapplyTime = 0;
+    gReapplyCount = 0;
+
+    TVLog(@"StaticIP: starting soft-lock timer (10s interval, 60s cooldown, max %d retries)", kMaxReapplyAttempts);
 
     dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
     gStaticIPLockTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
@@ -6274,7 +6315,7 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
 }
 
 // GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
-// v3.80: Setup-only write (no State key, no notify_post) + read-only timer
+// v3.81: Setup key write + targeted SCDynamicStoreNotifyValue + timer with cooldown
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     response.contentType = @"application/json";
