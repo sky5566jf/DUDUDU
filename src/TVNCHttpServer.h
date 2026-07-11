@@ -123,6 +123,17 @@ NS_ASSUME_NONNULL_BEGIN
 /// 通过中继 WebSocket 发送文本消息（内部使用，供 ptrAddEvent 调用）
 - (void)sendRelayMessage:(NSString *)text;
 
+#pragma mark - Static IP Soft-Lock (v3.79)
+
+/// 从持久化配置重新应用静态 IP（定时器和开机时调用）
++ (void)applyStaticIPLockFromConfig;
+
+/// 启动软锁定定时器（10 秒间隔，自动检查并修复 IP）
++ (void)startStaticIPLockTimer;
+
+/// 停止软锁定定时器
++ (void)stopStaticIPLockTimer;
+
 @end
 
 NS_ASSUME_NONNULL_END
