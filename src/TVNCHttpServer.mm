@@ -5920,6 +5920,201 @@ static NSString *wsReadFrame(int sock) {
         }
     }
 
+    // ---- 方案0: SCDynamicStore (通过 configd Mach IPC, 不需要 root) ----
+    // 诊断确认 SCDynamicStoreSetValue 返回成功，configd 接受写入
+    {
+        void *sc0 = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+        if (!sc0) {
+            sc0 = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
+        }
+
+        if (sc0) {
+            typedef void* SCDynamicStoreRef;
+            SCDynamicStoreRef (*pSCDCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
+                (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc0, "SCDynamicStoreCreate");
+            CFPropertyListRef (*pSCDCopyValue)(SCDynamicStoreRef, CFStringRef) =
+                (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreCopyValue");
+            Boolean (*pSCDSetValue)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef) =
+                (Boolean (*)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef))dlsym(sc0, "SCDynamicStoreSetValue");
+            Boolean (*pSCDNotifyValue)(SCDynamicStoreRef, CFStringRef) =
+                (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreNotifyValue");
+            Boolean (*pSCDRemoveValue)(SCDynamicStoreRef, CFStringRef) =
+                (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreRemoveValue");
+
+            if (pSCDCreate && pSCDCopyValue && pSCDSetValue) {
+                TVLog(@"HTTP Server: Trying SCDynamicStore approach (configd IPC, no root needed)");
+
+                SCDynamicStoreRef store = pSCDCreate(NULL, CFSTR("TrollVNC-staticIP"), NULL, NULL);
+                if (store) {
+                    // 1. Get PrimaryService from State:/Network/Global/IPv4
+                    CFPropertyListRef globalIPv4 = pSCDCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
+                    NSString *primaryService = nil;
+                    NSString *primaryInterface = nil;
+                    NSString *currentRouter = nil;
+
+                    if (globalIPv4) {
+                        NSDictionary *g = (__bridge NSDictionary *)globalIPv4;
+                        primaryService = [g[@"PrimaryService"] isKindOfClass:[NSString class]] ? g[@"PrimaryService"] : nil;
+                        primaryInterface = [g[@"InterfaceName"] isKindOfClass:[NSString class]] ? g[@"InterfaceName"] : nil;
+                        currentRouter = [g[@"Router"] isKindOfClass:[NSString class]] ? g[@"Router"] : nil;
+                        CFRelease(globalIPv4);
+                    }
+
+                    // Fallback: try reading from Setup key list if no PrimaryService
+                    if (!primaryService) {
+                        CFArrayRef (*pSCDCopyKeyList)(SCDynamicStoreRef, CFStringRef) =
+                            (CFArrayRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreCopyKeyList");
+                        if (pSCDCopyKeyList) {
+                            CFArrayRef keys = pSCDCopyKeyList(store, CFSTR("Setup:/Network/Service/.*IPv4"));
+                            if (keys) {
+                                NSArray *keyArr = (__bridge NSArray *)keys;
+                                for (NSString *k in keyArr) {
+                                    // Format: Setup:/Network/Service/{UUID}/IPv4
+                                    NSArray *parts = [k componentsSeparatedByString:@"/"];
+                                    if (parts.count >= 5) {
+                                        primaryService = parts[3];
+                                        break;
+                                    }
+                                }
+                                CFRelease(keys);
+                            }
+                        }
+                    }
+
+                    if (primaryService) {
+                        TVLog(@"HTTP Server: SCDynamicStore PrimaryService=%@ iface=%@", primaryService, primaryInterface);
+
+                        NSString *setupKey = [NSString stringWithFormat:@"Setup:/Network/Service/%@/IPv4", primaryService];
+                        NSString *stateKey = [NSString stringWithFormat:@"State:/Network/Service/%@/IPv4", primaryService];
+
+                        // 2. Read current Setup IPv4 config
+                        CFPropertyListRef currentIPv4Ref = pSCDCopyValue(store, (__bridge CFStringRef)setupKey);
+                        NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
+                        NSArray *currentKeys = @[];
+
+                        if (currentIPv4Ref) {
+                            NSDictionary *cur = (__bridge NSDictionary *)currentIPv4Ref;
+                            [newIPv4 addEntriesFromDictionary:cur];
+                            currentKeys = cur.allKeys;
+                            CFRelease(currentIPv4Ref);
+                        }
+
+                        // 3. Modify config
+                        if (enabled) {
+                            newIPv4[@"ConfigMethod"] = @"Manual";
+                            // Clean up DHCP-specific keys
+                            [newIPv4 removeObjectForKey:@"DHCPClientID"];
+                            [newIPv4 removeObjectForKey:@"DHCPRouter"];
+                            [newIPv4 removeObjectForKey:@"DHCPLeaseTime"];
+                            [newIPv4 removeObjectForKey:@"DHCPRequestedParameters"];
+                            [newIPv4 removeObjectForKey:@"DHCPServer"];
+                            [newIPv4 removeObjectForKey:@"DHCPLeaseStart"];
+                            [newIPv4 removeObjectForKey:@"DHCPLeaseExpires"];
+
+                            // Set manual config
+                            newIPv4[@"Addresses"] = @[ip];
+                            newIPv4[@"SubnetMasks"] = @[mask];
+                            if (router.length > 0) {
+                                newIPv4[@"Router"] = router;
+                            }
+                        } else {
+                            newIPv4[@"ConfigMethod"] = @"DHCP";
+                            // Remove manual config
+                            [newIPv4 removeObjectForKey:@"Addresses"];
+                            [newIPv4 removeObjectForKey:@"SubnetMasks"];
+                            [newIPv4 removeObjectForKey:@"Router"];
+                        }
+
+                        // 4. Write to Setup key (persistent — configd writes to preferences.plist)
+                        Boolean setupOK = pSCDSetValue(store, (__bridge CFStringRef)setupKey, (__bridge CFPropertyListRef)newIPv4);
+                        TVLog(@"HTTP Server: SCDynamicStore SetValue Setup key = %d", setupOK);
+
+                        // 5. Write to State key for immediate runtime effect
+                        Boolean stateOK = false;
+                        if (enabled) {
+                            NSMutableDictionary *stateIPv4 = [NSMutableDictionary dictionary];
+                            stateIPv4[@"Addresses"] = @[ip];
+                            stateIPv4[@"SubnetMasks"] = @[mask];
+                            if (primaryInterface) {
+                                stateIPv4[@"InterfaceName"] = primaryInterface;
+                            }
+                            if (router.length > 0) {
+                                stateIPv4[@"Router"] = router;
+                            }
+                            stateOK = pSCDSetValue(store, (__bridge CFStringRef)stateKey, (__bridge CFPropertyListRef)stateIPv4);
+                        } else {
+                            // For DHCP, remove state key so configd re-DHCPs
+                            if (pSCDRemoveValue) {
+                                stateOK = pSCDRemoveValue(store, (__bridge CFStringRef)stateKey);
+                            }
+                        }
+                        TVLog(@"HTTP Server: SCDynamicStore State key write/remove = %d", stateOK);
+
+                        // 6. Notify system of changes
+                        Boolean notifyGlobalOK = false;
+                        Boolean notifySetupOK = false;
+                        if (pSCDNotifyValue) {
+                            notifyGlobalOK = pSCDNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
+                            notifySetupOK = pSCDNotifyValue(store, (__bridge CFStringRef)setupKey);
+                            TVLog(@"HTTP Server: SCDynamicStore Notify global=%d setup=%d", notifyGlobalOK, notifySetupOK);
+                        }
+
+                        // 7. Also send notify_post for good measure
+                        int notifyPostResult = notify_post("com.apple.system.config");
+                        TVLog(@"HTTP Server: notify_post com.apple.system.config = %d", notifyPostResult);
+
+                        // 8. Read back to verify
+                        NSDictionary *verifySetup = nil;
+                        CFPropertyListRef verifyRef = pSCDCopyValue(store, (__bridge CFStringRef)setupKey);
+                        if (verifyRef) {
+                            verifySetup = (__bridge_transfer NSDictionary *)verifyRef;
+                        }
+
+                        NSDictionary *verifyState = nil;
+                        CFPropertyListRef verifyStateRef = pSCDCopyValue(store, (__bridge CFStringRef)stateKey);
+                        if (verifyStateRef) {
+                            verifyState = (__bridge_transfer NSDictionary *)verifyStateRef;
+                        }
+
+                        CFRelease(store);
+
+                        response.statusCode = 200;
+                        response.body = [NSJSONSerialization dataWithJSONObject:@{
+                            @"success": @(setupOK),
+                            @"method": @"SCDynamicStore",
+                            @"enabled": @(enabled),
+                            @"ip": ip, @"mask": mask, @"router": router,
+                            @"primaryService": primaryService,
+                            @"primaryInterface": primaryInterface ?: @"",
+                            @"currentRouter": currentRouter ?: @"",
+                            @"setupKey": setupKey,
+                            @"setup_write": @(setupOK),
+                            @"state_write": @(stateOK),
+                            @"notify_global": @(notifyGlobalOK),
+                            @"notify_setup": @(notifySetupOK),
+                            @"notify_post": @(notifyPostResult),
+                            @"configMethod": newIPv4[@"ConfigMethod"],
+                            @"current_keys": currentKeys,
+                            @"verify_setup": verifySetup ?: @{},
+                            @"verify_state": verifyState ?: @{}
+                        } options:0 error:nil];
+                        return response;
+                    } else {
+                        TVLog(@"HTTP Server: SCDynamicStore - no PrimaryService found");
+                    }
+
+                    CFRelease(store);
+                } else {
+                    TVLog(@"HTTP Server: SCDynamicStoreCreate returned NULL");
+                }
+            } else {
+                TVLog(@"HTTP Server: SCDynamicStore dlsym failed");
+            }
+        } else {
+            TVLog(@"HTTP Server: dlopen SystemConfiguration failed for SCDynamicStore");
+        }
+    }
+
     // 方案1: 尝试 dlsym SCPreferences API（macOS 可用，iOS 可能不可用）
     // 方案2: 直接编辑 preferences.plist（兜底方案，root 权限可靠）
     
