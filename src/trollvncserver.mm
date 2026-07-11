@@ -5759,6 +5759,26 @@ int main(int argc, const char *argv[]) {
 
         tvStartControlSocketIfNeeded();
 
+        // v3.79: Static IP soft-lock — on daemon startup, check for saved config and auto-apply
+        if (gIsDaemonMode) {
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                // Wait 15s for network to come up after boot
+                TVLog(@"StaticIP: waiting 15s for network to initialize...");
+                STAccurateSleep(15.0);
+                
+                // Check if we have a saved static IP config
+                NSDictionary *config = [NSDictionary dictionaryWithContentsOfFile:
+                    @"/var/mobile/Library/Preferences/com.82flex.trollvnc.static_ip.plist"];
+                if (config && [config[@"enabled"] boolValue]) {
+                    TVLog(@"StaticIP: found saved config, auto-applying static IP...");
+                    [TVNCHttpServer applyStaticIPLockFromConfig];
+                    [TVNCHttpServer startStaticIPLockTimer];
+                } else {
+                    TVLog(@"StaticIP: no saved config found, skipping auto-apply");
+                }
+            });
+        }
+
         // Auto-unlock after boot: only in daemon mode, enabled by default
         if (gIsDaemonMode && gAutoUnlockEnabled) {
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{

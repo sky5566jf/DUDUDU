@@ -261,6 +261,11 @@ static NSString * const kWebDAVHTMLBase64 =
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleNetworkDebug;
 - (TVNCHttpResponse *)handleNetworkIpMethods:(NSDictionary *)query;
+- (TVNCHttpResponse *)handleNetworkStaticIPStatus;
+// v3.79: 软锁定 — 以太网优先，持久化，开机自动应用
++ (void)applyStaticIPLockFromConfig;
++ (void)startStaticIPLockTimer;
++ (void)stopStaticIPLockTimer;
 
 @end
 
@@ -666,6 +671,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleNetworkTestHelper];
     } else if ([path isEqualToString:@"/api/network/ip_methods"]) {
         return [self handleNetworkIpMethods:query];
+    } else if ([path isEqualToString:@"/api/network/static_ip_status"]) {
+        return [self handleNetworkStaticIPStatus];
     } else if ([path isEqualToString:@"/api/group/start"]) {
         return [self handleGroupStart:query];
     } else if ([path isEqualToString:@"/api/group/stop"]) {
@@ -5895,8 +5902,362 @@ static NSString *wsReadFrame(int sock) {
     return response;
 }
 
+#pragma mark - v3.79: Static IP Soft Lock (Ethernet-first, persistent, auto-apply on boot)
+
+static NSString *kStaticIPLockConfigPath = @"/var/mobile/Library/Preferences/com.82flex.trollvnc.static_ip.plist";
+static dispatch_source_t gStaticIPLockTimer = NULL;
+
+// Read preferences.plist to find the Ethernet service ID (not just PrimaryService)
+// Returns: @{ @"serviceID": ..., @"interface": ..., @"type": ... } or nil
+static NSDictionary *TVNCFindEthernetService(void) {
+    // Try both known paths
+    NSArray *prefsPaths = @[
+        @"/var/preferences/SystemConfiguration/preferences.plist",
+        @"/Library/Preferences/SystemConfiguration/preferences.plist"
+    ];
+
+    for (NSString *prefsPath in prefsPaths) {
+        NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:prefsPath];
+        if (!prefs) continue;
+
+        NSString *currentSet = prefs[@"CurrentSet"];
+        if (!currentSet) continue;
+
+        NSDictionary *sets = prefs[@"Sets"];
+        NSDictionary *currentSetDict = sets ? sets[currentSet] : nil;
+        NSDictionary *network = currentSetDict ? currentSetDict[@"Network"] : nil;
+        NSDictionary *services = network ? network[@"Service"] : nil;
+        if (!services || ![services isKindOfClass:[NSDictionary class]]) continue;
+
+        // First pass: find Ethernet service
+        // Second pass: if no Ethernet, find WiFi service
+        NSString *ethSvcID = nil, *wifiSvcID = nil;
+        NSString *ethIface = nil, *wifiIface = nil;
+        NSString *ethType = nil, *wifiType = nil;
+
+        for (NSString *svcID in services) {
+            NSDictionary *svc = services[svcID];
+            if (![svc isKindOfClass:[NSDictionary class]]) continue;
+
+            NSDictionary *iface = svc[@"Interface"];
+            if (![iface isKindOfClass:[NSDictionary class]]) continue;
+
+            NSString *type = iface[@"Type"] ?: @"";
+            NSString *devName = iface[@"DeviceName"] ?: @"";
+
+            BOOL isEthernet = [type rangeOfString:@"Ethernet" options:NSCaseInsensitiveSearch].location != NSNotFound;
+            BOOL isWiFi = [type rangeOfString:@"Wi" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+                          [type rangeOfString:@"AirPort" options:NSCaseInsensitiveSearch].location != NSNotFound;
+
+            if (isEthernet && !ethSvcID) {
+                ethSvcID = svcID;
+                ethIface = devName;
+                ethType = type;
+            } else if (isWiFi && !wifiSvcID) {
+                wifiSvcID = svcID;
+                wifiIface = devName;
+                wifiType = type;
+            }
+        }
+
+        // Ethernet first, then WiFi
+        if (ethSvcID) {
+            return @{ @"serviceID": ethSvcID, @"interface": ethIface ?: @"", @"type": ethType ?: @"Ethernet" };
+        }
+        if (wifiSvcID) {
+            return @{ @"serviceID": wifiSvcID, @"interface": wifiIface ?: @"", @"type": wifiType ?: @"WiFi" };
+        }
+    }
+    return nil;
+}
+
+// Save static IP config to persistent plist
+static void TVNCSaveStaticIPConfig(BOOL enabled, NSString *ip, NSString *mask, NSString *router,
+                                    NSString *serviceID, NSString *interface) {
+    NSDictionary *config = @{
+        @"enabled": @(enabled),
+        @"ip": ip ?: @"",
+        @"mask": mask ?: @"",
+        @"router": router ?: @"",
+        @"serviceID": serviceID ?: @"",
+        @"interface": interface ?: @"",
+        @"savedAt": [NSDate date]
+    };
+    // Ensure directory exists
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *dir = [kStaticIPLockConfigPath stringByDeletingLastPathComponent];
+    if (![fm fileExistsAtPath:dir]) {
+        [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    }
+    [config writeToFile:kStaticIPLockConfigPath atomically:YES];
+    TVLog(@"StaticIP: config saved to %@ (enabled=%d ip=%@ svc=%@)", kStaticIPLockConfigPath, enabled, ip, serviceID);
+}
+
+// Load static IP config from persistent plist
+static NSDictionary *TVNCLoadStaticIPConfig(void) {
+    return [NSDictionary dictionaryWithContentsOfFile:kStaticIPLockConfigPath];
+}
+
+// Delete static IP config (when disabling)
+static void TVNCClearStaticIPConfig(void) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if ([fm fileExistsAtPath:kStaticIPLockConfigPath]) {
+        [fm removeItemAtPath:kStaticIPLockConfigPath error:nil];
+    }
+    TVLog(@"StaticIP: config cleared");
+}
+
+// Core: apply static IP via SCDynamicStore for a given service ID
+// Returns YES on success
+static BOOL TVNCApplyStaticIPViaSCDynamicStore(BOOL enabled, NSString *ip, NSString *mask,
+                                                NSString *router, NSString *serviceID,
+                                                NSString *interface, NSMutableDictionary *outInfo) {
+    void *sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+    if (!sc) {
+        sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
+    }
+    if (!sc) return NO;
+
+    typedef void* SCDynamicStoreRef;
+    SCDynamicStoreRef (*pCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
+        (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
+    CFPropertyListRef (*pCopyValue)(SCDynamicStoreRef, CFStringRef) =
+        (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreCopyValue");
+    Boolean (*pSetValue)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef) =
+        (Boolean (*)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCDynamicStoreSetValue");
+    Boolean (*pNotifyValue)(SCDynamicStoreRef, CFStringRef) =
+        (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreNotifyValue");
+    Boolean (*pRemoveValue)(SCDynamicStoreRef, CFStringRef) =
+        (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreRemoveValue");
+
+    if (!pCreate || !pCopyValue || !pSetValue) return NO;
+
+    SCDynamicStoreRef store = pCreate(NULL, CFSTR("TrollVNC-StaticIPLock"), NULL, NULL);
+    if (!store) return NO;
+
+    BOOL success = NO;
+
+    if (serviceID.length > 0) {
+        NSString *setupKey = [NSString stringWithFormat:@"Setup:/Network/Service/%@/IPv4", serviceID];
+        NSString *stateKey = [NSString stringWithFormat:@"State:/Network/Service/%@/IPv4", serviceID];
+
+        // Read current Setup IPv4 config
+        CFPropertyListRef curRef = pCopyValue(store, (__bridge CFStringRef)setupKey);
+        NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
+        if (curRef) {
+            NSDictionary *cur = (__bridge NSDictionary *)curRef;
+            [newIPv4 addEntriesFromDictionary:cur];
+            CFRelease(curRef);
+        }
+
+        if (enabled) {
+            newIPv4[@"ConfigMethod"] = @"Manual";
+            [newIPv4 removeObjectForKey:@"DHCPClientID"];
+            [newIPv4 removeObjectForKey:@"DHCPRouter"];
+            [newIPv4 removeObjectForKey:@"DHCPLeaseTime"];
+            [newIPv4 removeObjectForKey:@"DHCPRequestedParameters"];
+            [newIPv4 removeObjectForKey:@"DHCPServer"];
+            [newIPv4 removeObjectForKey:@"DHCPLeaseStart"];
+            [newIPv4 removeObjectForKey:@"DHCPLeaseExpires"];
+            newIPv4[@"Addresses"] = @[ip];
+            newIPv4[@"SubnetMasks"] = @[mask];
+            if (router.length > 0) {
+                newIPv4[@"Router"] = router;
+            }
+        } else {
+            newIPv4[@"ConfigMethod"] = @"DHCP";
+            [newIPv4 removeObjectForKey:@"Addresses"];
+            [newIPv4 removeObjectForKey:@"SubnetMasks"];
+            [newIPv4 removeObjectForKey:@"Router"];
+        }
+
+        // Write Setup key (persistent layer)
+        Boolean setupOK = pSetValue(store, (__bridge CFStringRef)setupKey, (__bridge CFPropertyListRef)newIPv4);
+
+        // Write State key (immediate runtime effect)
+        Boolean stateOK = false;
+        if (enabled) {
+            NSMutableDictionary *stateIPv4 = [NSMutableDictionary dictionary];
+            stateIPv4[@"Addresses"] = @[ip];
+            stateIPv4[@"SubnetMasks"] = @[mask];
+            if (interface.length > 0) {
+                stateIPv4[@"InterfaceName"] = interface;
+            }
+            if (router.length > 0) {
+                stateIPv4[@"Router"] = router;
+            }
+            stateOK = pSetValue(store, (__bridge CFStringRef)stateKey, (__bridge CFPropertyListRef)stateIPv4);
+        } else {
+            if (pRemoveValue) {
+                stateOK = pRemoveValue(store, (__bridge CFStringRef)stateKey);
+            }
+        }
+
+        // Notify
+        Boolean notifyGlobal = false, notifySetup = false;
+        if (pNotifyValue) {
+            notifyGlobal = pNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
+            notifySetup = pNotifyValue(store, (__bridge CFStringRef)setupKey);
+        }
+        notify_post("com.apple.system.config");
+
+        success = setupOK;
+
+        if (outInfo) {
+            outInfo[@"setup_write"] = @(setupOK);
+            outInfo[@"state_write"] = @(stateOK);
+            outInfo[@"notify_global"] = @(notifyGlobal);
+            outInfo[@"notify_setup"] = @(notifySetup);
+            outInfo[@"configMethod"] = newIPv4[@"ConfigMethod"];
+            outInfo[@"setupKey"] = setupKey;
+        }
+
+        TVLog(@"StaticIP: SCDynamicStore apply svc=%@ iface=%@ setup=%d state=%d", serviceID, interface, setupOK, stateOK);
+    }
+
+    CFRelease(store);
+    return success;
+}
+
+// Check if current IP for the service matches the saved static IP
+// Returns YES if IP is correct (no action needed), NO if needs re-apply
+static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) {
+    if (serviceID.length == 0 || expectedIP.length == 0) return NO;
+
+    void *sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+    if (!sc) return NO;
+
+    typedef void* SCDynamicStoreRef;
+    SCDynamicStoreRef (*pCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
+        (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
+    CFPropertyListRef (*pCopyValue)(SCDynamicStoreRef, CFStringRef) =
+        (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreCopyValue");
+
+    if (!pCreate || !pCopyValue) return NO;
+
+    SCDynamicStoreRef store = pCreate(NULL, CFSTR("TrollVNC-StaticIPCheck"), NULL, NULL);
+    if (!store) return NO;
+
+    NSString *stateKey = [NSString stringWithFormat:@"State:/Network/Service/%@/IPv4", serviceID];
+    CFPropertyListRef valRef = pCopyValue(store, (__bridge CFStringRef)stateKey);
+    BOOL matches = NO;
+
+    if (valRef) {
+        NSDictionary *stateIPv4 = (__bridge NSDictionary *)valRef;
+        NSArray *addrs = stateIPv4[@"Addresses"];
+        if ([addrs isKindOfClass:[NSArray class]] && addrs.count > 0) {
+            NSString *currentIP = [addrs[0] isKindOfClass:[NSString class]] ? addrs[0] : [addrs[0] description];
+            matches = [currentIP isEqualToString:expectedIP];
+            if (!matches) {
+                TVLog(@"StaticIP: IP mismatch! current=%@ expected=%@ → re-applying", currentIP, expectedIP);
+            }
+        }
+        CFRelease(valRef);
+    }
+
+    CFRelease(store);
+    return matches;
+}
+
+// Apply static IP from saved config (used by timer and boot-time)
++ (void)applyStaticIPLockFromConfig {
+    NSDictionary *config = TVNCLoadStaticIPConfig();
+    if (!config) return;
+
+    BOOL enabled = [config[@"enabled"] boolValue];
+    if (!enabled) return;
+
+    NSString *ip = config[@"ip"] ?: @"";
+    NSString *mask = config[@"mask"] ?: @"";
+    NSString *router = config[@"router"] ?: @"";
+    NSString *serviceID = config[@"serviceID"] ?: @"";
+    NSString *interface = config[@"interface"] ?: @"";
+
+    if (ip.length == 0 || mask.length == 0) return;
+
+    // If no saved serviceID, try to find Ethernet service now
+    if (serviceID.length == 0) {
+        NSDictionary *svc = TVNCFindEthernetService();
+        if (svc) {
+            serviceID = svc[@"serviceID"];
+            interface = svc[@"interface"];
+        }
+    }
+
+    if (serviceID.length == 0) {
+        TVLog(@"StaticIP: no service ID found, cannot apply");
+        return;
+    }
+
+    // Check if already correct (skip re-apply if matching)
+    if (TVNCCheckStaticIPMatches(serviceID, ip)) {
+        return; // IP is correct, no action needed
+    }
+
+    TVLog(@"StaticIP: re-applying static IP (ip=%@ svc=%@)", ip, serviceID);
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    TVNCApplyStaticIPViaSCDynamicStore(YES, ip, mask, router, serviceID, interface, info);
+}
+
+// Start the soft-lock timer (10 second interval)
++ (void)startStaticIPLockTimer {
+    if (gStaticIPLockTimer) return; // already running
+
+    // Check if config exists and is enabled
+    NSDictionary *config = TVNCLoadStaticIPConfig();
+    if (!config || ![config[@"enabled"] boolValue]) return;
+
+    TVLog(@"StaticIP: starting soft-lock timer (10s interval)");
+
+    dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+    gStaticIPLockTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+    uint64_t interval = 10 * NSEC_PER_SEC;
+    uint64_t leeway = 2 * NSEC_PER_SEC;
+    dispatch_source_set_timer(gStaticIPLockTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, leeway);
+
+    dispatch_source_set_event_handler(gStaticIPLockTimer, ^{
+        [TVNCHttpServer applyStaticIPLockFromConfig];
+    });
+
+    dispatch_source_set_cancel_handler(gStaticIPLockTimer, ^{
+        gStaticIPLockTimer = NULL;
+    });
+
+    dispatch_resume(gStaticIPLockTimer);
+}
+
++ (void)stopStaticIPLockTimer {
+    if (gStaticIPLockTimer) {
+        dispatch_source_cancel(gStaticIPLockTimer);
+        gStaticIPLockTimer = NULL;
+        TVLog(@"StaticIP: soft-lock timer stopped");
+    }
+}
+
+// GET /api/network/static_ip_status - return current lock config and status
+- (TVNCHttpResponse *)handleNetworkStaticIPStatus {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    response.contentType = @"application/json";
+    response.statusCode = 200;
+
+    NSDictionary *config = TVNCLoadStaticIPConfig();
+    BOOL timerRunning = (gStaticIPLockTimer != NULL);
+
+    // Also detect current Ethernet service
+    NSDictionary *ethSvc = TVNCFindEthernetService();
+
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"config"] = config ?: @{};
+    result[@"timer_running"] = @(timerRunning);
+    result[@"config_path"] = kStaticIPLockConfigPath;
+    result[@"detected_service"] = ethSvc ?: @{};
+
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 // GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
-// 通过 dlopen SystemConfiguration + SCPreferences API 以 root 权限写入静态 IP
+// v3.79: 以太网优先 + 持久化 + 软锁定
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     response.contentType = @"application/json";
@@ -5920,965 +6281,80 @@ static NSString *wsReadFrame(int sock) {
         }
     }
 
-    // ---- 方案0: SCDynamicStore (通过 configd Mach IPC, 不需要 root) ----
-    // 诊断确认 SCDynamicStoreSetValue 返回成功，configd 接受写入
-    {
-        void *sc0 = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
-        if (!sc0) {
-            sc0 = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
-        }
+    // v3.79: 以太网优先 — 读 preferences.plist 找 Interface.Type=Ethernet 的服务
+    NSDictionary *ethSvc = TVNCFindEthernetService();
+    NSString *serviceID = ethSvc[@"serviceID"] ?: @"";
+    NSString *interface = ethSvc[@"interface"] ?: @"";
+    NSString *serviceType = ethSvc[@"type"] ?: @"";
 
-        if (sc0) {
+    // 如果没找到 Ethernet/WiFi 服务，尝试用 PrimaryService 兜底
+    if (serviceID.length == 0) {
+        void *sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+        if (!sc) sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
+        if (sc) {
             typedef void* SCDynamicStoreRef;
-            SCDynamicStoreRef (*pSCDCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
-                (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc0, "SCDynamicStoreCreate");
-            CFPropertyListRef (*pSCDCopyValue)(SCDynamicStoreRef, CFStringRef) =
-                (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreCopyValue");
-            Boolean (*pSCDSetValue)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef) =
-                (Boolean (*)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef))dlsym(sc0, "SCDynamicStoreSetValue");
-            Boolean (*pSCDNotifyValue)(SCDynamicStoreRef, CFStringRef) =
-                (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreNotifyValue");
-            Boolean (*pSCDRemoveValue)(SCDynamicStoreRef, CFStringRef) =
-                (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreRemoveValue");
-
-            if (pSCDCreate && pSCDCopyValue && pSCDSetValue) {
-                TVLog(@"HTTP Server: Trying SCDynamicStore approach (configd IPC, no root needed)");
-
-                SCDynamicStoreRef store = pSCDCreate(NULL, CFSTR("TrollVNC-staticIP"), NULL, NULL);
+            SCDynamicStoreRef (*pCreate)(CFAllocatorRef, CFStringRef, void*, void*) = 
+                (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
+            CFPropertyListRef (*pCopyValue)(SCDynamicStoreRef, CFStringRef) = 
+                (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreCopyValue");
+            if (pCreate && pCopyValue) {
+                SCDynamicStoreRef store = pCreate(NULL, CFSTR("TrollVNC-fallback"), NULL, NULL);
                 if (store) {
-                    // 1. Get PrimaryService from State:/Network/Global/IPv4
-                    CFPropertyListRef globalIPv4 = pSCDCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
-                    NSString *primaryService = nil;
-                    NSString *primaryInterface = nil;
-                    NSString *currentRouter = nil;
-
-                    if (globalIPv4) {
-                        NSDictionary *g = (__bridge NSDictionary *)globalIPv4;
-                        primaryService = [g[@"PrimaryService"] isKindOfClass:[NSString class]] ? g[@"PrimaryService"] : nil;
-                        primaryInterface = [g[@"InterfaceName"] isKindOfClass:[NSString class]] ? g[@"InterfaceName"] : nil;
-                        currentRouter = [g[@"Router"] isKindOfClass:[NSString class]] ? g[@"Router"] : nil;
-                        CFRelease(globalIPv4);
+                    CFPropertyListRef val = pCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
+                    if (val) {
+                        NSDictionary *g = (__bridge NSDictionary *)val;
+                        serviceID = [g[@"PrimaryService"] isKindOfClass:[NSString class]] ? g[@"PrimaryService"] : @"";
+                        interface = [g[@"InterfaceName"] isKindOfClass:[NSString class]] ? g[@"InterfaceName"] : @"";
+                        CFRelease(val);
                     }
-
-                    // Fallback: try reading from Setup key list if no PrimaryService
-                    if (!primaryService) {
-                        CFArrayRef (*pSCDCopyKeyList)(SCDynamicStoreRef, CFStringRef) =
-                            (CFArrayRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc0, "SCDynamicStoreCopyKeyList");
-                        if (pSCDCopyKeyList) {
-                            CFArrayRef keys = pSCDCopyKeyList(store, CFSTR("Setup:/Network/Service/.*IPv4"));
-                            if (keys) {
-                                NSArray *keyArr = (__bridge NSArray *)keys;
-                                for (NSString *k in keyArr) {
-                                    // Format: Setup:/Network/Service/{UUID}/IPv4
-                                    NSArray *parts = [k componentsSeparatedByString:@"/"];
-                                    if (parts.count >= 5) {
-                                        primaryService = parts[3];
-                                        break;
-                                    }
-                                }
-                                CFRelease(keys);
-                            }
-                        }
-                    }
-
-                    if (primaryService) {
-                        TVLog(@"HTTP Server: SCDynamicStore PrimaryService=%@ iface=%@", primaryService, primaryInterface);
-
-                        NSString *setupKey = [NSString stringWithFormat:@"Setup:/Network/Service/%@/IPv4", primaryService];
-                        NSString *stateKey = [NSString stringWithFormat:@"State:/Network/Service/%@/IPv4", primaryService];
-
-                        // 2. Read current Setup IPv4 config
-                        CFPropertyListRef currentIPv4Ref = pSCDCopyValue(store, (__bridge CFStringRef)setupKey);
-                        NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
-                        NSArray *currentKeys = @[];
-
-                        if (currentIPv4Ref) {
-                            NSDictionary *cur = (__bridge NSDictionary *)currentIPv4Ref;
-                            [newIPv4 addEntriesFromDictionary:cur];
-                            currentKeys = cur.allKeys;
-                            CFRelease(currentIPv4Ref);
-                        }
-
-                        // 3. Modify config
-                        if (enabled) {
-                            newIPv4[@"ConfigMethod"] = @"Manual";
-                            // Clean up DHCP-specific keys
-                            [newIPv4 removeObjectForKey:@"DHCPClientID"];
-                            [newIPv4 removeObjectForKey:@"DHCPRouter"];
-                            [newIPv4 removeObjectForKey:@"DHCPLeaseTime"];
-                            [newIPv4 removeObjectForKey:@"DHCPRequestedParameters"];
-                            [newIPv4 removeObjectForKey:@"DHCPServer"];
-                            [newIPv4 removeObjectForKey:@"DHCPLeaseStart"];
-                            [newIPv4 removeObjectForKey:@"DHCPLeaseExpires"];
-
-                            // Set manual config
-                            newIPv4[@"Addresses"] = @[ip];
-                            newIPv4[@"SubnetMasks"] = @[mask];
-                            if (router.length > 0) {
-                                newIPv4[@"Router"] = router;
-                            }
-                        } else {
-                            newIPv4[@"ConfigMethod"] = @"DHCP";
-                            // Remove manual config
-                            [newIPv4 removeObjectForKey:@"Addresses"];
-                            [newIPv4 removeObjectForKey:@"SubnetMasks"];
-                            [newIPv4 removeObjectForKey:@"Router"];
-                        }
-
-                        // 4. Write to Setup key (persistent — configd writes to preferences.plist)
-                        Boolean setupOK = pSCDSetValue(store, (__bridge CFStringRef)setupKey, (__bridge CFPropertyListRef)newIPv4);
-                        TVLog(@"HTTP Server: SCDynamicStore SetValue Setup key = %d", setupOK);
-
-                        // 5. Write to State key for immediate runtime effect
-                        Boolean stateOK = false;
-                        if (enabled) {
-                            NSMutableDictionary *stateIPv4 = [NSMutableDictionary dictionary];
-                            stateIPv4[@"Addresses"] = @[ip];
-                            stateIPv4[@"SubnetMasks"] = @[mask];
-                            if (primaryInterface) {
-                                stateIPv4[@"InterfaceName"] = primaryInterface;
-                            }
-                            if (router.length > 0) {
-                                stateIPv4[@"Router"] = router;
-                            }
-                            stateOK = pSCDSetValue(store, (__bridge CFStringRef)stateKey, (__bridge CFPropertyListRef)stateIPv4);
-                        } else {
-                            // For DHCP, remove state key so configd re-DHCPs
-                            if (pSCDRemoveValue) {
-                                stateOK = pSCDRemoveValue(store, (__bridge CFStringRef)stateKey);
-                            }
-                        }
-                        TVLog(@"HTTP Server: SCDynamicStore State key write/remove = %d", stateOK);
-
-                        // 6. Notify system of changes
-                        Boolean notifyGlobalOK = false;
-                        Boolean notifySetupOK = false;
-                        if (pSCDNotifyValue) {
-                            notifyGlobalOK = pSCDNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
-                            notifySetupOK = pSCDNotifyValue(store, (__bridge CFStringRef)setupKey);
-                            TVLog(@"HTTP Server: SCDynamicStore Notify global=%d setup=%d", notifyGlobalOK, notifySetupOK);
-                        }
-
-                        // 7. Also send notify_post for good measure
-                        int notifyPostResult = notify_post("com.apple.system.config");
-                        TVLog(@"HTTP Server: notify_post com.apple.system.config = %d", notifyPostResult);
-
-                        // 8. Read back to verify
-                        NSDictionary *verifySetup = nil;
-                        CFPropertyListRef verifyRef = pSCDCopyValue(store, (__bridge CFStringRef)setupKey);
-                        if (verifyRef) {
-                            verifySetup = (__bridge_transfer NSDictionary *)verifyRef;
-                        }
-
-                        NSDictionary *verifyState = nil;
-                        CFPropertyListRef verifyStateRef = pSCDCopyValue(store, (__bridge CFStringRef)stateKey);
-                        if (verifyStateRef) {
-                            verifyState = (__bridge_transfer NSDictionary *)verifyStateRef;
-                        }
-
-                        CFRelease(store);
-
-                        response.statusCode = 200;
-                        response.body = [NSJSONSerialization dataWithJSONObject:@{
-                            @"success": @(setupOK),
-                            @"method": @"SCDynamicStore",
-                            @"enabled": @(enabled),
-                            @"ip": ip, @"mask": mask, @"router": router,
-                            @"primaryService": primaryService,
-                            @"primaryInterface": primaryInterface ?: @"",
-                            @"currentRouter": currentRouter ?: @"",
-                            @"setupKey": setupKey,
-                            @"setup_write": @(setupOK),
-                            @"state_write": @(stateOK),
-                            @"notify_global": @(notifyGlobalOK),
-                            @"notify_setup": @(notifySetupOK),
-                            @"notify_post": @(notifyPostResult),
-                            @"configMethod": newIPv4[@"ConfigMethod"],
-                            @"current_keys": currentKeys,
-                            @"verify_setup": verifySetup ?: @{},
-                            @"verify_state": verifyState ?: @{}
-                        } options:0 error:nil];
-                        return response;
-                    } else {
-                        TVLog(@"HTTP Server: SCDynamicStore - no PrimaryService found");
-                    }
-
                     CFRelease(store);
-                } else {
-                    TVLog(@"HTTP Server: SCDynamicStoreCreate returned NULL");
                 }
-            } else {
-                TVLog(@"HTTP Server: SCDynamicStore dlsym failed");
             }
-        } else {
-            TVLog(@"HTTP Server: dlopen SystemConfiguration failed for SCDynamicStore");
         }
     }
 
-    // 方案1: 尝试 dlsym SCPreferences API（macOS 可用，iOS 可能不可用）
-    // 方案2: 直接编辑 preferences.plist（兜底方案，root 权限可靠）
-    
-    // ---- 方案1: 尝试 dlopen + dlsym ----
-    typedef void *SCPrefsRef;
-    void *sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
-    if (!sc) {
-        // 尝试备用路径
-        sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
+    if (serviceID.length == 0) {
+        response.statusCode = 500;
+        response.body = [NSJSONSerialization dataWithJSONObject:@{
+            @"success": @NO,
+            @"error": @"No network service found (Ethernet or WiFi)",
+            @"method": @"SCDynamicStore"
+        } options:0 error:nil];
+        return response;
     }
-    
-    SCPrefsRef (*pSCPreferencesCreate)(CFAllocatorRef, CFStringRef, CFStringRef) = NULL;
-    CFPropertyListRef (*pSCPreferencesGetValue)(SCPrefsRef, CFStringRef) = NULL;
-    CFPropertyListRef (*pSCPreferencesPathGet)(SCPrefsRef, CFStringRef) = NULL;
-    Boolean (*pSCPreferencesPathSetValue)(SCPrefsRef, CFStringRef, CFPropertyListRef) = NULL;
-    Boolean (*pSCPreferencesSetValue)(SCPrefsRef, CFStringRef, CFPropertyListRef) = NULL;
-    Boolean (*pSCPreferencesCommitChanges)(SCPrefsRef) = NULL;
-    Boolean (*pSCPreferencesApplyChanges)(SCPrefsRef) = NULL;
-    Boolean (*pSCPreferencesSynchronize)(SCPrefsRef) = NULL;
-    Boolean (*pSCPreferencesLock)(SCPrefsRef, Boolean) = NULL;
-    Boolean (*pSCPreferencesUnlock)(SCPrefsRef) = NULL;
-    SCPrefsRef (*pSCPreferencesCreateWithAuthorization)(CFAllocatorRef, CFStringRef, CFStringRef, void *) = NULL;
-    
-    if (sc) {
-        pSCPreferencesCreate = (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef))dlsym(sc, "SCPreferencesCreate");
-        pSCPreferencesGetValue = (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesGetValue");
-        pSCPreferencesPathGet = (CFPropertyListRef (*)(SCPrefsRef, CFStringRef))dlsym(sc, "SCPreferencesPathGet");
-        pSCPreferencesPathSetValue = (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesPathSetValue");
-        pSCPreferencesSetValue = (Boolean (*)(SCPrefsRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCPreferencesSetValue");
-        pSCPreferencesCommitChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesCommitChanges");
-        pSCPreferencesApplyChanges = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesApplyChanges");
-        pSCPreferencesSynchronize = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesSynchronize");
-        pSCPreferencesLock = (Boolean (*)(SCPrefsRef, Boolean))dlsym(sc, "SCPreferencesLock");
-        pSCPreferencesUnlock = (Boolean (*)(SCPrefsRef))dlsym(sc, "SCPreferencesUnlock");
-        pSCPreferencesCreateWithAuthorization = (SCPrefsRef (*)(CFAllocatorRef, CFStringRef, CFStringRef, void *))dlsym(sc, "SCPreferencesCreateWithAuthorization");
-    }
-    
-    // 尝试加载 Security framework 的 AuthorizationCreate
-    void *sec = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_NOW);
-    if (!sec) {
-        sec = dlopen("/System/Library/Frameworks/Security.framework/Versions/Current/Security", RTLD_NOW);
-    }
-    int (*pAuthorizationCreate)(const void *, const void *, unsigned int, void **) = NULL;
-    if (sec) {
-        pAuthorizationCreate = (int (*)(const void *, const void *, unsigned int, void **))dlsym(sec, "AuthorizationCreate");
-    }
-    
-    // 收集诊断信息
-    NSMutableArray *dlsymResults = [NSMutableArray array];
-    [dlsymResults addObject:[NSString stringWithFormat:@"dlopen=%@", sc ? @"ok" : @"failed"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCreate=%@", pSCPreferencesCreate ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesGetValue=%@", pSCPreferencesGetValue ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesPathGet=%@", pSCPreferencesPathGet ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesPathSetValue=%@", pSCPreferencesPathSetValue ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesSetValue=%@", pSCPreferencesSetValue ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCommitChanges=%@", pSCPreferencesCommitChanges ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesApplyChanges=%@", pSCPreferencesApplyChanges ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesSynchronize=%@", pSCPreferencesSynchronize ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesLock=%@", pSCPreferencesLock ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesUnlock=%@", pSCPreferencesUnlock ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"SCPreferencesCreateWithAuthorization=%@", pSCPreferencesCreateWithAuthorization ? @"ok" : @"null"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"Security.framework=%@", sec ? @"ok" : @"failed"]];
-    [dlsymResults addObject:[NSString stringWithFormat:@"AuthorizationCreate=%@", pAuthorizationCreate ? @"ok" : @"null"]];
-    TVLog(@"HTTP Server: dlsym diagnostics: %@", [dlsymResults componentsJoinedByString:@", "]);
-    
-    // 如果核心 dlsym 函数可用，用 SCPreferences API
-    // 只需要 Create + GetValue + SetValue + CommitChanges（ApplyChanges 可选）
-    if (pSCPreferencesCreate && pSCPreferencesGetValue && pSCPreferencesSetValue &&
-        pSCPreferencesCommitChanges) {
-        
-        TVLog(@"HTTP Server: Using SCPreferences API path");
-        
-        // 1. 创建 SCPreferences session
-        // 优先用 Authorization（需要 SCPreferencesCreateWithAuthorization + AuthorizationCreate）
-        SCPrefsRef prefs = NULL;
-        void *authRef = NULL;
-        BOOL usedAuthorization = NO;
-        NSString *createMethod = @"SCPreferencesCreate";
-        
-        if (pSCPreferencesCreateWithAuthorization && pAuthorizationCreate) {
-            int authStatus = pAuthorizationCreate(NULL, NULL, 0, &authRef);
-            TVLog(@"HTTP Server: AuthorizationCreate status=%d, authRef=%p", authStatus, authRef);
-            if (authStatus == 0 && authRef) {
-                prefs = pSCPreferencesCreateWithAuthorization(NULL, CFSTR("TrollVNC"), NULL, authRef);
-                if (prefs) {
-                    usedAuthorization = YES;
-                    createMethod = @"SCPreferencesCreateWithAuthorization";
-                }
-            }
-        }
-        
-        if (!prefs) {
-            prefs = pSCPreferencesCreate(NULL, CFSTR("TrollVNC"), NULL);
-        }
-        
-        if (!prefs) {
-            TVLog(@"HTTP Server: SCPreferencesCreate failed (both methods)");
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"SCPreferencesCreate returned NULL (permission denied?)",
-                @"step": @"SCPreferencesCreate",
-                @"method": @"SCPreferences",
-                @"createMethod": createMethod
-            } options:0 error:nil];
-            return response;
-        }
-        
-        TVLog(@"HTTP Server: SCPreferences created via %@, usedAuth=%d", createMethod, usedAuthorization);
-        
-        // 1b. Lock preferences for exclusive write access
-        BOOL lockOK = NO;
-        if (pSCPreferencesLock) {
-            lockOK = pSCPreferencesLock(prefs, YES);  // YES = blocking wait
-            TVLog(@"HTTP Server: SCPreferencesLock result=%d", lockOK);
-        }
-        
-        // 1c. 如果 Lock 失败，fallback 到 root helper（spawn 自身以 root 身份直接修改 preferences.plist）
-        int rootHelperExitCode = -999;
-        NSString *rootHelperOutputStr = @"";
-        NSString *rootHelperExecPath = @"";
-        if (!lockOK) {
-            char selfPath[PATH_MAX];
-            uint32_t pathSize = sizeof(selfPath);
-            if (_NSGetExecutablePath(selfPath, &pathSize) == 0) {
-                NSString *execPath = [NSString stringWithUTF8String:selfPath];
-                TVLog(@"HTTP Server: Lock failed, trying root helper via %@", execPath);
-                
-                NSDictionary *helperParams = @{
-                    @"enabled": @(enabled),
-                    @"ip": ip,
-                    @"mask": mask,
-                    @"router": router
-                };
-                NSData *helperJson = [NSJSONSerialization dataWithJSONObject:helperParams options:0 error:nil];
-                NSString *helperJsonStr = [[NSString alloc] initWithData:helperJson encoding:NSUTF8StringEncoding];
-                
-                NSString *helperOutput = nil;
-                int helperExit = spawnAsRootWithOutput(execPath, @[@"--root-helper", @"static_ip", helperJsonStr], &helperOutput);
-                TVLog(@"HTTP Server: root helper exit=%d, output=%@", helperExit, helperOutput);
-                
-                rootHelperExitCode = helperExit;
-                rootHelperOutputStr = helperOutput ?: @"";
-                rootHelperExecPath = execPath;
-                
-                if (helperExit == 0 && helperOutput.length > 0) {
-                    CFRelease((CFTypeRef)prefs);
-                    response.statusCode = 200;
-                    response.body = [helperOutput dataUsingEncoding:NSUTF8StringEncoding];
-                    return response;
-                }
-                
-                // root helper 也失败，继续 SCPreferences 路径（commit 会失败但提供诊断信息）
-                TVLog(@"HTTP Server: root helper failed (exit=%d, output=%@), falling through to SCPreferences for diagnostics", helperExit, helperOutput);
-            } else {
-                TVLog(@"HTTP Server: _NSGetExecutablePath failed, cannot try root helper");
-                rootHelperOutputStr = @"_NSGetExecutablePath failed";
-            }
-        }
-        
-        // 2. 获取 CurrentSet 路径
-        CFPropertyListRef currentSetVal = pSCPreferencesGetValue(prefs, CFSTR("CurrentSet"));
-        if (!currentSetVal) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"Cannot get CurrentSet",
-                @"step": @"CurrentSet",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        NSString *currentSet = [(__bridge_transfer NSString *)currentSetVal stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        // strip "/Sets/" prefix — Sets dict keys are bare UUIDs
-        NSString *currentSetKey = [currentSet hasPrefix:@"/Sets/"] ? [currentSet substringFromIndex:6] : currentSet;
-        TVLog(@"HTTP Server: CurrentSet = %@ (key=%@)", currentSet, currentSetKey);
-        
-        // 3. 获取 Sets 字典（GetValue 只能取顶层 key）
-        CFPropertyListRef setsVal = pSCPreferencesGetValue(prefs, CFSTR("Sets"));
-        if (!setsVal) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"Cannot get Sets dictionary",
-                @"step": @"GetValue_Sets",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        NSDictionary *setsDict = (__bridge NSDictionary *)setsVal;
-        // 注意：SCPreferencesGetValue 遵循 Get 规则，不释放返回值
-        
-        // 4. 导航到 CurrentSet/Network/Service
-        NSDictionary *currentSetDict = setsDict[currentSetKey];
-        if (![currentSetDict isKindOfClass:[NSDictionary class]]) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"CurrentSet not found in Sets",
-                @"step": @"navigate_currentSet",
-                @"currentSet": currentSet,
-                @"currentSetKey": currentSetKey,
-                @"sets_keys": setsDict.allKeys,
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        NSDictionary *networkDict = currentSetDict[@"Network"];
-        if (![networkDict isKindOfClass:[NSDictionary class]]) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"Network dict not found in CurrentSet",
-                @"step": @"navigate_network",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        NSDictionary *servicesDict = networkDict[@"Service"];
-        if (![servicesDict isKindOfClass:[NSDictionary class]]) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"Service dict not found in Network",
-                @"step": @"navigate_service",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        
-        // 5. 遍历服务，找到目标（优先 Wi-Fi，不要求 IPv4 已存在）
-        NSString *targetServiceID = nil;
-        NSString *targetServiceName = nil;
-        for (NSString *serviceID in servicesDict) {
-            NSDictionary *serviceInfo = servicesDict[serviceID];
-            if (![serviceInfo isKindOfClass:[NSDictionary class]]) continue;
-            
-            NSDictionary *interface = serviceInfo[@"Interface"];
-            NSString *hardwareType = interface[@"Type"];
-            NSString *devName = serviceInfo[@"UserDefinedName"] ?: @"";
-            
-            BOOL isWiFi = [hardwareType isEqualToString:@"AirPort"] ||
-                          [hardwareType isEqualToString:@"Wi-Fi"] ||
-                          [devName.lowercaseString containsString:@"wi-fi"] ||
-                          [devName.lowercaseString containsString:@"wifi"];
-            
-            if (isWiFi) {
-                targetServiceID = serviceID;
-                targetServiceName = devName;
-                break;
-            }
-            if (!targetServiceID) {
-                targetServiceID = serviceID;
-                targetServiceName = devName;
-            }
-        }
-        
-        if (!targetServiceID) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"No network service found",
-                @"step": @"find_service",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        
-        // 6. 构造新的 IPv4 配置
-        NSMutableDictionary *newIPv4 = [NSMutableDictionary dictionary];
-        newIPv4[@"method"] = enabled ? @"Manual" : @"DHCP";
+
+    TVLog(@"StaticIP: using service=%@ iface=%@ type=%@", serviceID, interface, serviceType);
+
+    // Apply via SCDynamicStore
+    NSMutableDictionary *applyInfo = [NSMutableDictionary dictionary];
+    BOOL success = TVNCApplyStaticIPViaSCDynamicStore(enabled, ip, mask, router, serviceID, interface, applyInfo);
+
+    if (success) {
         if (enabled) {
-            newIPv4[@"Router"] = router;
-            newIPv4[@"Addresses"] = @[ip];
-            newIPv4[@"SubnetMasks"] = @[mask];
-        }
-        
-        // 7. 深拷贝 Sets → 修改 IPv4 → SetValue 写回整个 Sets
-        NSMutableDictionary *mutableSets = [setsDict mutableCopy];
-        NSMutableDictionary *mutableCurrentSet = [mutableSets[currentSetKey] isKindOfClass:[NSDictionary class]] ? [mutableSets[currentSetKey] mutableCopy] : [NSMutableDictionary dictionary];
-        NSMutableDictionary *mutableNetwork = [mutableCurrentSet[@"Network"] isKindOfClass:[NSDictionary class]] ? [mutableCurrentSet[@"Network"] mutableCopy] : [NSMutableDictionary dictionary];
-        NSMutableDictionary *mutableServices = [mutableNetwork[@"Service"] isKindOfClass:[NSDictionary class]] ? [mutableNetwork[@"Service"] mutableCopy] : [NSMutableDictionary dictionary];
-        NSMutableDictionary *mutableService = [mutableServices[targetServiceID] isKindOfClass:[NSDictionary class]] ? [mutableServices[targetServiceID] mutableCopy] : [NSMutableDictionary dictionary];
-        
-        mutableService[@"IPv4"] = newIPv4;
-        mutableServices[targetServiceID] = mutableService;
-        mutableNetwork[@"Service"] = mutableServices;
-        mutableCurrentSet[@"Network"] = mutableNetwork;
-        mutableSets[currentSetKey] = mutableCurrentSet;
-        
-        Boolean writeOK = pSCPreferencesSetValue(prefs, CFSTR("Sets"), (__bridge CFPropertyListRef)mutableSets);
-        
-        if (!writeOK) {
-            if (lockOK && pSCPreferencesUnlock) pSCPreferencesUnlock(prefs);
-        CFRelease((CFTypeRef)prefs);
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"SCPreferencesSetValue failed",
-                @"step": @"SetValue",
-                @"method": @"SCPreferences"
-            } options:0 error:nil];
-            return response;
-        }
-        
-        // 8. 提交 + 应用 + 解锁（ApplyChanges 可选）
-        Boolean commitOK = pSCPreferencesCommitChanges(prefs);
-        Boolean applyOK = pSCPreferencesApplyChanges ? pSCPreferencesApplyChanges(prefs) : false;
-        if (pSCPreferencesSynchronize) pSCPreferencesSynchronize(prefs);
-        Boolean unlockOK = pSCPreferencesUnlock ? pSCPreferencesUnlock(prefs) : false;
-        TVLog(@"HTTP Server: commit=%d apply=%d unlock=%d", commitOK, applyOK, unlockOK);
-        CFRelease((CFTypeRef)prefs);
-        
-        // 如果 ApplyChanges 不可用，手动通知 configd 重新加载
-        int notifyResult = -1;
-        if (!applyOK) {
-            notifyResult = notify_post("com.apple.system.config");
-            TVLog(@"HTTP Server: notify_post com.apple.system.config = %d (ApplyChanges unavailable)", notifyResult);
-            
-            // 尝试 SCDynamicStoreNotifyValue
-            if (sc) {
-                typedef void* SCDynamicStoreRef;
-                SCDynamicStoreRef (*pSCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
-                    (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
-                if (pSCDynamicStoreCreate) {
-                    SCDynamicStoreRef store = pSCDynamicStoreCreate(NULL, CFSTR("TrollVNC"), NULL, NULL);
-                    if (store) {
-                        Boolean (*pSCDynamicStoreNotifyValue)(SCDynamicStoreRef, CFStringRef) =
-                            (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreNotifyValue");
-                        if (pSCDynamicStoreNotifyValue) {
-                            pSCDynamicStoreNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
-                        }
-                        CFRelease((CFTypeRef)store);
-                    }
-                }
-            }
-        }
-        
-        response.statusCode = 200;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @YES,
-            @"enabled": @(enabled),
-            @"ip": ip, @"mask": mask, @"router": router,
-            @"method": enabled ? @"Manual" : @"DHCP",
-            @"service": targetServiceID,
-            @"serviceName": targetServiceName ?: @"",
-            @"commit": @(commitOK), @"apply": @(applyOK),
-            @"unlock": @(unlockOK),
-            @"lock": @(lockOK),
-            @"usedAuthorization": @(usedAuthorization),
-            @"createMethod": createMethod,
-            @"notify_post": @(notifyResult),
-            @"api": @"SCPreferences",
-            @"rootHelperAttempted": @YES,
-            @"rootHelperExit": @(rootHelperExitCode),
-            @"rootHelperOutput": rootHelperOutputStr,
-            @"rootHelperPath": rootHelperExecPath
-        } options:0 error:nil];
-        return response;
-    }
-    
-    // ---- 方案2: 直接编辑 preferences.plist ----
-    TVLog(@"HTTP Server: SCPreferences core functions not available, falling back to direct plist editing");
-    
-    // preferences.plist 路径（iOS 标准）
-    NSString *prefsPath = @"/Library/Preferences/SystemConfiguration/preferences.plist";
-    NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:prefsPath]) {
-        // roothide 可能重定向
-        prefsPath = @"/var/jb/Library/Preferences/SystemConfiguration/preferences.plist";
-        if (![fm fileExistsAtPath:prefsPath]) {
-            response.statusCode = 500;
-            response.body = [NSJSONSerialization dataWithJSONObject:@{
-                @"success": @NO,
-                @"error": @"preferences.plist not found",
-                @"step": @"plist_not_found",
-                @"method": @"direct_plist",
-                @"dlsym_diag": [dlsymResults componentsJoinedByString:@", "]
-            } options:0 error:nil];
-            return response;
-        }
-    }
-    
-    // 备份原文件
-    NSString *backupPath = [prefsPath stringByAppendingString:@".trollvnc.bak"];
-    if (![fm fileExistsAtPath:backupPath]) {
-        [fm copyItemAtPath:prefsPath toPath:backupPath error:nil];
-        TVLog(@"HTTP Server: Backed up preferences.plist to %@", backupPath);
-    }
-    
-    // 读取 plist
-    NSMutableDictionary *prefsDict = [NSMutableDictionary dictionaryWithContentsOfFile:prefsPath];
-    if (!prefsDict) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"Cannot read preferences.plist",
-            @"step": @"plist_read",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    
-    // 获取 CurrentSet
-    NSString *currentSet = prefsDict[@"CurrentSet"];
-    if (!currentSet || currentSet.length == 0) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"No CurrentSet in preferences.plist",
-            @"step": @"no_currentset",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    TVLog(@"HTTP Server: plist CurrentSet = %@", currentSet);
-    
-    // 导航到 /Sets/{currentSet}/Network/Service
-    NSDictionary *sets = prefsDict[@"Sets"];
-    if (!sets) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"No Sets in preferences.plist",
-            @"step": @"no_sets",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    
-    // currentSet 格式: "/Sets/XXXX-XXXX-XXXX" 或 "XXXX-XXXX-XXXX"
-    NSString *setKey = currentSet;
-    if ([setKey hasPrefix:@"/Sets/"]) {
-        setKey = [setKey substringFromIndex:6];
-    }
-    
-    NSMutableDictionary *setDict = [sets[setKey] mutableCopy];
-    if (!setDict) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": [NSString stringWithFormat:@"Set %@ not found", setKey],
-            @"step": @"set_not_found",
-            @"method": @"direct_plist",
-            @"available_sets": [sets allKeys]
-        } options:0 error:nil];
-        return response;
-    }
-    
-    NSMutableDictionary *network = [setDict[@"Network"] mutableCopy];
-    if (!network) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"No Network in set",
-            @"step": @"no_network",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    
-    NSMutableDictionary *services = [network[@"Service"] mutableCopy];
-    if (!services) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"No Service in Network",
-            @"step": @"no_services",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    
-    // 遍历服务，找到目标服务（优先 Wi-Fi，不要求 IPv4 存在）
-    NSString *targetServiceID = nil;
-    NSString *targetServiceName = nil;
-    NSMutableArray *serviceDebug = [NSMutableArray array];
-    for (NSString *serviceID in services) {
-        NSDictionary *serviceInfo = services[serviceID];
-        if (![serviceInfo isKindOfClass:[NSDictionary class]]) continue;
-        
-        NSDictionary *ipv4 = serviceInfo[@"IPv4"];
-        NSDictionary *interface = serviceInfo[@"Interface"];
-        NSString *hardwareType = interface[@"Type"];
-        NSString *devName = serviceInfo[@"UserDefinedName"] ?: @"";
-        
-        TVLog(@"HTTP Server: plist service %@ type=%@ name=%@ ipv4=%@", serviceID, hardwareType, devName, ipv4 ? @"yes" : @"no");
-        
-        [serviceDebug addObject:@{
-            @"id": serviceID,
-            @"type": hardwareType ?: @"(null)",
-            @"name": devName,
-            @"has_ipv4": ipv4 ? @YES : @NO,
-            @"keys": [serviceInfo allKeys]
-        }];
-        
-        BOOL isWiFi = [hardwareType isEqualToString:@"AirPort"] ||
-                      [hardwareType isEqualToString:@"Wi-Fi"] ||
-                      [devName.lowercaseString containsString:@"wi-fi"] ||
-                      [devName.lowercaseString containsString:@"wifi"];
-        
-        if (isWiFi) {
-            targetServiceID = serviceID;
-            targetServiceName = devName;
-            break;
-        }
-        if (!targetServiceID) {
-            targetServiceID = serviceID;
-            targetServiceName = devName;
-        }
-    }
-    
-    if (!targetServiceID) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"No network service found in preferences.plist",
-            @"step": @"find_service",
-            @"method": @"direct_plist",
-            @"services": [services allKeys],
-            @"service_details": serviceDebug
-        } options:0 error:nil];
-        return response;
-    }
-    
-    TVLog(@"HTTP Server: plist target service: %@ (%@)", targetServiceID, targetServiceName);
-    
-    // 修改 IPv4 配置
-    NSMutableDictionary *serviceInfo = [services[targetServiceID] mutableCopy];
-    NSMutableDictionary *ipv4 = [serviceInfo[@"IPv4"] mutableCopy];
-    if (!ipv4) {
-        ipv4 = [NSMutableDictionary dictionary];
-    }
-    
-    ipv4[@"method"] = enabled ? @"Manual" : @"DHCP";
-    if (enabled) {
-        ipv4[@"Router"] = router;
-        ipv4[@"Addresses"] = [NSMutableArray arrayWithObject:ip];
-        ipv4[@"SubnetMasks"] = [NSMutableArray arrayWithObject:mask];
-    } else {
-        // 切回 DHCP：移除手动配置项
-        [ipv4 removeObjectForKey:@"Router"];
-        [ipv4 removeObjectForKey:@"Addresses"];
-        [ipv4 removeObjectForKey:@"SubnetMasks"];
-    }
-    
-    serviceInfo[@"IPv4"] = ipv4;
-    services[targetServiceID] = serviceInfo;
-    network[@"Service"] = services;
-    setDict[@"Network"] = network;
-    
-    // 写回 Sets
-    NSMutableDictionary *setsMutable = [sets mutableCopy];
-    setsMutable[setKey] = setDict;
-    prefsDict[@"Sets"] = setsMutable;
-    
-    // 同时更新顶层 Network/Service（有些 iOS 版本读这里）
-    NSMutableDictionary *topNetwork = [prefsDict[@"Network"] mutableCopy];
-    if (topNetwork) {
-        NSMutableDictionary *topServices = [topNetwork[@"Service"] mutableCopy];
-        if (topServices) {
-            NSMutableDictionary *topService = [topServices[targetServiceID] mutableCopy];
-            if (topService) {
-                NSMutableDictionary *topIPv4 = [topService[@"IPv4"] mutableCopy] ?: [NSMutableDictionary dictionary];
-                topIPv4[@"method"] = enabled ? @"Manual" : @"DHCP";
-                if (enabled) {
-                    topIPv4[@"Router"] = router;
-                    topIPv4[@"Addresses"] = [NSMutableArray arrayWithObject:ip];
-                    topIPv4[@"SubnetMasks"] = [NSMutableArray arrayWithObject:mask];
-                } else {
-                    [topIPv4 removeObjectForKey:@"Router"];
-                    [topIPv4 removeObjectForKey:@"Addresses"];
-                    [topIPv4 removeObjectForKey:@"SubnetMasks"];
-                }
-                topService[@"IPv4"] = topIPv4;
-                topServices[targetServiceID] = topService;
-                topNetwork[@"Service"] = topServices;
-                prefsDict[@"Network"] = topNetwork;
-            }
-        }
-    }
-    
-    // 写入 plist 文件
-    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:prefsDict
-                                                                    format:NSPropertyListXMLFormat_v1_0
-                                                                   options:0
-                                                                     error:nil];
-    if (!plistData) {
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"Failed to serialize plist",
-            @"step": @"plist_serialize",
-            @"method": @"direct_plist"
-        } options:0 error:nil];
-        return response;
-    }
-    
-    // 尝试多种写入方式
-    NSError *writeError = nil;
-    int spawnRootCpResult = -999;  // 记录 spawnRoot cp 的退出码
-    BOOL writeOK = [plistData writeToFile:prefsPath options:NSDataWritingAtomic error:&writeError];
-    
-    if (!writeOK) {
-        TVLog(@"HTTP Server: NSData write failed: %@", writeError);
-        
-        // 方案2: C 级 open()/write()，可能绕过 Foundation 文件保护
-        const char *cPath = [prefsPath UTF8String];
-        
-        // 先 chmod 确保可写
-        chmod(cPath, 0644);
-        
-        int fd = open(cPath, O_WRONLY | O_TRUNC, 0644);
-        if (fd >= 0) {
-            ssize_t written = write(fd, [plistData bytes], [plistData length]);
-            close(fd);
-            if (written == (ssize_t)[plistData length]) {
-                writeOK = YES;
-                TVLog(@"HTTP Server: C-level write succeeded (%zd bytes)", written);
-            } else {
-                TVLog(@"HTTP Server: C-level write failed: written=%zd, expected=%lu, errno=%s", written, (unsigned long)[plistData length], strerror(errno));
-            }
+            // Save config for soft-lock timer + boot-time auto-apply
+            TVNCSaveStaticIPConfig(YES, ip, mask, router, serviceID, interface);
+            // Start the soft-lock timer
+            [TVNCHttpServer startStaticIPLockTimer];
         } else {
-            TVLog(@"HTTP Server: open() failed: errno=%s", strerror(errno));
-        }
-        
-        // 方案3: 写临时文件再用 NSFileManager 替换
-        if (!writeOK) {
-            NSString *tmpPath = @"/tmp/preferences.plist.tmp";
-            BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
-            if (tmpOK) {
-                // 用 NSFileManager copy 替换
-                NSFileManager *fm2 = [NSFileManager defaultManager];
-                [fm2 removeItemAtPath:prefsPath error:nil];
-                NSError *copyError = nil;
-                if ([fm2 copyItemAtPath:tmpPath toPath:prefsPath error:&copyError]) {
-                    NSDictionary *attrs = @{NSFilePosixPermissions: [NSNumber numberWithShort:0644]};
-                    [fm2 setAttributes:attrs ofItemAtPath:prefsPath error:nil];
-                    writeOK = YES;
-                    TVLog(@"HTTP Server: NSFileManager copy write succeeded");
-                } else {
-                    TVLog(@"HTTP Server: NSFileManager copy failed: %@", copyError);
-                }
-                unlink([tmpPath UTF8String]);
-            }
-        }
-        
-        // 方案4: spawnRoot cp - 用 posix_spawn 以 root 身份执行 cp，绕过沙盒限制
-        if (!writeOK) {
-            NSString *tmpPath = @"/tmp/preferences.plist.tmp";
-            BOOL tmpOK = [plistData writeToFile:tmpPath atomically:YES];
-            if (tmpOK) {
-                // 自动找到可用的 cp 和 chmod 路径
-                NSString *cpPath = nil;
-                for (NSString *p in @[@"/bin/cp", @"/usr/bin/cp"]) {
-                    if (access([p UTF8String], X_OK) == 0) { cpPath = p; break; }
-                }
-                NSString *chmodPath = nil;
-                for (NSString *p in @[@"/bin/chmod", @"/usr/bin/chmod"]) {
-                    if (access([p UTF8String], X_OK) == 0) { chmodPath = p; break; }
-                }
-                
-                if (cpPath) {
-                    TVLog(@"HTTP Server: trying spawnAsRoot cp with %@...", cpPath);
-                    spawnRootCpResult = spawnAsRoot(cpPath, @[@"-f", tmpPath, prefsPath]);
-                    TVLog(@"HTTP Server: spawnAsRoot cp exit code: %d", spawnRootCpResult);
-                    if (spawnRootCpResult == 0) {
-                        if (chmodPath) spawnAsRoot(chmodPath, @[@"644", prefsPath]);
-                        // 验证文件确实更新了
-                        struct stat verifySt;
-                        if (stat([prefsPath UTF8String], &verifySt) == 0 && verifySt.st_size == (off_t)plistData.length) {
-                            writeOK = YES;
-                            TVLog(@"HTTP Server: spawnRoot cp write succeeded (size=%lld)", verifySt.st_size);
-                        } else {
-                            TVLog(@"HTTP Server: spawnRoot cp verification failed - size=%lld expected=%lu", verifySt.st_size, (unsigned long)plistData.length);
-                        }
-                    }
-                } else {
-                    TVLog(@"HTTP Server: no cp command found on device");
-                    spawnRootCpResult = -999;
-                }
-                unlink([tmpPath UTF8String]);
-            } else {
-                TVLog(@"HTTP Server: failed to write temp file for spawnRoot cp");
-            }
+            // Clear config and stop timer
+            TVNCClearStaticIPConfig();
+            [TVNCHttpServer stopStaticIPLockTimer];
         }
     }
-    
-    if (!writeOK) {
-        // 获取文件权限信息用于调试
-        struct stat st;
-        NSString *statInfo = @"unknown";
-        if (stat([prefsPath UTF8String], &st) == 0) {
-            statInfo = [NSString stringWithFormat:@"mode=%o uid=%d gid=%d size=%lld", st.st_mode, st.st_uid, st.st_gid, st.st_size];
-        }
-        
-        response.statusCode = 500;
-        response.body = [NSJSONSerialization dataWithJSONObject:@{
-            @"success": @NO,
-            @"error": @"Failed to write preferences.plist",
-            @"error_detail": writeError ? [writeError localizedDescription] : [NSString stringWithFormat:@"errno=%s", strerror(errno)],
-            @"step": @"plist_write",
-            @"method": @"direct_plist",
-            @"path": prefsPath,
-            @"file_stat": statInfo,
-            @"data_size": @(plistData.length),
-            @"spawn_root_cp_exit": @(spawnRootCpResult)
-        } options:0 error:nil];
-        return response;
-    }
-    
-    TVLog(@"HTTP Server: preferences.plist written successfully");
-    
-    // 通知系统重新加载网络配置
-    // 使用 notify_post 通知 configd
-    int notifyResult = notify_post("com.apple.system.config");
-    TVLog(@"HTTP Server: notify_post com.apple.system.config = %d", notifyResult);
-    
-    // 也尝试 SCDynamicStoreNotifyValue（如果可用）
-    void *scDyn = sc ?: dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
-    if (scDyn) {
-        typedef void* SCDynamicStoreRef;
-        SCDynamicStoreRef (*pSCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, void*, void*) = 
-            (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(scDyn, "SCDynamicStoreCreate");
-        if (pSCDynamicStoreCreate) {
-            SCDynamicStoreRef store = pSCDynamicStoreCreate(NULL, CFSTR("TrollVNC"), NULL, NULL);
-            if (store) {
-                Boolean (*pSCDynamicStoreNotifyValue)(SCDynamicStoreRef, CFStringRef) =
-                    (Boolean (*)(SCDynamicStoreRef, CFStringRef))dlsym(scDyn, "SCDynamicStoreNotifyValue");
-                if (pSCDynamicStoreNotifyValue) {
-                    Boolean notifyOK = pSCDynamicStoreNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
-                    TVLog(@"HTTP Server: SCDynamicStoreNotifyValue = %d", notifyOK);
-                }
-                void (*pCFRelease)(CFTypeRef) = 
-                    (void (*)(CFTypeRef))dlsym(RTLD_DEFAULT, "CFRelease");
-                if (pCFRelease) pCFRelease((CFTypeRef)store);
-            }
-        }
-    }
-    
+
     response.statusCode = 200;
     response.body = [NSJSONSerialization dataWithJSONObject:@{
-        @"success": @YES,
+        @"success": @(success),
+        @"method": @"SCDynamicStore",
         @"enabled": @(enabled),
         @"ip": ip, @"mask": mask, @"router": router,
-        @"method": enabled ? @"Manual" : @"DHCP",
-        @"service": targetServiceID,
-        @"serviceName": targetServiceName ?: @"",
-        @"api": @"direct_plist",
-        @"notify_post": @(notifyResult),
-        @"plist_path": prefsPath,
-        @"backup": backupPath
+        @"serviceID": serviceID,
+        @"interface": interface,
+        @"serviceType": serviceType,
+        @"soft_lock": @(enabled && success),
+        @"config_saved": @(enabled && success),
+        @"timer_started": @(enabled && success),
+        @"apply_info": applyInfo
     } options:0 error:nil];
     return response;
 }
