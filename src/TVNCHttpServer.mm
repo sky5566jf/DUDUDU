@@ -260,6 +260,7 @@ static NSString * const kWebDAVHTMLBase64 =
 - (TVNCHttpResponse *)handlePing;
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleNetworkDebug;
+- (TVNCHttpResponse *)handleNetworkIpMethods:(NSDictionary *)query;
 
 @end
 
@@ -663,6 +664,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleNetworkDebug];
     } else if ([path isEqualToString:@"/api/network/test_helper"]) {
         return [self handleNetworkTestHelper];
+    } else if ([path isEqualToString:@"/api/network/ip_methods"]) {
+        return [self handleNetworkIpMethods:query];
     } else if ([path isEqualToString:@"/api/group/start"]) {
         return [self handleGroupStart:query];
     } else if ([path isEqualToString:@"/api/group/stop"]) {
@@ -5402,6 +5405,277 @@ static NSString *wsReadFrame(int sock) {
     result[@"spawnWorked"] = @(helperExit != -1);
     
     response.statusCode = 200;
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// GET /api/network/ip_methods - 诊断多种 IP 修改方案可行性
+- (TVNCHttpResponse *)handleNetworkIpMethods:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    response.contentType = @"application/json";
+    response.statusCode = 200;
+    
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"uid"] = @(getuid());
+    result[@"gid"] = @(getgid());
+    result[@"euid"] = @(geteuid());
+    
+    // ---- 1. 检查 preferences.plist 文件权限 ----
+    struct stat st;
+    const char *prefsPath = "/var/preferences/SystemConfiguration/preferences.plist";
+    if (stat(prefsPath, &st) == 0) {
+        result[@"prefs_mode"] = [NSString stringWithFormat:@"%o", st.st_mode & 0777];
+        result[@"prefs_uid"] = @(st.st_uid);
+        result[@"prefs_gid"] = @(st.st_gid);
+        result[@"prefs_size"] = @(st.st_size);
+        result[@"prefs_writable_by_us"] = @((st.st_mode & S_IWOTH) || 
+            (st.st_uid == getuid() && (st.st_mode & S_IWUSR)) ||
+            (st.st_gid == getgid() && (st.st_mode & S_IWGRP)));
+    } else {
+        result[@"prefs_stat_error"] = [NSString stringWithFormat:@"stat failed: %s", strerror(errno)];
+    }
+    
+    // 检查目录权限（是否可写）
+    const char *dirPath = "/var/preferences/SystemConfiguration";
+    if (stat(dirPath, &st) == 0) {
+        result[@"dir_mode"] = [NSString stringWithFormat:@"%o", st.st_mode & 0777];
+        result[@"dir_uid"] = @(st.st_uid);
+        result[@"dir_gid"] = @(st.st_gid);
+        result[@"dir_writable_by_us"] = @((st.st_mode & S_IWOTH) || 
+            (st.st_uid == getuid() && (st.st_mode & S_IWUSR)) ||
+            (st.st_gid == getgid() && (st.st_mode & S_IWGRP)));
+    }
+    
+    // ---- 2. 尝试 ipconfig set 命令 ----
+    // ipconfig 通过 configd IPC 通信，可能不需要 root
+    NSString *testIp = query[@"ip"] ?: @"192.69.0.78";
+    NSString *testMask = query[@"mask"] ?: @"255.255.255.0";
+    
+    // 先获取当前接口名
+    NSString *iface = query[@"interface"] ?: @"en0";
+    
+    NSMutableDictionary *ipconfigResult = [NSMutableDictionary dictionary];
+    
+    // 尝试 ipconfig getifaddr 看看命令是否存在
+    {
+        FILE *pipe = popen("/usr/sbin/ipconfig getifaddr en0 2>&1", "r");
+        if (pipe) {
+            char buf[256];
+            NSString *output = @"";
+            if (fgets(buf, sizeof(buf), pipe)) {
+                output = [NSString stringWithUTF8String:buf];
+            }
+            int exitCode = pclose(pipe);
+            ipconfigResult[@"getifaddr_output"] = output;
+            ipconfigResult[@"getifaddr_exit"] = @(exitCode);
+        } else {
+            ipconfigResult[@"getifaddr_error"] = @"popen failed";
+        }
+    }
+    
+    // 检查 ipconfig 路径
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *ipconfigPaths = @[@"/usr/sbin/ipconfig", @"/sbin/ipconfig", @"/usr/bin/ipconfig"];
+    for (NSString *p in ipconfigPaths) {
+        if ([fm fileExistsAtPath:p]) {
+            ipconfigResult[@"ipconfig_path"] = p;
+            break;
+        }
+    }
+    if (!ipconfigResult[@"ipconfig_path"]) {
+        ipconfigResult[@"ipconfig_path"] = @"not found";
+    }
+    
+    // 尝试 ipconfig set en0 MANUAL ip mask
+    if (![ipconfigResult[@"ipconfig_path"] isEqualToString:@"not found"]) {
+        NSString *ipconfigPath = ipconfigResult[@"ipconfig_path"];
+        NSString *cmd = [NSString stringWithFormat:@"%@ set %@ MANUAL %@ %@ 2>&1", 
+                         ipconfigPath, iface, testIp, testMask];
+        ipconfigResult[@"set_cmd"] = cmd;
+        
+        FILE *pipe = popen([cmd UTF8String], "r");
+        if (pipe) {
+            char buf[512];
+            NSMutableString *output = [NSMutableString string];
+            while (fgets(buf, sizeof(buf), pipe)) {
+                [output appendString:[NSString stringWithUTF8String:buf]];
+            }
+            int exitCode = pclose(pipe);
+            ipconfigResult[@"set_exit"] = @(exitCode);
+            ipconfigResult[@"set_output"] = output;
+            ipconfigResult[@"set_success"] = @(exitCode == 0);
+        } else {
+            ipconfigResult[@"set_error"] = @"popen failed";
+        }
+        
+        // 也尝试设置 router
+        NSString *routerCmd = [NSString stringWithFormat:@"%@ set %@ router %@ 2>&1",
+                              ipconfigPath, iface, query[@"router"] ?: @"192.69.0.1"];
+        FILE *rPipe = popen([routerCmd UTF8String], "r");
+        if (rPipe) {
+            char buf[256];
+            NSString *rOut = @"";
+            if (fgets(buf, sizeof(buf), rPipe)) {
+                rOut = [NSString stringWithUTF8String:buf];
+            }
+            int rExit = pclose(rPipe);
+            ipconfigResult[@"router_exit"] = @(rExit);
+            ipconfigResult[@"router_output"] = rOut;
+        }
+    }
+    
+    result[@"ipconfig"] = ipconfigResult;
+    
+    // ---- 3. 尝试 SCDynamicStore ----
+    NSMutableDictionary *scStoreResult = [NSMutableDictionary dictionary];
+    void *sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+    if (!sc) {
+        sc = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/Versions/Current/SystemConfiguration", RTLD_NOW);
+    }
+    
+    if (sc) {
+        typedef void* SCDynamicStoreRef;
+        SCDynamicStoreRef (*pSCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, void*, void*) =
+            (SCDynamicStoreRef (*)(CFAllocatorRef, CFStringRef, void*, void*))dlsym(sc, "SCDynamicStoreCreate");
+        CFPropertyListRef (*pSCDynamicStoreCopyValue)(SCDynamicStoreRef, CFStringRef) =
+            (CFPropertyListRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreCopyValue");
+        Boolean (*pSCDynamicStoreSetValue)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef) =
+            (Boolean (*)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCDynamicStoreSetValue");
+        Boolean (*pSCDynamicStoreAddTemporaryValue)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef) =
+            (Boolean (*)(SCDynamicStoreRef, CFStringRef, CFPropertyListRef))dlsym(sc, "SCDynamicStoreAddTemporaryValue");
+        CFArrayRef (*pSCDynamicStoreCopyKeyList)(SCDynamicStoreRef, CFStringRef) =
+            (CFArrayRef (*)(SCDynamicStoreRef, CFStringRef))dlsym(sc, "SCDynamicStoreCopyKeyList");
+        
+        scStoreResult[@"dlopen"] = @"ok";
+        scStoreResult[@"SCDynamicStoreCreate"] = pSCDynamicStoreCreate ? @"ok" : @"null";
+        scStoreResult[@"SCDynamicStoreCopyValue"] = pSCDynamicStoreCopyValue ? @"ok" : @"null";
+        scStoreResult[@"SCDynamicStoreSetValue"] = pSCDynamicStoreSetValue ? @"ok" : @"null";
+        scStoreResult[@"SCDynamicStoreAddTemporaryValue"] = pSCDynamicStoreAddTemporaryValue ? @"ok" : @"null";
+        
+        if (pSCDynamicStoreCreate) {
+            SCDynamicStoreRef store = pSCDynamicStoreCreate(NULL, CFSTR("TrollVNC-diag"), NULL, NULL);
+            scStoreResult[@"store_created"] = store ? @"yes" : @"no";
+            
+            if (store) {
+                // 读当前全局 IPv4 状态
+                if (pSCDynamicStoreCopyValue) {
+                    CFPropertyListRef val = pSCDynamicStoreCopyValue(store, CFSTR("State:/Network/Global/IPv4"));
+                    if (val) {
+                        scStoreResult[@"read_global_ipv4"] = (__bridge NSDictionary *)val;
+                        CFRelease(val);
+                    } else {
+                        scStoreResult[@"read_global_ipv4"] = @"null";
+                    }
+                    
+                    // 列出所有 Setup: 和 State: 键
+                    if (pSCDynamicStoreCopyKeyList) {
+                        CFArrayRef keys = pSCDynamicStoreCopyKeyList(store, CFSTR("State:/Network/Service/.*IPv4"));
+                        if (keys) {
+                            NSArray *keyArr = (__bridge NSArray *)keys;
+                            scStoreResult[@"state_ipv4_keys"] = keyArr;
+                            CFRelease(keys);
+                        }
+                        
+                        CFArrayRef setupKeys = pSCDynamicStoreCopyKeyList(store, CFSTR("Setup:/Network/Service/.*IPv4"));
+                        if (setupKeys) {
+                            NSArray *setupKeyArr = (__bridge NSArray *)setupKeys;
+                            scStoreResult[@"setup_ipv4_keys"] = setupKeyArr;
+                            CFRelease(setupKeys);
+                        }
+                    }
+                }
+                
+                // 尝试 AddTemporaryValue (可能不需要写权限)
+                if (pSCDynamicStoreAddTemporaryValue) {
+                    NSDictionary *testVal = @{
+                        @"Addresses": @[testIp],
+                        @"SubnetMasks": @[testMask],
+                        @"InterfaceName": iface
+                    };
+                    Boolean addOK = pSCDynamicStoreAddTemporaryValue(store, 
+                        CFSTR("State:/Network/Service/trollvnc-test/IPv4"),
+                        (__bridge CFPropertyListRef)testVal);
+                    scStoreResult[@"add_temp_value"] = @(addOK);
+                }
+                
+                // 尝试 SetValue (需要写权限)
+                if (pSCDynamicStoreSetValue) {
+                    NSDictionary *testVal = @{
+                        @"Addresses": @[testIp],
+                        @"SubnetMasks": @[testMask],
+                        @"InterfaceName": iface
+                    };
+                    Boolean setOK = pSCDynamicStoreSetValue(store,
+                        CFSTR("State:/Network/Service/trollvnc-test/IPv4"),
+                        (__bridge CFPropertyListRef)testVal);
+                    scStoreResult[@"set_value"] = @(setOK);
+                }
+                
+                CFRelease(store);
+            }
+        }
+    } else {
+        scStoreResult[@"dlopen"] = @"failed";
+    }
+    result[@"scdynamic_store"] = scStoreResult;
+    
+    // ---- 4. 尝试直接写 preferences.plist（确认失败）----
+    NSMutableDictionary *writeTest = [NSMutableDictionary dictionary];
+    @try {
+        NSString *testPath = @"/var/preferences/SystemConfiguration/.trollvnc_write_test";
+        NSString *testContent = @"test";
+        BOOL writeOK = [testContent writeToFile:testPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        writeTest[@"direct_write_test"] = @(writeOK);
+        if (writeOK) {
+            [fm removeItemAtPath:testPath error:nil];
+        }
+        
+        // 也测试写到目录
+        struct stat dirSt;
+        if (stat("/var/preferences/SystemConfiguration", &dirSt) == 0) {
+            writeTest[@"dir_mode"] = [NSString stringWithFormat:@"%o", dirSt.st_mode & 0777];
+            writeTest[@"can_create_file"] = @((dirSt.st_mode & S_IWOTH) || 
+                (dirSt.st_uid == getuid() && (dirSt.st_mode & S_IWUSR)) ||
+                (dirSt.st_gid == getgid() && (dirSt.st_mode & S_IWGRP)));
+        }
+    } @catch (NSException *e) {
+        writeTest[@"exception"] = e.description;
+    }
+    result[@"write_test"] = writeTest;
+    
+    // ---- 5. 尝试 ifconfig 命令 ----
+    NSMutableDictionary *ifconfigResult = [NSMutableDictionary dictionary];
+    {
+        // 检查 ifconfig 路径
+        NSArray *ifconfigPaths = @[@"/sbin/ifconfig", @"/usr/sbin/ifconfig", @"/usr/bin/ifconfig"];
+        for (NSString *p in ifconfigPaths) {
+            if ([fm fileExistsAtPath:p]) {
+                ifconfigResult[@"ifconfig_path"] = p;
+                break;
+            }
+        }
+        if (!ifconfigResult[@"ifconfig_path"]) {
+            ifconfigResult[@"ifconfig_path"] = @"not found";
+        }
+        
+        if (![ifconfigResult[@"ifconfig_path"] isEqualToString:@"not found"]) {
+            // 读取当前 ifconfig en0
+            NSString *cmd = [NSString stringWithFormat:@"%@ %@ 2>&1", ifconfigResult[@"ifconfig_path"], iface];
+            FILE *pipe = popen([cmd UTF8String], "r");
+            if (pipe) {
+                char buf[2048];
+                NSMutableString *output = [NSMutableString string];
+                while (fgets(buf, sizeof(buf), pipe)) {
+                    [output appendString:[NSString stringWithUTF8String:buf]];
+                }
+                pclose(pipe);
+                ifconfigResult[@"ifconfig_output"] = output;
+            }
+        }
+    }
+    result[@"ifconfig"] = ifconfigResult;
+    
+    result[@"success"] = @YES;
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
