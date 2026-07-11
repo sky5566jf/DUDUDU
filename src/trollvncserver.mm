@@ -84,7 +84,8 @@ static int gTvCtlPort = 0;        // port for control connections (0 = disabled)
 static NSString *gBindHost = nil; // optional bind address from CLI/config
 static NSString *gDesktopName = @"TrollVNC";
 static BOOL gViewOnly = NO;
-static double gKeepAliveSec = 0.0; // 15..86400
+static double gKeepAliveSec = 15.0; // default 15s ON (keeps display awake during active sessions); 0=off, clamp 15..300
+static volatile time_t gLastFrameProduced = 0; // v3.83: timestamp of last produced frame (frame-liveness watchdog)
 static BOOL gClipboardEnabled = YES;
 static BOOL gIsDaemonMode = NO; // set when launched with -daemon
 
@@ -360,7 +361,7 @@ static void printUsageAndExit(const char *prog) {
     fprintf(stderr, "  -c port    Client management TCP port (0=off, default: 0)\n");
     fprintf(stderr, "  -n name    Desktop name (default: %s)\n", [gDesktopName UTF8String]);
     fprintf(stderr, "  -v         View-only (ignore input)\n");
-    fprintf(stderr, "  -A sec     Keep-alive interval to prevent sleep; only when clients > 0 (15..86400, 0=off)\n\n");
+    fprintf(stderr, "  -A sec     Keep-alive interval to prevent sleep; only when clients > 0 (default 15; 15..300, 0=off)\n\n");
 
     fprintf(stderr, "Display/Perf:\n");
     fprintf(stderr, "  -s scale   Output scale 0<s<=1 (default: %.2f)\n", gScale);
@@ -2336,6 +2337,10 @@ NS_INLINE void unlockAllClientsBlocking(void) {
 }
 
 static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
+    // v3.83: mark liveness — this is called on every CADisplayLink tick while the
+    // screen is on, so a stale value means the display link paused (screen sleep)
+    // or the main thread is frozen. The frame-liveness watchdog relies on this.
+    gLastFrameProduced = time(NULL);
 
 #if DEBUG
     // Perf: overall start timestamp
@@ -5098,6 +5103,47 @@ static void tvStopRfbEventThread(void) {
     }
 }
 
+#pragma mark - Frame-liveness watchdog (iOS 16 long-session hardening)
+
+// v3.83: The existing supervisors (launchd KeepAlive + trollvncmanager TRWatchDog)
+// only restart the process when it *exits*. They cannot detect a process that is
+// still alive but no longer producing frames — e.g. the device sleeping and pausing
+// CADisplayLink, or a main-thread freeze inside rfbRunEventLoop. This GCD timer runs
+// on a background queue (independent of the main thread) so it still fires even if
+// the main thread is wedged. If no frame has been produced while a client is connected
+// for longer than the threshold, we exit(0) and let the supervisor relaunch us (and,
+// with default KeepAlive on, the display wakes back up).
+#define TV_FRAME_LIVENESS_TIMEOUT_SEC 60
+
+static void installFrameLivenessWatchdog(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+        dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, q);
+        if (!timer) {
+            TVLog(@"[watchdog] failed to create timer; frame-liveness watchdog disabled");
+            return;
+        }
+        // Check every 10s; leeway 5s so we don't wake the CPU too aggressively.
+        dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC),
+                                  10 * NSEC_PER_SEC, 5 * NSEC_PER_SEC);
+        dispatch_source_set_event_handler(timer, ^{
+            if (gClientCount <= 0) return;        // no session in progress -> nothing to mirror
+            if (gLastFrameProduced <= 0) return;  // haven't produced a frame yet
+            time_t now = time(NULL);
+            long stalled = (long)(now - gLastFrameProduced);
+            if (stalled > TV_FRAME_LIVENESS_TIMEOUT_SEC) {
+                TVLog(@"[watchdog] no frame produced for %lds with %d client(s) connected; "
+                       "capture likely stalled (screen sleep / main-thread freeze). "
+                       "Exiting for supervised restart.", stalled, gClientCount);
+                exit(0);
+            }
+        });
+        dispatch_resume(timer);
+        TVLog(@"[watchdog] frame-liveness watchdog installed (timeout=%ds)", TV_FRAME_LIVENESS_TIMEOUT_SEC);
+    });
+}
+
 static void initializeAndRunRfbServer(void) {
     TVLog(@"initializeAndRunRfbServer: BEFORE rfbInitServer - port=%d, ipv6port=%d, httpPort=%d, http6Port=%d, httpDir=%s",
           gScreen->port, gScreen->ipv6port, gScreen->httpPort, gScreen->http6Port,
@@ -5106,6 +5152,9 @@ static void initializeAndRunRfbServer(void) {
     TVLog(@"VNC server initialized on port %d, %dx%d, name '%@'", gPort, gWidth, gHeight, gDesktopName);
     TVLog(@"initializeAndRunRfbServer: AFTER rfbInitServer - listenSock=%d, listen6Sock=%d, httpListenSock=%d, httpListen6Sock=%d",
           gScreen->listenSock, gScreen->listen6Sock, gScreen->httpListenSock, gScreen->httpListen6Sock);
+
+    // v3.83: install frame-liveness watchdog (guards against silent capture stalls)
+    installFrameLivenessWatchdog();
 
     if (isRepeaterEnabled()) {
         static CFTimeInterval sRetryInterval = 0.0;

@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.83] – 2026-07-12
+
+### Fixed
+- **iOS 16 长时 noVNC 投屏服务假死**: 长时无人操作投屏时，设备按自动锁定熄屏，CADisplayLink 暂停 → 不再产帧 → 画面定格且监管层（launchd KeepAlive / trollvncmanager TRWatchDog）因进程仍存活而无法自愈。
+  - **默认开启防休眠保活**: `gKeepAliveSec` 默认值由 `0.0`（关）改为 `15.0`，在有客户端连接时周期性发送 `ACUnlock` 消费者事件重置 iOS 闲置计时器，使显示保持常亮。仅在 `clients > 0` 时生效，无客户端时设备可正常休眠。
+  - **新增帧存活探针（watchdog）**: 在后台 GCD 队列上运行独立定时器，与主线程解耦——即便主线程卡死也能触发。当存在客户端连接且超过 60s 未成功产帧时，主动 `exit(0)` 退出，交由监管层重启（配合默认防休眠，重启后显示唤醒、恢复产帧），将“永久假死”变为“可自愈”。
+
 ## [3.44] – 2026-07-09
 
 ### Fixed
