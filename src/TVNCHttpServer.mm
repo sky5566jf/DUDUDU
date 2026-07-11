@@ -5920,11 +5920,21 @@ static NSDictionary *TVNCFindEthernetService(void) {
         NSDictionary *prefs = [NSDictionary dictionaryWithContentsOfFile:prefsPath];
         if (!prefs) continue;
 
+        // Top-level NetworkServices dictionary (iOS stores actual service data here)
+        NSDictionary *networkServices = prefs[@"NetworkServices"];
+        if (![networkServices isKindOfClass:[NSDictionary class]]) networkServices = nil;
+
         NSString *currentSet = prefs[@"CurrentSet"];
         if (!currentSet) continue;
 
+        // CurrentSet is typically "/Sets/UUID" — strip prefix to get UUID key
+        NSString *setKey = currentSet;
+        if ([setKey hasPrefix:@"/Sets/"]) {
+            setKey = [setKey substringFromIndex:@"/Sets/".length];
+        }
+
         NSDictionary *sets = prefs[@"Sets"];
-        NSDictionary *currentSetDict = sets ? sets[currentSet] : nil;
+        NSDictionary *currentSetDict = sets ? sets[setKey] : nil;
         NSDictionary *network = currentSetDict ? currentSetDict[@"Network"] : nil;
         NSDictionary *services = network ? network[@"Service"] : nil;
         if (!services || ![services isKindOfClass:[NSDictionary class]]) continue;
@@ -5936,8 +5946,14 @@ static NSDictionary *TVNCFindEthernetService(void) {
         NSString *ethType = nil, *wifiType = nil;
 
         for (NSString *svcID in services) {
-            NSDictionary *svc = services[svcID];
-            if (![svc isKindOfClass:[NSDictionary class]]) continue;
+            // Service entries in Sets may be __LINK__ references to /NetworkServices/UUID
+            // Try to get actual service data from top-level NetworkServices
+            NSDictionary *svc = networkServices[svcID];
+            if (!svc || ![svc isKindOfClass:[NSDictionary class]]) {
+                // Fallback: service data might be inline in Sets
+                svc = services[svcID];
+                if (![svc isKindOfClass:[NSDictionary class]]) continue;
+            }
 
             NSDictionary *iface = svc[@"Interface"];
             if (![iface isKindOfClass:[NSDictionary class]]) continue;
@@ -6071,48 +6087,26 @@ static BOOL TVNCApplyStaticIPViaSCDynamicStore(BOOL enabled, NSString *ip, NSStr
             [newIPv4 removeObjectForKey:@"Router"];
         }
 
-        // Write Setup key (persistent layer)
+        // v3.80: Only write Setup key — State key write + notify_post triggers
+        // configd network reset, which breaks connectivity. Setup key is
+        // non-destructive: configd reads it when configuring the interface.
         Boolean setupOK = pSetValue(store, (__bridge CFStringRef)setupKey, (__bridge CFPropertyListRef)newIPv4);
 
-        // Write State key (immediate runtime effect)
+        // Do NOT write State key — it causes configd to reset the network interface
+        // Do NOT call notify_post or SCDynamicStoreNotifyValue — triggers configd reconfiguration
         Boolean stateOK = false;
-        if (enabled) {
-            NSMutableDictionary *stateIPv4 = [NSMutableDictionary dictionary];
-            stateIPv4[@"Addresses"] = @[ip];
-            stateIPv4[@"SubnetMasks"] = @[mask];
-            if (interface.length > 0) {
-                stateIPv4[@"InterfaceName"] = interface;
-            }
-            if (router.length > 0) {
-                stateIPv4[@"Router"] = router;
-            }
-            stateOK = pSetValue(store, (__bridge CFStringRef)stateKey, (__bridge CFPropertyListRef)stateIPv4);
-        } else {
-            if (pRemoveValue) {
-                stateOK = pRemoveValue(store, (__bridge CFStringRef)stateKey);
-            }
-        }
-
-        // Notify
-        Boolean notifyGlobal = false, notifySetup = false;
-        if (pNotifyValue) {
-            notifyGlobal = pNotifyValue(store, CFSTR("State:/Network/Global/IPv4"));
-            notifySetup = pNotifyValue(store, (__bridge CFStringRef)setupKey);
-        }
-        notify_post("com.apple.system.config");
 
         success = setupOK;
 
         if (outInfo) {
             outInfo[@"setup_write"] = @(setupOK);
             outInfo[@"state_write"] = @(stateOK);
-            outInfo[@"notify_global"] = @(notifyGlobal);
-            outInfo[@"notify_setup"] = @(notifySetup);
             outInfo[@"configMethod"] = newIPv4[@"ConfigMethod"];
             outInfo[@"setupKey"] = setupKey;
+            outInfo[@"note"] = @"Setup-only (v3.80): State key write disabled to prevent network reset";
         }
 
-        TVLog(@"StaticIP: SCDynamicStore apply svc=%@ iface=%@ setup=%d state=%d", serviceID, interface, setupOK, stateOK);
+        TVLog(@"StaticIP: SCDynamicStore apply svc=%@ iface=%@ setup=%d (state key skipped)", serviceID, interface, setupOK);
     }
 
     CFRelease(store);
@@ -6149,7 +6143,7 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
             NSString *currentIP = [addrs[0] isKindOfClass:[NSString class]] ? addrs[0] : [addrs[0] description];
             matches = [currentIP isEqualToString:expectedIP];
             if (!matches) {
-                TVLog(@"StaticIP: IP mismatch! current=%@ expected=%@ → re-applying", currentIP, expectedIP);
+                TVLog(@"StaticIP: IP mismatch! current=%@ expected=%@ (read-only check)", currentIP, expectedIP);
             }
         }
         CFRelease(valRef);
@@ -6189,17 +6183,19 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
         return;
     }
 
-    // Check if already correct (skip re-apply if matching)
+    // v3.80: Timer is READ-ONLY — only check if IP matches, do NOT write
+    // SCDynamicStore. Writing State key + notify_post triggers configd to
+    // reset the network interface, causing permanent connectivity loss.
     if (TVNCCheckStaticIPMatches(serviceID, ip)) {
         return; // IP is correct, no action needed
     }
 
-    TVLog(@"StaticIP: re-applying static IP (ip=%@ svc=%@)", ip, serviceID);
-    NSMutableDictionary *info = [NSMutableDictionary dictionary];
-    TVNCApplyStaticIPViaSCDynamicStore(YES, ip, mask, router, serviceID, interface, info);
+    // IP mismatch detected — log only, do NOT re-apply
+    TVLog(@"StaticIP: IP mismatch detected (expected=%@) — monitoring only, not re-applying to avoid network reset", ip);
 }
 
-// Start the soft-lock timer (10 second interval)
+// Start the monitoring timer (10 second interval, read-only)
+// v3.80: Timer only checks and logs — does NOT write SCDynamicStore
 + (void)startStaticIPLockTimer {
     if (gStaticIPLockTimer) return; // already running
 
@@ -6230,7 +6226,7 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
     if (gStaticIPLockTimer) {
         dispatch_source_cancel(gStaticIPLockTimer);
         gStaticIPLockTimer = NULL;
-        TVLog(@"StaticIP: soft-lock timer stopped");
+        TVLog(@"StaticIP: monitoring timer stopped");
     }
 }
 
@@ -6246,8 +6242,29 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
     // Also detect current Ethernet service
     NSDictionary *ethSvc = TVNCFindEthernetService();
 
+    // Convert config to JSON-safe dictionary (NSDate is not JSON-serializable)
+    NSMutableDictionary *jsonConfig = [NSMutableDictionary dictionary];
+    if (config) {
+        for (NSString *key in config) {
+            id val = config[key];
+            if ([val isKindOfClass:[NSDate class]]) {
+                // Convert NSDate to ISO string
+                static NSDateFormatter *fmt = nil;
+                static dispatch_once_t onceToken;
+                dispatch_once(&onceToken, ^{
+                    fmt = [[NSDateFormatter alloc] init];
+                    [fmt setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss'Z"];
+                    [fmt setTimeZone:[NSTimeZone timeZoneWithAbbreviation:@"UTC"]];
+                });
+                jsonConfig[key] = [fmt stringFromDate:val];
+            } else {
+                jsonConfig[key] = val;
+            }
+        }
+    }
+
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    result[@"config"] = config ?: @{};
+    result[@"config"] = jsonConfig;
     result[@"timer_running"] = @(timerRunning);
     result[@"config_path"] = kStaticIPLockConfigPath;
     result[@"detected_service"] = ethSvc ?: @{};
@@ -6257,7 +6274,7 @@ static BOOL TVNCCheckStaticIPMatches(NSString *serviceID, NSString *expectedIP) 
 }
 
 // GET /api/network/static_ip?enabled=1&ip=x&mask=x&router=x
-// v3.79: 以太网优先 + 持久化 + 软锁定
+// v3.80: Setup-only write (no State key, no notify_post) + read-only timer
 - (TVNCHttpResponse *)handleNetworkStaticIP:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     response.contentType = @"application/json";
