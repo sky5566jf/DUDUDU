@@ -1,0 +1,52 @@
+{
+  "device": "192.69.0.99",
+  "start": "2026-07-12 20:09:01",
+  "phases": {
+    "T1_idle_keepalive": {
+      "restarts": 0,
+      "down_events": 0,
+      "max_latency_ms": 37.94550895690918,
+      "min_latency_ms": 16.377925872802734,
+      "shots_served": 60,
+      "start": 1783858141.8013425,
+      "client_died": false,
+      "duration_s": 181.8,
+      "pass": true
+    },
+    "T2_freeze_selfheal": {
+      "lock_sent": 1783858323.6671548,
+      "process_died": false,
+      "died_ts": null,
+      "recovered": false,
+      "alive_again_ts": null,
+      "downtime_s": null,
+      "start": 1783858323.6092045,
+      "pass": false
+    },
+    "T3_client_disconnect": {
+      "start": 1783858480.3384092,
+      "down_events": 0,
+      "alive_end": true,
+      "pass": true,
+      "duration_s": 30.0
+    }
+  },
+  "verdict": "FAIL — 见各阶段明细",
+  "_log": [
+    "[20:09:01] === 开始 v3.83 noVNC 稳定性完整测试 @ 192.69.0.99 ===",
+    "[20:09:01] ✓ 设备在线，/api/status = {'status': 'running', 'httpPort': 8182, 'version': '3.83'}",
+    "[20:09:01] ✓ 基线截图已存 shot_baseline.jpg (16497 bytes)",
+    "[20:09:01] --- T1: 空闲防休眠测试 (客户端已连, 不锁屏, 180s) ---",
+    "[20:09:01] RFB 客户端已连接 -> gClientCount 应 >0 | 分辨率 384x681 名称 'Matisu'",
+    "[20:12:03] T1 结论: restarts=0 client_died=False shots=60 latency=[16,38]ms -> PASS",
+    "[20:12:03] --- T2: 冻结自愈测试 (锁屏注入冻结, 客户端保持连接) ---",
+    "[20:12:03]   已发送 /api/screen/lock -> HTTP 200 {\"success\":true,\"message\":\"Screen locked\"}",
+    "[20:14:33]   ✗ 锁屏后 150s 内未检测到进程退出 -> watchdog 未触发(gClientCount 可能未>0 或逻辑异常)",
+    "[20:14:35]   已发送 /api/screen/unlock -> HTTP 200 {\"success\":true,\"message\":\"Screen unlocked\"}",
+    "[20:14:40]   恢复后截图 shot_recovered.jpg (18735 bytes)",
+    "[20:14:40] --- T3: 客户端优雅断开测试 ---",
+    "[20:14:40]   已关闭 RFB 客户端连接",
+    "[20:15:10] T3 结论: alive_end=True down_events=0 -> PASS",
+    "[20:15:10] === 总判定: FAIL — 见各阶段明细 ==="
+  ]
+}

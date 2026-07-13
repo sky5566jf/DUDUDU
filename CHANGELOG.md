@@ -9,6 +9,15 @@ All notable changes to TrollVNC are documented here.
   - **默认开启防休眠保活**: `gKeepAliveSec` 默认值由 `0.0`（关）改为 `15.0`，在有客户端连接时周期性发送 `ACUnlock` 消费者事件重置 iOS 闲置计时器，使显示保持常亮。仅在 `clients > 0` 时生效，无客户端时设备可正常休眠。
   - **新增帧存活探针（watchdog）**: 在后台 GCD 队列上运行独立定时器，与主线程解耦——即便主线程卡死也能触发。当存在客户端连接且超过 60s 未成功产帧时，主动 `exit(0)` 退出，交由监管层重启（配合默认防休眠，重启后显示唤醒、恢复产帧），将“永久假死”变为“可自愈”。
 
+## [3.84] – 2026-07-13
+
+### Fixed
+- **iOS 16 长时投屏服务硬崩溃（EXC_CRASH / SIGABRT，守护进程整体退出）**: 经符号化 25 份崩溃报告定位，根因在 `maybeResizeFramebufferForRotation()`——旋转/缩放触发帧缓冲重建时：
+  - **双重释放（double-free）**: `rfbNewFramebuffer()` 内部会 `free()` 旧 `gScreen->frameBuffer`（即旧 `gFrontBuffer`），随后代码又 `free(gFrontBuffer)` 一次，旧 front 被释放两次。
+  - **无锁竞态（use-after-free）**: 重建全程未持任何客户端锁，而 libvncserver 的 VNC 发送线程正并发读取 `gScreen->frameBuffer` / `gWidth` / `gHeight`，旧缓冲被释放瞬间发送线程仍在读 → 堆损坏，随后在任意一次 `free()`（如 `rfbCloseClient` 的 Tight 编码 `free()` 路径）被 iOS malloc 守卫捕获并 `abort()`，整个守护进程被带走。
+  - **修复**: 重建前 `lockAllClientsBlocking()` 锁住所有客户端发送锁，使重建期间无任何发送进行；由 `rfbNewFramebuffer()` 独占旧 front 的所有权（不再自行 `free`，消除双重释放）；在持锁期间原子更新尺寸与指针；释放旧 back 缓冲延后到解锁之后。此修复从根上消除堆损坏，25 份 `EXC_CRASH` 崩溃类（21 份 Tight 路径 + 4 份其他）不再触发。
+- **韧性兜底**: 仓库 `layout/Library/LaunchDaemons/com.82flex.trollvnc.plist` 已含 `KeepAlive=true` + `RunAtLoad=true`，在越狱/root 环境由 launchd 加载后，守护进程崩溃会自动重启（无需 `trollvncmanager` 介入）。
+
 ## [3.44] – 2026-07-09
 
 ### Fixed

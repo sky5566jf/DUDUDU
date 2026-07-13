@@ -2116,6 +2116,11 @@ NS_INLINE void alignDimensions(int rawW, int rawH, int *alignedW, int *alignedH)
 }
 
 // Resize framebuffer according to rotation (0/180 keep WxH from src, 90/270 swap), then apply scale
+// Forward declarations (defined later in this file) — needed so the resize
+// path below can serialize against the VNC send threads.
+static inline void lockAllClientsBlocking(void);
+static inline void unlockAllClientsBlocking(void);
+
 NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
     // Source capture size (portrait-orientated)
     int srcW = gSrcWidth;
@@ -2145,31 +2150,42 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
         exit(EXIT_FAILURE);
     }
 
-    // Swap buffers into screen & notify clients
+    // --- Thread-safe resize ---
+    // The VNC send thread (libvncserver) reads gScreen->frameBuffer / gWidth /
+    // gHeight while building a framebuffer update. Resizing must therefore
+    // happen with ALL client send mutexes held so no update is mid-flight;
+    // otherwise the send thread reads a freed / partially-swapped buffer
+    // (use-after-free -> heap corruption -> abort() later in an unrelated
+    // free() such as rfbCloseClient). This race was the root cause of the
+    // periodic EXC_CRASH/SIGABRT that took down the whole daemon.
+    lockAllClientsBlocking();
+
+    // rfbNewFramebuffer() TAKES OWNERSHIP of the previous gScreen->frameBuffer
+    // (which is the current gFrontBuffer) and frees it internally. We must NOT
+    // free gFrontBuffer ourselves afterwards — that would be a double-free and
+    // is exactly what corrupted the heap before this fix. Only free the old
+    // back buffer, which we own and libvncserver never references.
+    void *oldFront = gFrontBuffer;
+    void *oldBack = gBackBuffer;
+
+    if (gScreen) {
+        // Update server with new framebuffer (this frees the old front buffer)
+        rfbNewFramebuffer(gScreen, (char *)newFront, outW, outH, 8, 3, gBytesPerPixel);
+        // Restore BGRA little-endian channel layout (R shift=16, G=8, B=0)
+        gScreen->serverFormat.redShift = 16;
+        gScreen->serverFormat.greenShift = 8;
+        gScreen->serverFormat.blueShift = 0;
+        gScreen->paddedWidthInBytes = outW * (int)gBytesPerPixel;
+    }
+
+    // Update dimensions + pointers ONLY while clients are locked, so the send
+    // thread can never observe a mismatched (buffer, width, height) tuple.
     gWidth = outW;
     gHeight = outH;
     gFBSize = newFBSize;
-
-    if (gScreen) {
-        // Update server with new framebuffer
-        rfbNewFramebuffer(gScreen, (char *)newFront, gWidth, gHeight, 8, 3, gBytesPerPixel);
-        // Restore BGRA little-endian channel layout (R shift=16, G=8, B=0)
-        int bps = 8;
-        gScreen->serverFormat.redShift = bps * 2;   // 16
-        gScreen->serverFormat.greenShift = bps * 1; // 8
-        gScreen->serverFormat.blueShift = 0;        // 0
-        gScreen->paddedWidthInBytes = gWidth * gBytesPerPixel;
-    }
-
-    // Free old buffers and store new pointers
-    if (gFrontBuffer)
-        free(gFrontBuffer);
-    if (gBackBuffer)
-        free(gBackBuffer);
     gFrontBuffer = newFront;
     gBackBuffer = newBack;
-
-    // Keep gScreen->frameBuffer in sync (rfbNewFramebuffer already did, but ensure local)
+    // Keep gScreen->frameBuffer in sync with the new front buffer
     if (gScreen)
         gScreen->frameBuffer = (char *)gFrontBuffer;
 
@@ -2180,6 +2196,19 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
         memset(gPendingDirty, 0, gTileCount);
 
     gHasPending = NO;
+
+    unlockAllClientsBlocking();
+
+    // Free the old back buffer AFTER releasing the locks. It is ours (never
+    // handed to libvncserver), so freeing it here cannot race a send. The old
+    // front buffer was already freed inside rfbNewFramebuffer() above.
+    if (oldBack)
+        free(oldBack);
+    // If gScreen was NULL (resize before server init), libvncserver did not take
+    // ownership of the old front buffer, so free it ourselves to avoid a leak.
+    if (gScreen == NULL && oldFront)
+        free(oldFront);
+
     TVLog(@"Resize: framebuffer changed to %dx%d (rotQ=%d, scale=%.3f)", gWidth, gHeight, rotQ, gScale);
 }
 
