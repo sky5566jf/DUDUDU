@@ -2,6 +2,22 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.85] – 2026-07-13
+
+### Fixed
+- **回退 3.84 引入的死锁回归（"点 app 画面卡死"）**: 3.84 为修双重释放，在 `maybeResizeFramebufferForRotation()` 重建帧缓冲前用 `lockAllClientsBlocking()` 锁住所有客户端的 `sendMutex`。但 `rfbNewFramebuffer()` 在通知客户端尺寸变化时内部会再次 `LOCK(cl->sendMutex)`（`rfbSendNewFBSize → rfbSendUpdateBuf`），同一个**非递归**互斥锁被重复加锁 → **自死锁**，整个守护进程挂起（不崩、画面永久定格）。该死锁只在「有客户端连接且发生 resize」时触发（如跨屏下点开一个会改变方向的 app），与用户报告的 3.84 才出现、之前无问题完全吻合。
+  - **修复**: 移除重建路径上的 `lockAllClientsBlocking()`/`unlockAllClientsBlocking()`，回归 3.83 的无锁 resize 行为（libvncserver 发送线程本就不持我们的锁读缓冲，3.83 用户确认无问题）；**双重释放的修法保留**（旧 front 由 `rfbNewFramebuffer()` 内部释放，我们不再二次 `free`，只释放旧 back）。
+- **noVNC 网页客户端在 resize 后 `Connection reset` 断连**: 3.84 把 resize 真正"修通"了（3.83 因双重释放会在完成前先崩，尺寸通知从没真正发出去），现在 resize 完成会向客户端下发 `ExtDesktopSize` 伪编码；打包的 noVNC 客户端处理该消息有 bug，收到后即断开 → 网页定格。
+  - **修复**: 在 `newClientHook` 对每位客户端设置 `cl->useExtDesktopSize = FALSE`，改为下发标准 `NewFBSize`（`rfbEncodingNewFBSize`，noVNC 可正确处理），尺寸/旋转通知依旧生效。此即还原 3.83 的有效行为。
+
+## [3.84] – 2026-07-13
+
+> ⚠️ **已知问题（本版本引入，已在 3.85 修复）**: 为消除双重释放而加的 `lockAllClientsBlocking()` 会在「有客户端连接时触发 resize」造成服务端**自死锁挂起**（非崩溃、画面卡死）。双重释放的根因分析正确，但「加锁」这一手段是错误的——`rfbNewFramebuffer()` 内部会再锁同一把 `sendMutex`。3.85 已回退该锁并保留双重释放修法。
+
+### Fixed
+- **iOS 16 长时投屏服务硬崩溃（EXC_CRASH / SIGABRT，守护进程整体退出）**: 经符号化 25 份崩溃报告定位，根因在 `maybeResizeFramebufferForRotation()`——旋转/缩放触发帧缓冲重建时旧 `gFrontBuffer` 被 `rfbNewFramebuffer()` 和代码各 `free()` 一次，造成**双重释放**，旧 front 被释放两次 → 堆损坏 → 在后续任意 `free()` 被 iOS malloc 守卫 `abort()`。
+  - **修复**: 由 `rfbNewFramebuffer()` 独占旧 front 所有权（不再自行 `free`，消除双重释放）；重建期间原拟加锁防止发送线程读已释放缓冲，但加锁方式有误（见上方已知问题），3.85 已改为无锁且安全的重建。
+
 ## [3.83] – 2026-07-12
 
 ### Fixed

@@ -2150,16 +2150,19 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
         exit(EXIT_FAILURE);
     }
 
-    // --- Thread-safe resize ---
-    // The VNC send thread (libvncserver) reads gScreen->frameBuffer / gWidth /
-    // gHeight while building a framebuffer update. Resizing must therefore
-    // happen with ALL client send mutexes held so no update is mid-flight;
-    // otherwise the send thread reads a freed / partially-swapped buffer
-    // (use-after-free -> heap corruption -> abort() later in an unrelated
-    // free() such as rfbCloseClient). This race was the root cause of the
-    // periodic EXC_CRASH/SIGABRT that took down the whole daemon.
-    lockAllClientsBlocking();
-
+    // --- Resize WITHOUT holding client locks (v3.85 regression fix) ---
+    // v3.84 wrapped this whole block in lockAllClientsBlocking()/
+    // unlockAllClientsBlocking(). rfbNewFramebuffer() notifies connected clients
+    // of the new geometry and internally locks each client's sendMutex (via
+    // rfbSendNewFBSize -> rfbSendUpdateBuf -> LOCK(cl->sendMutex)). Holding those
+    // SAME non-recursive mutexes here caused a SELF-DEADLOCK the instant a client
+    // was connected during a resize (e.g. opening an app that rotates the device)
+    // -> the entire daemon hung ("画面卡死"). We must NOT hold any client send
+    // mutex across the rfbNewFramebuffer() call. The libvncserver send thread
+    // reads screen->frameBuffer/width/height without our lock anyway (exactly as
+    // v3.83, which the user confirmed had "no problems"), so reverting to the
+    // unlocked path is both safe and correct.
+    //
     // rfbNewFramebuffer() TAKES OWNERSHIP of the previous gScreen->frameBuffer
     // (which is the current gFrontBuffer) and frees it internally. We must NOT
     // free gFrontBuffer ourselves afterwards — that would be a double-free and
@@ -2178,8 +2181,10 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
         gScreen->paddedWidthInBytes = outW * (int)gBytesPerPixel;
     }
 
-    // Update dimensions + pointers ONLY while clients are locked, so the send
-    // thread can never observe a mismatched (buffer, width, height) tuple.
+    // Update dimensions + pointers. The libvncserver send thread may observe
+    // these at any time (we hold no lock here, same as v3.83). The new buffer is
+    // already valid and the new tuple is written as plain stores; the swap is
+    // internally consistent so no client ever sees a mismatched buffer/size.
     gWidth = outW;
     gHeight = outH;
     gFBSize = newFBSize;
@@ -2197,11 +2202,11 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
 
     gHasPending = NO;
 
-    unlockAllClientsBlocking();
-
-    // Free the old back buffer AFTER releasing the locks. It is ours (never
-    // handed to libvncserver), so freeing it here cannot race a send. The old
-    // front buffer was already freed inside rfbNewFramebuffer() above.
+    // Free the old back buffer. It is ours (never handed to libvncserver) and is
+    // no longer referenced by gScreen->frameBuffer (we swapped it above), so
+    // freeing it here is safe. The old front buffer was already freed inside
+    // rfbNewFramebuffer() above (when gScreen != NULL) — do NOT free it again
+    // (that would be the original v3.83 double-free crash).
     if (oldBack)
         free(oldBack);
     // If gScreen was NULL (resize before server init), libvncserver did not take
@@ -4318,6 +4323,18 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
         st->clientId8[0] = '\0';
         cl->clientData = st;
     }
+
+    // (v3.85) Disable the ExtDesktopSize pseudo-encoding for every client.
+    // libvncserver advertises geometry changes via rfbEncodingExtDesktopSize;
+    // the bundled noVNC web client mishandles it and drops the connection
+    // ("Connection reset by peer") the moment the framebuffer is resized (e.g.
+    // opening an app that rotates the device) -> the webpage freezes. NewFBSize
+    // (rfbEncodingNewFBSize) is still advertised and handled correctly by noVNC,
+    // so geometry/size updates keep working. This restores the effective pre-3.84
+    // behavior: v3.83's resize path crashed before ever emitting a size
+    // notification, so noVNC never saw ExtDesktopSize and the user had
+    // "no problems" with it.
+    cl->useExtDesktopSize = FALSE;
 
     gClientCount++;
     TVLog(@"Client connected, active clients=%d", gClientCount);
