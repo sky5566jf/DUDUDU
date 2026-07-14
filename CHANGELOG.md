@@ -9,6 +9,9 @@ All notable changes to TrollVNC are documented here.
 - 实现：`src/TVNCProcessInject.m`（主程序侧，仅 mach API：AX 取前台 PID → `task_for_pid` → 解析目标进程 `dlopen`/`dlsym` → 三步线程注入）。`src/tvnc_inject.m`（注入到目标进程的 dylib，真正调 UIKit）。
 - `src/trollvncserver.entitlements` 新增注入类权限：`task_for_pid-allow` / `get-task-allow` / `com.apple.private.cs.debugger`（TrollStore 可声明任意 entitlements）。
 - 每步返回详细 JSON（`stage`/`status`/`error`），便于在设备上定位失败环节（如 task_for_pid 被拒、符号解析失败、注入函数执行未生效）。
+- 第一响应者获取改用 `sendAction:` 技巧（`-[UIResponder tvnc_currentFirstResponder]`），规避 `UIWindow.firstResponder` 私有属性在部分 SDK 下编译/运行不可靠的问题；并兼容 iOS 13+ 多场景 `connectedScenes` 取 keyWindow。
+- **新增 Web 视图通道**：目标若内嵌 `WKWebView` 且焦点在 HTML `<input>`/`<textarea>`/`contenteditable`，`tvnc_inject.m` 会用 `evaluateJavaScript:` 把文本写入 `document.activeElement` 并派发 `input`/`change` 事件——覆盖 React/Vue 等受控组件（参考 RootCore inputText 的 `window._nxkbSetValue` 方案；纯 `insertText:` 在受控组件上不派发事件、框架读不到值）。
+- **新增 `UIKeyInput` 协议回退**：仅实现 `UIKeyInput` 的自定义输入视图也能收到文本（在 `UITextInput`/`replaceRange:` 之后兜底）。
 
 ### Fixed
 - 修复 `POST /api/input_ax` 用 body 传参时请求被重置（http 000 / 死锁）的 bug：原 `inputTextViaAX:` 在主线程同步处理 body 请求时 `dispatch_sync(main_queue)` 死锁。改为在独立工作线程跑 AX（避免主线程死锁），`?text=` 与 body 两种方式均稳定。
