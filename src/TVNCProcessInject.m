@@ -10,6 +10,21 @@
 #import <sys/types.h>
 #import <stdint.h>
 
+// iOS SDK 不提供 <mach/mach_vm.h> 头（符号在 libsystem_kernel 里但无声明），
+// 手动 extern 声明我们用到的三个 mach_vm_* 函数，避免隐式声明编译错误。
+#ifdef __cplusplus
+extern "C" {
+#endif
+extern kern_return_t mach_vm_allocate(vm_map_t target, mach_vm_address_t *address,
+                                      mach_vm_size_t size, int flags);
+extern kern_return_t mach_vm_deallocate(vm_map_t target, mach_vm_address_t address,
+                                        mach_vm_size_t size);
+extern kern_return_t mach_vm_write(vm_map_t target_task, mach_vm_address_t address,
+                                   vm_offset_t data, mach_msg_type_number_t dataCnt);
+#ifdef __cplusplus
+}
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
