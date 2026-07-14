@@ -75,7 +75,52 @@
     <div class="result" id="res-game" style="margin-top:8px;"><span class="status s-idle">未发送</span></div>
   </div>
 
+  <div class="card" style="border-color:var(--green); margin-top:14px;">
+    <div class="chead">
+      <span class="method m-POST" style="background:var(--green)">AX</span>
+      <span class="path">POST /api/input_ax</span>
+      <span class="meta">🎯 无障碍通道 · 任何字符都进不去的输入框救星</span>
+    </div>
+    <div class="desc">系统无障碍(AX)通道：直接对"当前聚焦的 UI 元素"写文本值，绕过 firstResponder / HID / 剪贴板。专治游戏、引擎自绘、WebView 等"任何字符都进不去"的输入框（懒人精灵巨魔版同款通道）。<b>全程不碰剪贴板 → 不弹 iOS16 粘贴窗</b>。前置：设备开启辅助功能访问 + 光标停在目标文本区。</div>
+    <div style="display:flex; gap:8px; margin-top:8px;">
+      <input id="axText" placeholder="输入要注入的文本，回车发送" onkeydown="if(event.key==='Enter'){sendAx();}" style="flex:1; padding:8px 10px; border:1px solid var(--line); border-radius:7px; font-size:14px;">
+      <button class="btn-main" onclick="sendAx()">发送</button>
+    </div>
+    <div class="result" id="res-ax" style="margin-top:8px;"><span class="status s-idle">未发送</span></div>
+  </div>
+
 <script>
+
+async function sendAx(){
+  const ip = document.getElementById('ip').value.trim();
+  const port = document.getElementById('port').value.trim();
+  const text = document.getElementById('axText').value;
+  const el = document.getElementById('res-ax');
+  if (!text){ el.innerHTML = '<span class="status s-warn">注意</span><span class="meta">请输入内容</span>'; return; }
+  const url = `http://${ip}:${port}/api/input_ax`;
+  const t0 = performance.now();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  el.innerHTML = '<span class="status s-idle">发送中…</span>';
+  try {
+    const res = await fetch(url, {method:'POST', headers:{'Content-Type':'text/plain'}, body:text, signal:ctrl.signal});
+    const raw = await res.text();
+    const dt = (performance.now() - t0).toFixed(0);
+    let parsed = null; try { parsed = JSON.parse(raw); } catch(e){}
+    let level = res.ok ? 'ok' : 'err';
+    if (parsed && parsed.success === false) level = 'warn';
+    const cls = 's-' + level;
+    let hint = '';
+    if (level !== 'ok')
+      hint = '<div class="meta" style="color:var(--yellow)">⚠ 若失败：①确认「设置→辅助功能」已给本 App 辅助功能访问；②确认光标停在目标文本区(如游戏聊天框)；③完全自绘且无 AX 节点的输入框可能仍收不到。</div>';
+    const pretty = parsed ? JSON.stringify(parsed, null, 2) : raw;
+    el.innerHTML = `<span class="status ${cls}">${LEVEL_TXT[level]}</span><span class="meta">HTTP ${res.status} · ${dt} ms</span><pre>${escapeHtml(pretty)}</pre>` + hint;
+  } catch(e){
+    const dt = (performance.now() - t0).toFixed(0);
+    const msg = (e.name === 'AbortError') ? '请求超时（8s）' : ('无法连接：' + e.message);
+    el.innerHTML = `<span class="status s-err">失败</span><span class="meta">${msg}</span>`;
+  } finally { clearTimeout(timer); }
+}
 
 async function sendGame(){
   const ip = document.getElementById('ip').value.trim();
@@ -117,6 +162,7 @@ const TESTS = [
   {id:'input',    method:'POST', path:'/api/input',           desc:'输入到当前焦点输入框（⚠ 需先在设备上点开一个输入框）', body:'text'},
   {id:'key',      method:'POST', path:'/api/key?code=13',     desc:'发送单键：回车（code=13 / 退格=8）', body:null},
   {id:'input_hid',method:'POST', path:'/api/input_hid',       desc:'🎮 游戏专用：HID 键盘事件注入，绕过输入框焦点（英文 KeyPress / 中文 HID 粘贴）', body:'text'},
+  {id:'input_ax', method:'POST', path:'/api/input_ax',        desc:'🎯 无障碍(AX)通道：直接对聚焦 UI 元素写文本值，解决游戏/自绘/WebView 任何字符都进不去的问题（不碰剪贴板、不弹粘贴窗）', body:'text'},
 ];
 
 function utf8ToBase64(str){

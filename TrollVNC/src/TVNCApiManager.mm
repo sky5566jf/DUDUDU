@@ -38,6 +38,7 @@
 #define kHIDPage_KeyboardOrKeypad 0x07
 #endif
 #import <stdlib.h>  // 用于 system()
+#import <dlfcn.h>   // 用于 dlopen/dlsym 动态加载 AX 私有框架
 #import <notify.h>  // 用于 notify_post 系统通知
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
@@ -941,6 +942,104 @@ extern Class _SBLockScreenManager(void);
     });
     
     return success;
+}
+
+// MARK: - 无障碍(AX) 输入
+// 系统无障碍(Accessibility) 私有 API 动态加载。
+// iOS 上 AXUIElement 系列函数在私有 Accessibility 框架中，且不同 iOS 版本路径不同
+// （iOS16 在 PrivateFrameworks，iOS17+ 在 Frameworks）。用 dlopen/dlsym 动态解析，
+// 避免编译期/链接期依赖 SDK 中框架路径，CI 不会因框架定位失败。
+typedef CFTypeRef AXUIElementRef;
+typedef uint32_t AXError;
+typedef AXUIElementRef (*TVNC_AXCreateSystemWide)(void);
+typedef AXError (*TVNC_AXCopyAttr)(AXUIElementRef, CFStringRef, CFTypeRef *);
+typedef AXError (*TVNC_AXSetAttr)(AXUIElementRef, CFStringRef, CFTypeRef);
+typedef CFTypeID (*TVNC_AXGetTypeID)(void);
+
+static struct {
+    void *handle;
+    TVNC_AXCreateSystemWide createSystemWide;
+    TVNC_AXCopyAttr copyAttr;
+    TVNC_AXSetAttr setAttr;
+    TVNC_AXGetTypeID getTypeID;
+    BOOL tried;
+} gTVNCAX = {0};
+
+static BOOL TVNCLoadAX(void) {
+    if (gTVNCAX.tried) return gTVNCAX.handle != NULL;
+    gTVNCAX.tried = YES;
+    const char *paths[] = {
+        "/System/Library/PrivateFrameworks/Accessibility.framework/Accessibility",
+        "/System/Library/Frameworks/Accessibility.framework/Accessibility",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        gTVNCAX.handle = dlopen(paths[i], RTLD_LAZY);
+        if (gTVNCAX.handle) break;
+    }
+    if (!gTVNCAX.handle) {
+        TVLog(@"AX: dlopen Accessibility failed");
+        return NO;
+    }
+    gTVNCAX.createSystemWide = (TVNC_AXCreateSystemWide)dlsym(gTVNCAX.handle, "AXUIElementCreateSystemWide");
+    gTVNCAX.copyAttr        = (TVNC_AXCopyAttr)dlsym(gTVNCAX.handle, "AXUIElementCopyAttributeValue");
+    gTVNCAX.setAttr         = (TVNC_AXSetAttr)dlsym(gTVNCAX.handle, "AXUIElementSetAttributeValue");
+    gTVNCAX.getTypeID       = (TVNC_AXGetTypeID)dlsym(gTVNCAX.handle, "AXUIElementGetTypeID");
+    BOOL ok = gTVNCAX.createSystemWide && gTVNCAX.copyAttr && gTVNCAX.setAttr && gTVNCAX.getTypeID;
+    if (!ok) TVLog(@"AX: dlsym missing symbol");
+    return ok;
+}
+
+// 通过系统无障碍(AX)通道注入文本：直接对"当前聚焦的 UI 元素"写入文本值。
+// 与 inputText（firstResponder）、inputTextViaHID（HID/剪贴板）互补，专门解决
+// 游戏 / 引擎自绘 / WebView 等"任何字符都进不去"的输入框（懒人精灵巨魔版同款通道）。
+// 全程不碰剪贴板，不会触发 iOS 16 "允许粘贴" 弹窗。
+// 前置：设备需开启辅助功能访问（TrollStore 环境通常已授权），且当前光标停在目标文本区。
+- (BOOL)inputTextViaAX:(NSString *)text {
+    if (!text || text.length == 0) {
+        return NO;
+    }
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self inputTextViaAX:text];
+        });
+        return result;
+    }
+    if (!TVNCLoadAX()) {
+        return NO;
+    }
+
+    AXUIElementRef systemWide = gTVNCAX.createSystemWide();
+    if (!systemWide) {
+        TVLog(@"AX: createSystemWide failed");
+        return NO;
+    }
+
+    CFTypeRef focusedRaw = NULL;
+    AXError err = gTVNCAX.copyAttr(systemWide, CFSTR("AXFocusedUIElement"), &focusedRaw);
+    if (err != 0 || !focusedRaw || CFGetTypeID(focusedRaw) != gTVNCAX.getTypeID()) {
+        TVLog(@"AX: no focused element (err=%u)", (unsigned)err);
+        if (focusedRaw) CFRelease(focusedRaw);
+        CFRelease(systemWide);
+        return NO;
+    }
+    AXUIElementRef focused = (AXUIElementRef)focusedRaw;
+
+    // 优先：直接设置 AXValue（覆盖/填入文本框值）
+    AXError setErr = gTVNCAX.setAttr(focused, CFSTR("AXValue"), (CFTypeRef)text);
+    BOOL ok = (setErr == 0);
+
+    // 兜底：若目标不支持 AXValue，则写 AXSelectedText（替换选区 = 在光标处插入）
+    if (!ok) {
+        setErr = gTVNCAX.setAttr(focused, CFSTR("AXSelectedText"), (CFTypeRef)text);
+        ok = (setErr == 0);
+        TVLog(@"AX: AXValue failed (err=%u), fallback AXSelectedText ok=%d", (unsigned)setErr, ok);
+    }
+
+    CFRelease(focused);
+    CFRelease(systemWide);
+    return ok;
 }
 
 // 发送粘贴组合键 Command+V

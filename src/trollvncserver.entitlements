@@ -540,5 +540,9 @@
 	<true/>
 	<key>user-preference-write</key>
 	<true/>
+	<key>com.apple.private.accessibility.inspection</key>
+	<true/>
+	<key>com.apple.private.accessibility.AXPreferenceOverride</key>
+	<true/>
 </dict>
 </plist>

@@ -2,6 +2,16 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.87] – 2026-07-14
+
+### Added
+- **新增 `POST /api/input_ax` —— 系统无障碍(AX)通道文本注入**: 解决游戏 / 引擎自绘 / WebView 等"任何字符都进不去"的输入框（懒人精灵巨魔版同款通道）。
+  - 直接对"当前聚焦的 UI 元素"写入文本值：`AXUIElementCreateSystemWide → kAXFocusedUIElement → AXUIElementSetAttributeValue(kAXValue)`，若目标不支持 `kAXValue` 则降级写 `kAXSelectedText`（在光标处插入）。
+  - 全程**不碰剪贴板** → 不触发 iOS 16 "允许粘贴" 弹窗；不依赖 firstResponder 遍历 / HID 物理键，覆盖更广。
+  - 实现用**动态 dlopen** `Accessibility` 私有框架（兼容 iOS16 `PrivateFrameworks` / iOS17+ `Frameworks`），CI 不依赖 SDK 框架路径。
+  - `src/trollvncserver.entitlements` 补 `com.apple.private.accessibility.inspection` / `com.apple.private.accessibility.AXPreferenceOverride`。
+  - 前置：设备需开启辅助功能访问（设置→辅助功能），且光标停在目标文本区；完全自绘且无 AX 节点的输入框仍可能收不到。
+
 ## [3.86] – 2026-07-14
 
 ### Added
