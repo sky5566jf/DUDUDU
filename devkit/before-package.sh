@@ -18,6 +18,18 @@ if [ -n "$THEBOOTSTRAP" ]; then
     cp -rp "$THEOS_STAGING_DIR/usr/bin/trollvncserver" "$THEOS_STAGING_DIR/Applications/TrollVNC.app/"
     cp -rp "$THEOS_STAGING_DIR/usr/bin/trollvncmanager" "$THEOS_STAGING_DIR/Applications/TrollVNC.app/"
 
+    # Collect injection dylib. Rootless/iOS sealed system volume has no writable /usr/lib,
+    # and the .tipa staging below does `rm -rf usr`, so the dylib MUST ship INSIDE the app
+    # bundle to reach the device. The daemon (running inside the .app) resolves it via
+    # [NSBundle mainBundle]. Handle both theos library naming variants.
+    for _dyn in "$THEOS_STAGING_DIR/usr/lib/tvnc_inject.dylib" "$THEOS_STAGING_DIR/usr/lib/libtvnc_inject.dylib"; do
+        if [ -f "$_dyn" ]; then
+            cp -rp "$_dyn" "$THEOS_STAGING_DIR/Applications/TrollVNC.app/"
+            echo "Copied $(basename "$_dyn") into TrollVNC.app"
+            break
+        fi
+    done
+
     # Collect bundle resources
     cp -rp "$THEOS_STAGING_DIR/Library/PreferenceBundles/TrollVNCPrefs.bundle" "$THEOS_STAGING_DIR/Applications/TrollVNC.app/"
     rm -f "$THEOS_STAGING_DIR/Applications/TrollVNC.app/TrollVNCPrefs.bundle/TrollVNCPrefs"

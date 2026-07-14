@@ -154,6 +154,7 @@ static int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **outpu
 
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
+#import "TVNCProcessInject.h"
 #import "Logging.h"
 #import "STHIDEventGenerator.h"
 
@@ -637,6 +638,10 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleInputHid:query body:body];
     } else if ([path isEqualToString:@"/api/input_ax"]) {
         return [self handleInputAx:query body:body];
+    } else if ([path isEqualToString:@"/api/input_inject"]) {
+        return [self handleInputInject:query body:body];
+    } else if ([path isEqualToString:@"/api/inject_probe"]) {
+        return [self handleInjectProbe];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/api/install"]) {
@@ -3110,6 +3115,51 @@ static NSString *tvncGetRealDeviceName(void) {
           @"note": @"via system Accessibility (AX) channel; no paste prompt"} :
         @{@"success": @NO,
           @"error": @"AX input failed: no focused element / AX not authorized / target field not AX-exposed. Check 设置→辅助功能 access and that cursor is in the target text field."};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/input_inject
+// 进程内注入：把 tvnc_inject.dylib 注入「前台游戏/目标 App 进程」，在其进程空间内
+// 直接调用 UIKit insertText:（懒人精灵巨魔版「root模式直接输入文字」等价实现）。
+// 绕开输入法与 AX 节点限制，可解决游戏自绘框文本输入。需要 entitlements 含 task_for_pid-allow。
+// 参数：body UTF-8 文本，或 ?text=xxx。返回每步详细状态，便于定位失败环节。
+- (TVNCHttpResponse *)handleInputInject:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    NSDictionary *result = [TVNCProcessInject injectText:text];
+    BOOL ok = [result[@"status"] isEqualToString:@"ok"] && [result[@"injected"] boolValue];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// GET /api/inject_probe
+// 仅探测：取前台 App PID + 验证 task_for_pid 是否可取 task port（不实际注入）。
+// 用于在设备上确认 entitlements 的 task_for_pid-allow 是否生效，是注入能否成功的前提。
+- (TVNCHttpResponse *)handleInjectProbe {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    NSDictionary *result = [TVNCProcessInject probe];
+    BOOL ok = [result[@"status"] isEqualToString:@"ok"];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }

@@ -1190,17 +1190,32 @@ static BOOL TVNCLoadAX(void) {
     if (!text || text.length == 0) {
         return NO;
     }
-    if (![NSThread isMainThread]) {
-        __block BOOL result = NO;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            result = [self inputTextViaAX:text];
-        });
-        return result;
-    }
     if (!TVNCLoadAX()) {
         return NO;
     }
+    // 在独立工作线程跑 AX（AX XPC 需要 runloop；避免在主线程 dispatch_sync 死锁），
+    // 通过 NSCondition 回收结果。无论调用方处于哪个线程都不会死锁。
+    __block BOOL result = NO;
+    NSCondition *cond = [[NSCondition alloc] init];
+    __block BOOL done = NO;
+    NSThread *worker = [[NSThread alloc] initWithBlock:^{
+        @autoreleasepool {
+            result = [self _axInputSync:text];
+            [cond lock];
+            done = YES;
+            [cond signal];
+            [cond unlock];
+        }
+    }];
+    [worker start];
+    [cond lock];
+    while (!done) [cond wait];
+    [cond unlock];
+    return result;
+}
 
+// AX 实际写入逻辑（运行于独立工作线程）。
+- (BOOL)_axInputSync:(NSString *)text {
     AXUIElementRef systemWide = gTVNCAX.createSystemWide();
     if (!systemWide) {
         TVLog(@"AX: createSystemWide failed");

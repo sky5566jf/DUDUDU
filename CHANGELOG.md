@@ -2,6 +2,17 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.90] – 2026-07-15
+
+### Added（进程内注入 · 游戏文本输入终极方案）
+- 新增 `POST /api/input_inject`：把 `tvnc_inject.dylib` 注入「前台游戏/目标 App 进程」，在其进程空间内直接调用 UIKit `insertText:`，**彻底绕开输入法与 AX 节点限制**——可解决游戏自绘框/Unity 输入框"任何字符都进不去"的问题（即懒人精灵巨魔版「root模式直接输入文字」等价实现）。
+- 实现：`src/TVNCProcessInject.m`（主程序侧，仅 mach API：AX 取前台 PID → `task_for_pid` → 解析目标进程 `dlopen`/`dlsym` → 三步线程注入）。`src/tvnc_inject.m`（注入到目标进程的 dylib，真正调 UIKit）。
+- `src/trollvncserver.entitlements` 新增注入类权限：`task_for_pid-allow` / `get-task-allow` / `com.apple.private.cs.debugger`（TrollStore 可声明任意 entitlements）。
+- 每步返回详细 JSON（`stage`/`status`/`error`），便于在设备上定位失败环节（如 task_for_pid 被拒、符号解析失败、注入函数执行未生效）。
+
+### Fixed
+- 修复 `POST /api/input_ax` 用 body 传参时请求被重置（http 000 / 死锁）的 bug：原 `inputTextViaAX:` 在主线程同步处理 body 请求时 `dispatch_sync(main_queue)` 死锁。改为在独立工作线程跑 AX（避免主线程死锁），`?text=` 与 body 两种方式均稳定。
+
 ## [3.89] – 2026-07-14
 
 ### Changed

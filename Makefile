@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 3.89
+export PACKAGE_VERSION := 3.90
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -30,6 +30,15 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
+trollvncserver_FILES += src/TVNCProcessInject.m
+
+# ── 进程内注入 dylib（被注入到前台游戏/目标 App 进程，直接调 UIKit insertText:）──
+LIBRARY_NAME += tvnc_inject
+tvnc_inject_FILES = src/tvnc_inject.m
+tvnc_inject_CFLAGS = -fobjc-arc
+tvnc_inject_FRAMEWORKS = UIKit Foundation
+tvnc_inject_INSTALL_PATH = /usr/lib
+tvnc_inject_CODESIGN_FLAGS = -Ssrc/trollvncserver.entitlements
 
 # v3.40: Dropped iOS < 13.4 support. Removed fishhook and weak symbol shim.
 # ___darwin_check_fd_set_overflow is natively available on iOS 13.4+.
@@ -133,6 +142,7 @@ endif
 endif
 
 include $(THEOS_MAKE_PATH)/tool.mk
+include $(THEOS_MAKE_PATH)/library.mk
 
 SUBPROJECTS += prefs/TrollVNCPrefs
 SUBPROJECTS += prefs/CCTrollVNC

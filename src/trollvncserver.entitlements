@@ -544,5 +544,12 @@
 	<true/>
 	<key>com.apple.private.accessibility.AXPreferenceOverride</key>
 	<true/>
+	<!-- 进程内注入（懒人精灵同款）：以 mobile 身份 task_for_pid 挂入同用户前台 App 进程 -->
+	<key>task_for_pid-allow</key>
+	<true/>
+	<key>get-task-allow</key>
+	<true/>
+	<key>com.apple.private.cs.debugger</key>
+	<true/>
 </dict>
 </plist>
