@@ -260,6 +260,8 @@
         return [self handleInput:query body:body];
     } else if ([path isEqualToString:@"/api/key"]) {
         return [self handleKey:query];
+    } else if ([path isEqualToString:@"/api/input_hid"]) {
+        return [self handleInputHid:query body:body];
     } else if ([path isEqualToString:@"/api/clients"]) {
         return [self handleClients];
     } else if ([path isEqualToString:@"/api/status"]) {
@@ -1093,6 +1095,41 @@
         @{@"success": @NO, @"error": @"Failed to send key or no active input field"};
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     
+    return response;
+}
+
+// POST /api/input_hid  (body: UTF-8 文本, 或 ?text=xxx)
+// 通过 HID 键盘事件注入文本，绕过 UIKit 输入框焦点。
+// 适用于游戏 / 自定义渲染输入框 / 任何不暴露原生 UITextField 焦点的场景：
+//   - ASCII（英数符号）→ STHIDEventGenerator.keyPress 逐字符模拟外接物理键盘
+//   - 非 ASCII（中文等）→ 自动降级为 写剪贴板 + Cmd+V 的 HID 粘贴事件
+// 两者均不经 firstResponder，只要目标 App 响应物理键盘即可收到。
+- (TVNCHttpResponse *)handleInputHid:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaHID:text];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = ok ?
+        @{@"success": @YES, @"method": @"hid", @"text": text, @"length": @(text.length)} :
+        @{@"success": @NO, @"error": @"HID input failed (generator unavailable or injection rejected)"};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
 

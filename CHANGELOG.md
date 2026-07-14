@@ -2,6 +2,15 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.86] – 2026-07-14
+
+### Added
+- **新增 `POST /api/input_hid` —— 面向游戏 / 自定义渲染输入框的文本注入出口**: 之前的文本接口在游戏 App 中全部失效——`/api/input` 依赖 UIKit 焦点（游戏不暴露原生 `UITextField`）、`/api/clipboard_text` 仅写剪贴板不触发粘贴（游戏不自动读）、`/api/key` 只发单键且字符映射会丢中文。
+  - 本接口直接调用已有的 `TVNCApiManager.inputTextViaHID:`，底层走 `STHIDEventGenerator` 的 IOHID 键盘事件（`_sendIOHIDKeyboardEvent`），**模拟外接物理键盘、绕过 firstResponder 焦点**：
+    - ASCII（英数符号）→ 逐字符 `keyPress:` 注入，任何响应物理键盘的 App（含游戏）均可收到；
+    - 非 ASCII（中文等）→ 自动降级为「写剪贴板 + Cmd+V 的 HID 粘贴事件」，同样无需原生输入框焦点。
+  - 这是游戏聊天 / 搜索场景目前唯一可用的远程文本输入途径。
+
 ## [3.85] – 2026-07-13
 
 ### Fixed
