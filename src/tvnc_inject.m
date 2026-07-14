@@ -133,8 +133,10 @@ BOOL tvnc_inject_text(NSString *text) {
         }
 
         // 2b) 原生 insertText:（UITextField / UITextView / WKContentView 等）
+        //     fr 静态类型是 UIResponder*（未声明 insertText:），用 id 转发调用避免编译报错
         if ([fr respondsToSelector:@selector(insertText:)]) {
-            [fr insertText:text];
+            id target = fr;
+            [target insertText:text];
             return YES;
         }
         // 2c) UITextInput 协议：替换全选范围（兜底）
