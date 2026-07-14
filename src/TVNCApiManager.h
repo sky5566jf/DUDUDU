@@ -141,6 +141,20 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)inputText:(NSString *)text;
 
 /**
+ 通过 HID 键盘事件通道注入文本（游戏 / 自绘输入框兜底）
+ @param text 要输入的文本内容
+ @return 是否成功
+ */
+- (BOOL)inputTextViaHID:(NSString *)text;
+
+/**
+ 通过系统无障碍(AX)通道注入文本（不碰剪贴板，不弹"允许粘贴"）
+ @param text 要输入的文本内容
+ @return 是否成功
+ */
+- (BOOL)inputTextViaAX:(NSString *)text;
+
+/**
  模拟按键事件
  @param keyCode 按键码（如回车键 13，退格键 8 等）
  @return 是否成功

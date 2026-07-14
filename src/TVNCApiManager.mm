@@ -1218,12 +1218,12 @@ static BOOL TVNCLoadAX(void) {
     AXUIElementRef focused = (AXUIElementRef)focusedRaw;
 
     // 优先：直接设置 AXValue（覆盖/填入文本框值）
-    AXError setErr = gTVNCAX.setAttr(focused, CFSTR("AXValue"), (CFTypeRef)text);
+    AXError setErr = gTVNCAX.setAttr(focused, CFSTR("AXValue"), (__bridge CFTypeRef)text);
     BOOL ok = (setErr == 0);
 
     // 兜底：若目标不支持 AXValue，则写 AXSelectedText（替换选区 = 在光标处插入）
     if (!ok) {
-        setErr = gTVNCAX.setAttr(focused, CFSTR("AXSelectedText"), (CFTypeRef)text);
+        setErr = gTVNCAX.setAttr(focused, CFSTR("AXSelectedText"), (__bridge CFTypeRef)text);
         ok = (setErr == 0);
         TVLog(@"AX: AXValue failed (err=%u), fallback AXSelectedText ok=%d", (unsigned)setErr, ok);
     }
