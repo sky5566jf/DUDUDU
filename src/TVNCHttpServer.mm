@@ -3546,9 +3546,7 @@ static NSString *tvncGetRealDeviceName(void) {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     NSString *html = @"<!DOCTYPE html>"
         "<html><head><meta charset='UTF-8'><title>TrollVNC</title></head>"
-        "<body><h1>TrollVNC is running</h1>"
-        "<p>API 文档已隐藏。访问 <code>/api/endpoints?key=YOUR_KEY</code> 查看完整接口列表，"
-        "或 <a href=\"/api/status\">/api/status</a> 查看运行状态。</p>"
+        "<body><h1>Matisu欢迎你</h1>"
         "</body></html>";
     response.statusCode = 200;
     response.contentType = @"text/html; charset=utf-8";
