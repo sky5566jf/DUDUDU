@@ -2,6 +2,12 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.89] – 2026-07-14
+
+### Changed
+- 根路径 `/` 不再暴露完整 API 文档，改为只显示一行运行状态（`TrollVNC is running` + 提示）。完整接口列表移到 `GET /api/endpoints?key=matisu`，缺密钥/密钥错误返回 `403 Forbidden`。
+- 密钥定义在 `src/TVNCHttpServer.mm` 的 `kTVNCEndpointsKey`（默认 `matisu`，如需修改改此常量即可）。
+
 ## [3.88] – 2026-07-14
 
 ### Fixed

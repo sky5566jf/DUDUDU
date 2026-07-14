@@ -704,8 +704,10 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     } else if ([path isEqualToString:@"/group-control"]) {
         return [self handleGroupControlPage];
     } else if ([path isEqualToString:@"/"]) {
-        // 返回简单的 API 文档
+        // 根路径只显示极简状态，完整 API 文档需访问 /api/endpoints?key=xxx
         return [self handleRoot];
+    } else if ([path isEqualToString:@"/api/endpoints"]) {
+        return [self handleEndpoints:query];
     }
     
     // 404 Not Found
@@ -3540,8 +3542,34 @@ static NSString *tvncGetRealDeviceName(void) {
 
 // GET /
 - (TVNCHttpResponse *)handleRoot {
+    // 根路径只显示极简运行状态，完整 API 文档需访问 /api/endpoints?key=xxx
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+    NSString *html = @"<!DOCTYPE html>"
+        "<html><head><meta charset='UTF-8'><title>TrollVNC</title></head>"
+        "<body><h1>TrollVNC is running</h1>"
+        "<p>API 文档已隐藏。访问 <code>/api/endpoints?key=YOUR_KEY</code> 查看完整接口列表，"
+        "或 <a href=\"/api/status\">/api/status</a> 查看运行状态。</p>"
+        "</body></html>";
+    response.statusCode = 200;
+    response.contentType = @"text/html; charset=utf-8";
+    response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
+    return response;
+}
+
+// 完整 API 文档（密钥保护）：GET /api/endpoints?key=matisu
+// 密钥如需修改，改下方 kTVNCEndpointsKey 即可
+static NSString * const kTVNCEndpointsKey = @"matisu";
+
+- (TVNCHttpResponse *)handleEndpoints:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    NSString *key = query[@"key"];
+    if (![key isEqualToString:kTVNCEndpointsKey]) {
+        response.statusCode = 403;
+        response.contentType = @"application/json";
+        NSDictionary *err = @{@"error": @"Forbidden", @"message": @"missing or invalid key"};
+        response.body = [NSJSONSerialization dataWithJSONObject:err options:0 error:nil];
+        return response;
+    }
     NSString *html = @"<!DOCTYPE html>"
         "<html><head><meta charset='UTF-8'><title>TrollVNC API</title></head>"
         "<body><h1>TrollVNC HTTP API</h1>"
