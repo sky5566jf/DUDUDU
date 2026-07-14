@@ -2,6 +2,14 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.88] – 2026-07-14
+
+### Fixed
+- **关键修复：v3.86 / v3.87 新增的接口此前根本没进编译产物**。之前改动误写到不参与编译的 `TrollVNC/src/` 开发分支，而 Makefile 实际只编译根目录 `src/`。导致设备上 `/api/input_hid`、`/api/input_ax`、`/api/clearapps/smart`、`/api/assistivetouch`、`/api/install`、`/api/uninstall`、`/api/trollstore/diagnostics` 全部返回 404（实测 .19 设备 3.86 全 404 确认）。
+  - 本次把上述 7 个 HTTP 路由 + 对应 handler 正式登记进编译用的 `src/TVNCHttpServer.mm`；其中 `handleInputHid:` / `handleInputAx:` 原缺失，已从开发分支补齐；`src/TVNCApiManager.mm` 补上 `inputTextViaAX:`（含 AX 私有框架动态 `dlopen` 初始化块）及 `#import <dlfcn.h>`。
+  - 原有生产功能（group control / network debug / `screenshot/fast` / `stream.mjpeg` 等）不受影响。
+  - 等价说明：v3.86 的 HID 文本注入、v3.87 的无障碍(AX)文本注入，至此才真正随构建下发到设备。
+
 ## [3.87] – 2026-07-14
 
 ### Added

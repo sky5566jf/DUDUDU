@@ -631,6 +631,20 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleHome];
     } else if ([path isEqualToString:@"/api/taskmanager"]) {
         return [self handleTaskManager];
+    } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
+        return [self handleClearAppsSmart];
+    } else if ([path isEqualToString:@"/api/input_hid"]) {
+        return [self handleInputHid:query body:body];
+    } else if ([path isEqualToString:@"/api/input_ax"]) {
+        return [self handleInputAx:query body:body];
+    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
+        return [self handleAssistiveTouch:query method:method];
+    } else if ([path isEqualToString:@"/api/install"]) {
+        return [self handleInstallApp:query];
+    } else if ([path isEqualToString:@"/api/uninstall"]) {
+        return [self handleUninstallApp:query];
+    } else if ([path isEqualToString:@"/api/trollstore/diagnostics"]) {
+        return [self handleTrollStoreDiagnostics];
     } else if ([path isEqualToString:@"/test"]) {
         return [self handleTestInterface];
     } else if ([path isEqualToString:@"/api/filelist"]) {
@@ -3022,6 +3036,78 @@ static NSString *tvncGetRealDeviceName(void) {
             @"error": @"Failed to open task manager"
         };
 
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/input_hid  (body: UTF-8 文本, 或 ?text=xxx)
+// 通过 HID 键盘事件注入文本：绕过 firstResponder，直接模拟外接物理键盘。
+// 适用于游戏 / 自定义渲染输入框 / 任何不暴露原生 UITextField 焦点的场景：
+//   - ASCII（英数符号）→ STHIDEventGenerator.keyPress 逐字符模拟外接物理键盘
+//   - 非 ASCII（中文等）→ 自动降级为 写剪贴板 + Cmd+V 的 HID 粘贴事件
+// 两者均不经 firstResponder，只要目标 App 响应物理键盘即可收到。
+- (TVNCHttpResponse *)handleInputHid:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaHID:text];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = ok ?
+        @{@"success": @YES, @"method": @"hid", @"text": text, @"length": @(text.length)} :
+        @{@"success": @NO, @"error": @"HID input failed (generator unavailable or injection rejected)"};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/input_ax  (body: UTF-8 文本, 或 ?text=xxx)
+// 通过系统无障碍(AX)通道注入文本：直接对"当前聚焦的 UI 元素"写入文本值。
+// 与 /api/input（firstResponder）、/api/input_hid（HID/剪贴板）互补，专门解决
+// 游戏 / 自定义 / 自绘输入框"任何字符都进不去"的问题（懒人精灵巨魔版同款通道）。
+// 全程不碰剪贴板，不会触发 iOS 16 "允许粘贴" 弹窗。
+// 前置：设备需开启辅助功能访问；当前光标须停在目标文本区。
+- (TVNCHttpResponse *)handleInputAx:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaAX:text];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = ok ?
+        @{@"success": @YES, @"method": @"ax", @"text": text, @"length": @(text.length),
+          @"note": @"via system Accessibility (AX) channel; no paste prompt"} :
+        @{@"success": @NO,
+          @"error": @"AX input failed: no focused element / AX not authorized / target field not AX-exposed. Check 设置→辅助功能 access and that cursor is in the target text field."};
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
