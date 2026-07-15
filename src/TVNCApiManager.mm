@@ -1077,16 +1077,26 @@ int tvncGetFBBytesPerPixel(void);
     // 方法2: HID 键盘事件（daemon 下最可靠；仅 ASCII，不碰剪贴板→无 iOS16 粘贴弹窗）
     // 必须排在 UIKeyboardImpl 之前：UIKeyboardImpl.addText: 在 daemon 无键盘会话时会"假成功"
     // (返回 YES 但实际没送到前台 App)，若排在前会短路级联、导致 HID 永远不执行（v3.96 回归点）。
-    // 中文等含非 ASCII 字符时本方法主动返回 NO，交由后续 UIKeyboardImpl/剪贴板处理。
+    // 中文等含非 ASCII 字符时本方法主动返回 NO，交由后续 AX/UIKeyboardImpl/剪贴板处理。
     TVLog(@"inputText: firstResponder failed, trying HID...");
     if ([self inputTextViaHID:text]) {
         TVLog(@"inputText: Success via HID");
         return YES;
     }
 
+    // 方法2.5: 无障碍(AX)通道 —— 直接对"当前系统焦点 UI 元素"写入 AXValue/AXSelectedText。
+    // 支持任何 Unicode（中文/emoji），不碰剪贴板→无 iOS16 粘贴弹窗，且不依赖第一响应者/键盘会话。
+    // 必须排在 UIKeyboardImpl 之前：UIKeyboardImpl 在 daemon/部分场景下会"假成功"(返回 YES 实际没输入)，
+    // 若排在其后会被短路，中文永远走不到 AX（v4.06 修复：把 AX 提到 UIKeyboardImpl 前）。
+    TVLog(@"inputText: HID failed, trying AX...");
+    if ([self inputTextViaAX:text]) {
+        TVLog(@"inputText: Success via AX");
+        return YES;
+    }
+
     // 方法3: UIKeyboardImpl 私有 API（主 App 有焦点时中英文都经键盘系统直接输入，零弹窗）
-    // daemon 无键盘会话下会假成功(返回 YES 但实际没输入)，故仅作 HID 之后的补充，不影响 daemon 可靠性。
-    TVLog(@"inputText: HID failed, trying UIKeyboardImpl...");
+    // daemon 无键盘会话下会假成功(返回 YES 但实际没输入)，故排在 AX 之后作补充，不影响 daemon 可靠性。
+    TVLog(@"inputText: AX failed, trying UIKeyboardImpl...");
     if ([self inputTextViaKeyboard:text]) {
         TVLog(@"inputText: Success via UIKeyboardImpl");
         return YES;
@@ -1130,6 +1140,119 @@ int tvncGetFBBytesPerPixel(void);
         TVLog(@"HID input failed: %@", exception.reason);
         return NO;
     }
+}
+
+// MARK: - 无障碍(AX) 输入
+// 系统无障碍(Accessibility) 私有 API 动态加载。
+// iOS 上 AXUIElement 系列函数在私有 Accessibility 框架中，且不同 iOS 版本路径不同
+// （iOS16 在 PrivateFrameworks，iOS17+ 在 Frameworks）。用 dlopen/dlsym 动态解析，
+// 避免编译期/链接期依赖 SDK 中框架路径，CI 不会因框架定位失败。
+typedef CFTypeRef AXUIElementRef;
+typedef uint32_t AXError;
+typedef AXUIElementRef (*TVNC_AXCreateSystemWide)(void);
+typedef AXError (*TVNC_AXCopyAttr)(AXUIElementRef, CFStringRef, CFTypeRef *);
+typedef AXError (*TVNC_AXSetAttr)(AXUIElementRef, CFStringRef, CFTypeRef);
+typedef CFTypeID (*TVNC_AXGetTypeID)(void);
+
+static struct {
+    void *handle;
+    TVNC_AXCreateSystemWide createSystemWide;
+    TVNC_AXCopyAttr copyAttr;
+    TVNC_AXSetAttr setAttr;
+    TVNC_AXGetTypeID getTypeID;
+    BOOL tried;
+} gTVNCAX = {0};
+
+static BOOL TVNCLoadAX(void) {
+    if (gTVNCAX.tried) return gTVNCAX.handle != NULL;
+    gTVNCAX.tried = YES;
+    const char *paths[] = {
+        "/System/Library/PrivateFrameworks/Accessibility.framework/Accessibility",
+        "/System/Library/Frameworks/Accessibility.framework/Accessibility",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        gTVNCAX.handle = dlopen(paths[i], RTLD_LAZY);
+        if (gTVNCAX.handle) break;
+    }
+    if (!gTVNCAX.handle) {
+        TVLog(@"AX: dlopen Accessibility failed");
+        return NO;
+    }
+    gTVNCAX.createSystemWide = (TVNC_AXCreateSystemWide)dlsym(gTVNCAX.handle, "AXUIElementCreateSystemWide");
+    gTVNCAX.copyAttr        = (TVNC_AXCopyAttr)dlsym(gTVNCAX.handle, "AXUIElementCopyAttributeValue");
+    gTVNCAX.setAttr         = (TVNC_AXSetAttr)dlsym(gTVNCAX.handle, "AXUIElementSetAttributeValue");
+    gTVNCAX.getTypeID       = (TVNC_AXGetTypeID)dlsym(gTVNCAX.handle, "AXUIElementGetTypeID");
+    BOOL ok = gTVNCAX.createSystemWide && gTVNCAX.copyAttr && gTVNCAX.setAttr && gTVNCAX.getTypeID;
+    if (!ok) TVLog(@"AX: dlsym missing symbol");
+    return ok;
+}
+
+// 通过系统无障碍(AX)通道注入文本：直接对"当前聚焦的 UI 元素"写入文本值。
+// 与 inputText（firstResponder）、inputTextViaHID（HID）互补，专门解决
+// 中文/emoji/引擎自绘等"任何字符都进不去"的输入框。
+// 全程不碰剪贴板，不会触发 iOS 16 "允许粘贴" 弹窗；支持任意 Unicode。
+// 前置：TrollStore 巨魔 App 有系统级权限，可调用私有 Accessibility 框架。
+- (BOOL)inputTextViaAX:(NSString *)text {
+    if (!text || text.length == 0) {
+        return NO;
+    }
+    if (!TVNCLoadAX()) {
+        return NO;
+    }
+    // 在独立工作线程跑 AX（AX XPC 需要 runloop；避免在主线程 dispatch_sync 死锁），
+    // 通过 NSCondition 回收结果。无论调用方处于哪个线程都不会死锁。
+    __block BOOL result = NO;
+    NSCondition *cond = [[NSCondition alloc] init];
+    __block BOOL done = NO;
+    NSThread *worker = [[NSThread alloc] initWithBlock:^{
+        @autoreleasepool {
+            result = [self _axInputSync:text];
+            [cond lock];
+            done = YES;
+            [cond signal];
+            [cond unlock];
+        }
+    }];
+    [worker start];
+    [cond lock];
+    while (!done) [cond wait];
+    [cond unlock];
+    return result;
+}
+
+// AX 实际写入逻辑（运行于独立工作线程）。
+- (BOOL)_axInputSync:(NSString *)text {
+    AXUIElementRef systemWide = gTVNCAX.createSystemWide();
+    if (!systemWide) {
+        TVLog(@"AX: createSystemWide failed");
+        return NO;
+    }
+
+    CFTypeRef focusedRaw = NULL;
+    AXError err = gTVNCAX.copyAttr(systemWide, CFSTR("AXFocusedUIElement"), &focusedRaw);
+    if (err != 0 || !focusedRaw || CFGetTypeID(focusedRaw) != gTVNCAX.getTypeID()) {
+        TVLog(@"AX: no focused element (err=%u)", (unsigned)err);
+        if (focusedRaw) CFRelease(focusedRaw);
+        CFRelease(systemWide);
+        return NO;
+    }
+    AXUIElementRef focused = (AXUIElementRef)focusedRaw;
+
+    // 优先：直接设置 AXValue（覆盖/填入文本框值）
+    AXError setErr = gTVNCAX.setAttr(focused, CFSTR("AXValue"), (__bridge CFTypeRef)text);
+    BOOL ok = (setErr == 0);
+
+    // 兜底：若目标不支持 AXValue，则写 AXSelectedText（替换选区 = 在光标处插入）
+    if (!ok) {
+        setErr = gTVNCAX.setAttr(focused, CFSTR("AXSelectedText"), (__bridge CFTypeRef)text);
+        ok = (setErr == 0);
+        TVLog(@"AX: AXValue failed (err=%u), fallback AXSelectedText ok=%d", (unsigned)setErr, ok);
+    }
+
+    CFRelease(focused);
+    CFRelease(systemWide);
+    return ok;
 }
 
 // 通过剪贴板输入文本

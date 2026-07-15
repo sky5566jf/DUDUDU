@@ -2,6 +2,15 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.06] – 2026-07-16
+
+### Fixed（中文无法输入：恢复 inputTextViaAX 通道）
+- 根因：v4.04 删除了 `inputTextViaAX`（Accessibility / AXUIElement 通道），而该通道是开发分支 `TrollVNC/src/` 一直保留、生产版漏移植的唯一"支持任意 Unicode、零弹窗、不依赖键盘会话"的中文落点。v4.05 恢复 HID+UIKeyboardImpl 后，UIKeyboardImpl 在部分场景"假成功"短路级联，中文仍哑火。
+- 恢复内容：`TVNCLoadAX()`（dlopen 动态加载 Accessibility 框架，iOS16 PrivateFrameworks / iOS17+ Frameworks 双路径）+ `gTVNCAX` 静态结构 + `inputTextViaAX:` + `_axInputSync:`（独立 NSThread + NSCondition 跑 AX，避免主线程死锁）；`AXValue` 优先、失败兜底 `AXSelectedText`。
+- **级联顺序关键调整**：AX 排在 `inputTextViaHID:` 之后、`inputTextViaKeyboard:` 之前——否则中文会在 UIKeyboardImpl"假成功"处被短路，永远走不到 AX。
+- 新级联：第一响应者 → HID(ASCII) → **AX(任意 Unicode，零弹窗)** → UIKeyboardImpl → 剪贴板(兜底弹窗)。
+- 效果：主 App 有焦点时中文走 AX 通道直接写系统焦点 UI 元素的 `AXValue`，支持中文/emoji、不碰剪贴板、不弹"是否允许粘贴"。
+
 ## [4.05] – 2026-07-16
 
 ### Changed（文本输入级联恢复为四级，解决 iOS 16 "是否允许粘贴" 弹窗）
