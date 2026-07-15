@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.91] – 2026-07-15
+
+### Fixed（进程内注入可真正启动）
+- **修复 `/api/inject_probe` 与 `/api/input_inject` 在 `foreground_pid` 阶段直接失败**：原实现用 AX（`AXFocusedApplication`）取前台 PID，但 `trollvncserver` 是无界面 daemon，iOS 不会给它辅助功能授权，`AXFocusedApplication` 必然返回错误 → 注入根本起不来。
+- 改为 **SpringBoardServices 优先**（`SBFrontmostApplication()` → `processIdentifier`；兜底 `SBFrontmostApplicationBundleIdentifier()` → 枚举进程匹配 `.app` 的 `Info.plist` 反查 pid），AX 仅作为最后兜底。该路径**不需要辅助功能授权**，daemon 也能用。
+- `entitlements` 新增 `com.apple.springboard.appcontrol`（查询前台 App 状态所需），配合既有的 `launchapplications` 类授权，使 SpringBoard XPC 查询从外部进程可用。
+
 ## [3.90] – 2026-07-15
 
 ### Added（进程内注入 · 游戏文本输入终极方案）

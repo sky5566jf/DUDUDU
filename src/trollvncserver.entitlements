@@ -551,5 +551,8 @@
 	<true/>
 	<key>com.apple.private.cs.debugger</key>
 	<true/>
+	<!-- 通过 SpringBoardServices 查询前台 App（无需辅助功能授权） -->
+	<key>com.apple.springboard.appcontrol</key>
+	<true/>
 </dict>
 </plist>

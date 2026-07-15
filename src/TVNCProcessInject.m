@@ -9,6 +9,9 @@
 #import <mach/arm/thread_status.h>
 #import <sys/types.h>
 #import <stdint.h>
+#import <sys/sysctl.h>
+#import <libproc.h>
+#import <objc/runtime.h>
 
 // iOS SDK 不提供 <mach/mach_vm.h> 头（符号在 libsystem_kernel 里但无声明），
 // 手动 extern 声明我们用到的三个 mach_vm_* 函数，避免隐式声明编译错误。
@@ -135,19 +138,90 @@ static kern_return_t tvnc_call_in_task(task_t task,
     return KERN_SUCCESS;
 }
 
-#pragma mark - 前台 App PID（AX）
+#pragma mark - 前台 App PID
 
-static int tvnc_foreground_pid(void) {
+// 从 SBApplication 取进程号（兼容 processIdentifier / pid 两种属性名）
+static pid_t tvnc_pid_from_sbapp(id app) {
+    if (!app) return -1;
+    pid_t pid = -1;
+    if ([app respondsToSelector:@selector(processIdentifier)]) {
+        pid = (pid_t)[app processIdentifier];
+    } else if ([app respondsToSelector:@selector(pid)]) {
+        pid = (pid_t)[app pid];
+    }
+    return pid;
+}
+
+// 通过 sysctl 枚举进程 + 读 .app Info.plist，将 bundle id 映射到 pid
+static int tvnc_pid_for_bundle(NSString *bundleId) {
+    if (!bundleId.length) return -1;
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+    size_t size = 0;
+    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0) return -1;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return -1;
+    if (sysctl(mib, 3, procs, &size, NULL, 0) != 0) { free(procs); return -1; }
+    int count = (int)(size / sizeof(struct kinfo_proc));
+    int found = -1;
+    char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
+    for (int i = 0; i < count; i++) {
+        pid_t pid = procs[i].kp_proc.p_pid;
+        if (pid <= 0) continue;
+        int ret = proc_pidpath(pid, pathbuf, sizeof(pathbuf));
+        if (ret <= 0) continue;
+        NSString *path = [NSString stringWithUTF8String:pathbuf];
+        NSRange r = [path rangeOfString:@".app/"];
+        if (r.location == NSNotFound) continue;
+        NSString *appDir = [path substringToIndex:r.location + r.length - 1];
+        NSString *plist = [appDir stringByAppendingPathComponent:@"Info.plist"];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plist];
+        if (info && [bundleId isEqualToString:info[@"CFBundleIdentifier"]]) {
+            found = (int)pid;
+            break;
+        }
+    }
+    free(procs);
+    return found;
+}
+
+// 通过 SpringBoardServices 取前台 App PID（无需辅助功能授权，daemon 可用）
+// 返回 >0 成功；<=0 失败。
+static int tvnc_foreground_pid_springboard(void) {
+    void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+    if (!sbs) return -1;
+    int pid = -1;
+
+    // 1) SBFrontmostApplication() -> SBApplication -> processIdentifier
+    id (*sbFrontmost)(void) = (id (*)(void))dlsym(sbs, "SBFrontmostApplication");
+    if (sbFrontmost) {
+        pid = (int)tvnc_pid_from_sbapp(sbFrontmost());
+        if (pid > 0) { dlclose(sbs); return pid; }
+    }
+
+    // 2) SBFrontmostApplicationBundleIdentifier() -> 反查进程
+    NSString *(*sbFrontBid)(void) = (NSString *(*)(void))dlsym(sbs, "SBFrontmostApplicationBundleIdentifier");
+    NSString *bid = sbFrontBid ? sbFrontBid() : nil;
+    if (bid.length) {
+        pid = tvnc_pid_for_bundle(bid);
+        if (pid > 0) { dlclose(sbs); return pid; }
+    }
+
+    dlclose(sbs);
+    return pid;
+}
+
+// AX 兜底（仅桌面 / 已授权辅助功能的环境可用）
+static int tvnc_foreground_pid_ax(void) {
     void *h = dlopen("/System/Library/PrivateFrameworks/Accessibility.framework/Accessibility", RTLD_LAZY);
     if (!h) h = dlopen("/System/Library/Frameworks/Accessibility.framework/Accessibility", RTLD_LAZY);
     if (!h) return -1;
     TVNC_AXCreateSystemWide createSystemWide = (TVNC_AXCreateSystemWide)dlsym(h, "AXUIElementCreateSystemWide");
     TVNC_AXCopyAttr copyAttr = (TVNC_AXCopyAttr)dlsym(h, "AXUIElementCopyAttributeValue");
     TVNC_AXGetPid getPid = (TVNC_AXGetPid)dlsym(h, "AXUIElementGetPid");
-    if (!createSystemWide || !copyAttr || !getPid) return -1;
+    if (!createSystemWide || !copyAttr || !getPid) { dlclose(h); return -1; }
 
     AXUIElementRef sys = createSystemWide();
-    if (!sys) return -1;
+    if (!sys) { dlclose(h); return -1; }
     CFTypeRef appRef = NULL;
     AXError e = copyAttr(sys, CFSTR("AXFocusedApplication"), &appRef);
     int pid = -1;
@@ -158,7 +232,15 @@ static int tvnc_foreground_pid(void) {
         CFRelease(appRef);
     }
     CFRelease(sys);
+    dlclose(h);
     return pid;
+}
+
+// 综合取前台 PID：SpringBoard 优先（daemon 可用），AX 兜底
+static int tvnc_foreground_pid(void) {
+    int pid = tvnc_foreground_pid_springboard();
+    if (pid > 0) return pid;
+    return tvnc_foreground_pid_ax();
 }
 
 #pragma mark - 目标进程符号解析
@@ -358,7 +440,7 @@ static NSString *tvnc_dylib_path(void) {
     if (pid <= 0) {
         r[@"status"] = @"error";
         r[@"stage"] = @"foreground_pid";
-        r[@"error"] = @"无法获取前台 App PID（设备需开启辅助功能访问，且当前有 App 在前台）";
+        r[@"error"] = @"无法获取前台 App PID（当前需有 App 处于前台；若 SpringBoard 查询被拒，请在 entitlements 加 com.apple.springboard.appcontrol 并重签）";
         return r;
     }
     r[@"foreground_pid"] = @(pid);
@@ -399,7 +481,7 @@ static NSString *tvnc_dylib_path(void) {
     if (pid <= 0) {
         r[@"status"] = @"error";
         r[@"stage"] = @"foreground_pid";
-        r[@"error"] = @"无法获取前台 App PID（需有 App 在前台且光标在输入框）";
+        r[@"error"] = @"无法获取前台 App PID（需有 App 处于前台；若 SpringBoard 查询被拒，请在 entitlements 加 com.apple.springboard.appcontrol 并重签）";
         return r;
     }
     r[@"foreground_pid"] = @(pid);
