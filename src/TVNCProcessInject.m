@@ -290,13 +290,50 @@ static int tvnc_foreground_pid_fbs(void) {
     return v > 0 ? v : -1;
 }
 
-// 综合取前台 PID：FrontBoard 优先（daemon 可用且最稳），其次 SpringBoard XPC，AX 兜底
+// 综合取前台 PID：FrontBoard 优先（daemon 可用且最稳），其次 SpringBoard XPC，AX 兜底，sysctl 兜底
 static int tvnc_foreground_pid(void) {
     int pid = tvnc_foreground_pid_fbs();
     if (pid > 0) return pid;
     pid = tvnc_foreground_pid_springboard();
     if (pid > 0) return pid;
-    return tvnc_foreground_pid_ax();
+    pid = tvnc_foreground_pid_ax();
+    if (pid > 0) return pid;
+
+    // 兜底：通过 sysctl 枚举最新启动的用户 App（取最后启动的 .app 进程）
+    @try {
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+        size_t size = 0;
+        if (sysctl(mib, 3, NULL, &size, NULL, 0) == 0 && size > 0) {
+            struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+            if (procs && sysctl(mib, 3, procs, &size, NULL, 0) == 0) {
+                int count = (int)(size / sizeof(struct kinfo_proc));
+                pid_t bestPid = -1;
+                for (int i = count - 1; i >= 0; i--) {
+                    if (procs[i].kp_proc.p_stat != SRUN) continue;
+                    pid_t p = procs[i].kp_proc.p_pid;
+                    if (p <= 0) continue;
+                    char pathbuf[4096];
+                    if (proc_pidpath(p, pathbuf, sizeof(pathbuf)) <= 0) continue;
+                    NSString *path = [NSString stringWithUTF8String:pathbuf];
+                    if ([path rangeOfString:@".app/"].location == NSNotFound) continue;
+                    if ([path hasPrefix:@"/System/"] || [path hasPrefix:@"/usr/"]) continue;
+                    if ([path containsString:@"/CoreServices/SpringBoard.app/"]) continue;
+                    bestPid = p;
+                    break;
+                }
+                free(procs);
+                if (bestPid > 0) {
+                    TVLog(@"foreground_pid: sysctl fallback found pid=%d", bestPid);
+                    return bestPid;
+                }
+            }
+            free(procs);
+        }
+    } @catch (NSException *e) {
+        TVLog(@"foreground_pid: sysctl fallback failed: %@", e.reason);
+    }
+
+    return -1;
 }
 
 #pragma mark - 目标进程符号解析

@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.99] – 2026-07-15
+
+### Changed（`tvnc_foreground_pid` 新增 sysctl 兜底，已修正 namelen）
+- 在 `src/TVNCProcessInject.m` 的 `tvnc_foreground_pid()` 优先级链末尾加入 **sysctl 兜底**：通过 `sysctl(KERN_PROC_ALL)` + `proc_pidpath` 从后往前枚举 `.app` 进程，取最后启动的用户 App 作为前台候选（FBS → SBS → AX → sysctl）。
+- **修正**：原写法 `sysctl(mib, 4, …)` 与同文件已验证的 `tvnc_enumerate_user_apps` / `tvnc_pid_for_bundle`（`sysctl(mib, 3, …)`）不一致，`KERN_PROC_ALL` 下第 4 个 mib 元素被忽略，可能导致 `EINVAL`。已统一为 `sysctl(mib, 3, …)`，使兜底真正生效。
+- 说明：该兜底仅用于 `probe` 的诊断 `foreground_pid_guess` 与 `injectText:` 的**额外候选**；真正的注入仍走 v3.98 的「枚举全部用户 App 逐一注入」路径，不依赖前台 PID 检测即可工作。本版本为对 v3.98 的小幅增强，行为兼容。
+
 ## [3.98] – 2026-07-15
 
 ### Changed（input_inject 不再依赖前台 PID 检测）
