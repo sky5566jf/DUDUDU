@@ -3,6 +3,7 @@
 // 仅用 mach API（守护进程无 UIKit）。详细实现见头文件注释。
 
 #import "TVNCProcessInject.h"
+#import "Logging.h"
 #import <dlfcn.h>
 #import <mach/mach.h>
 #import <mach/thread_status.h>
