@@ -154,7 +154,6 @@ static int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **outpu
 
 #import "TVNCHttpServer.h"
 #import "TVNCApiManager.h"
-#import "TVNCProcessInject.h"
 #import "Logging.h"
 #import "STHIDEventGenerator.h"
 
@@ -638,16 +637,6 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleClearAppsForce];
     } else if ([path isEqualToString:@"/api/frontmost"]) {
         return [self handleFrontmost];
-    } else if ([path isEqualToString:@"/api/input_hid"]) {
-        return [self handleInputHid:query body:body];
-    } else if ([path isEqualToString:@"/api/input_ax"]) {
-        return [self handleInputAx:query body:body];
-    } else if ([path isEqualToString:@"/api/input_inject"]) {
-        return [self handleInputInject:query body:body];
-    } else if ([path isEqualToString:@"/api/input_keyboard"]) {
-        return [self handleInputKeyboard:query body:body];
-    } else if ([path isEqualToString:@"/api/inject_probe"]) {
-        return [self handleInjectProbe];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
         return [self handleAssistiveTouch:query method:method];
     } else if ([path isEqualToString:@"/api/install"]) {
@@ -3053,220 +3042,9 @@ static NSString *tvncGetRealDeviceName(void) {
     return response;
 }
 
-// POST /api/input_hid  (body: UTF-8 文本, 或 ?text=xxx)
-// 通过 HID 键盘事件注入文本：绕过 firstResponder，直接模拟外接物理键盘。
-// 适用于游戏 / 自定义渲染输入框 / 任何不暴露原生 UITextField 焦点的场景：
-//   - ASCII（英数符号）→ STHIDEventGenerator.keyPress 逐字符模拟外接物理键盘
-//   - 非 ASCII（中文等）→ 自动降级为 写剪贴板 + Cmd+V 的 HID 粘贴事件
-// 两者均不经 firstResponder，只要目标 App 响应物理键盘即可收到。
-// POST /api/input_hid  (body: UTF-8 文本, 或 ?text=xxx)
-// 【百分百可靠方案 · 推荐首用】
-// 通过 STHIDEventGenerator 把文本当成"外接蓝牙键盘"逐字符发送 HID 键盘事件。
-// 这是 VNC 远程敲键用的同一条通道，在 daemon 下完全可用，不依赖前台 PID / task_for_pid / UIKit / AX。
-// 适用：任何支持键盘输入的输入框（游戏 / 自绘框 / 标准输入框），等价于物理键盘，游戏自绘框也能收到。
-// 使用前提：请先在游戏里点一下目标输入框使其获得焦点，再调用本接口。
-// 限制：HID 键盘码只能编码 ASCII（英文字母/数字/符号）。中文/emoji 无法用 HID 发送，
-//       会自动写入设备剪贴板，请在游戏输入框内长按粘贴（中文唯一可靠方案）。
-- (TVNCHttpResponse *)handleInputHid:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-
-    NSString *text = nil;
-    if (body && body.length > 0) {
-        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-    }
-    if (!text || text.length == 0) {
-        NSString *q = query[@"text"];
-        if (q) text = [q stringByRemovingPercentEncoding];
-    }
-    if (!text || text.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-
-    // 与 VNC 敲键一致，必须在主线程调用 generator。
-    // 注意：HTTP handler 跑在后台全局队列，这里要 dispatch_sync 回主线程，
-    // 绝不能递归调用自身（否则无限递归栈溢出）。
-    if (![NSThread isMainThread]) {
-        __block TVNCHttpResponse *resp = nil;
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            resp = [self handleInputHid:query body:body];
-        });
-        return resp;
-    }
-
-    STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
-    if (!gen) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        response.body = [NSJSONSerialization dataWithJSONObject:
-            @{@"success": @NO, @"error": @"HID generator unavailable (STHIDEventGenerator sharedGenerator == nil)"} options:0 error:nil];
-        return response;
-    }
-
-    NSMutableString *sent = [NSMutableString string];
-    NSMutableString *skipped = [NSMutableString string];
-    [text enumerateSubstringsInRange:NSMakeRange(0, text.length)
-                             options:NSStringEnumerationByComposedCharacterSequences
-                          usingBlock:^(NSString *sub, NSRange subRange, NSRange enclosing, BOOL *stop) {
-        // 仅 ASCII（<=0x7F）可经 HID 键盘事件发送
-        if (sub.length == 1 && [sub characterAtIndex:0] <= 127) {
-            @try { [gen keyPress:sub]; } @catch (NSException *e) { TVLog(@"HID keyPress failed: %@", e.reason); }
-            [sent appendString:sub];
-        } else {
-            [skipped appendString:sub];
-        }
-    }];
-
-    BOOL hasSkipped = (skipped.length > 0);
-    if (hasSkipped) {
-        // 非 ASCII：唯一可靠方案是写剪贴板 + 游戏内长按粘贴
-        @try { [UIPasteboard generalPasteboard].string = text; } @catch (NSException *e) {}
-    }
-
-    response.statusCode = 200;
-    response.contentType = @"application/json";
-    NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    result[@"success"] = @YES;
-    result[@"method"] = @"hid";
-    result[@"sent"] = sent;
-    result[@"sent_length"] = @(sent.length);
-    if (hasSkipped) {
-        result[@"skipped"] = skipped;
-        result[@"skipped_length"] = @(skipped.length);
-        result[@"note"] = @"已发送ASCII部分；非ASCII(中文/emoji)无法经HID键盘发送，已写入设备剪贴板，请在游戏输入框内长按粘贴";
-    } else {
-        result[@"note"] = @"已通过HID键盘事件逐字符发送(等价外接键盘)。请确保游戏输入框已获得焦点(先点一下输入框)";
-    }
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    return response;
-}
-
-// POST /api/input_ax  (body: UTF-8 文本, 或 ?text=xxx)
-// 通过系统无障碍(AX)通道注入文本：直接对"当前聚焦的 UI 元素"写入文本值。
-// 与 /api/input（firstResponder）、/api/input_hid（HID/剪贴板）互补，专门解决
-// 游戏 / 自定义 / 自绘输入框"任何字符都进不去"的问题（懒人精灵巨魔版同款通道）。
-// 全程不碰剪贴板，不会触发 iOS 16 "允许粘贴" 弹窗。
-// 前置：设备需开启辅助功能访问；当前光标须停在目标文本区。
-- (TVNCHttpResponse *)handleInputAx:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-
-    NSString *text = nil;
-    if (body && body.length > 0) {
-        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-    }
-    if (!text || text.length == 0) {
-        NSString *q = query[@"text"];
-        if (q) text = [q stringByRemovingPercentEncoding];
-    }
-    if (!text || text.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-
-    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaAX:text];
-    response.statusCode = ok ? 200 : 400;
-    response.contentType = @"application/json";
-    NSDictionary *result = ok ?
-        @{@"success": @YES, @"method": @"ax", @"text": text, @"length": @(text.length),
-          @"note": @"via system Accessibility (AX) channel; no paste prompt"} :
-        @{@"success": @NO,
-          @"error": @"AX input failed: no focused element / AX not authorized / target field not AX-exposed. Check 设置→辅助功能 access and that cursor is in the target text field."};
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    return response;
-}
-
-// POST /api/input_inject
-// 进程内注入：把 tvnc_inject.dylib 注入目标 App 进程，在其进程空间内
-// 直接调用 UIKit insertText:（懒人精灵巨魔版「root模式直接输入文字」等价实现）。
-// 绕开输入法与 AX 节点限制，可解决游戏自绘框文本输入。需要 entitlements 含 task_for_pid-allow。
-// 不依赖前台 PID 检测：通过 sysctl 枚举全部用户 App 进程，逐一注入并调用 tvnc_inject_text，
-// 仅前台 App（有焦点输入框）会真正写入文本，后台 App 自动跳过。
-// 参数：body UTF-8 文本，或 ?text=xxx。返回每步详细状态，便于定位失败环节。
-- (TVNCHttpResponse *)handleInputInject:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-
-    NSString *text = nil;
-    if (body && body.length > 0) {
-        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-    }
-    if (!text || text.length == 0) {
-        NSString *q = query[@"text"];
-        if (q) text = [q stringByRemovingPercentEncoding];
-    }
-    if (!text || text.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-
-    NSDictionary *result = [TVNCProcessInject injectText:text];
-    BOOL ok = [result[@"status"] isEqualToString:@"ok"] && [result[@"injected"] boolValue];
-    response.statusCode = ok ? 200 : 400;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    return response;
-}
-
-// GET /api/inject_probe
-// 仅探测：枚举用户 App 进程 + 验证 task_for_pid 是否可取 task port（不实际注入）。
-// 用于在设备上确认 entitlements 的 task_for_pid-allow 是否生效，是注入能否成功的前提。
-// 不再要求精确前台 PID（daemon 下 SpringBoard/FrontBoard XPC 不可用），只要能枚举到 App 并取 task port 即视为通道打通。
-- (TVNCHttpResponse *)handleInjectProbe {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    NSDictionary *result = [TVNCProcessInject probe];
-    BOOL ok = [result[@"status"] isEqualToString:@"ok"];
-    response.statusCode = ok ? 200 : 400;
-    response.contentType = @"application/json";
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    return response;
-}
 
 // POST /api/clearapps/smart
 // 智能清理后台应用（识别当前应用，桌面则跳过）
-// POST /api/input_keyboard  (body: UTF-8 文本, 或 ?text=xxx)
-// 通过 iOS 键盘系统私有 API（UIKeyboardImpl）直接输入文本。
-// 绕过第一响应者类型限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗。
-// 适用：游戏/引擎自绘/标准输入框；对完全不接系统键盘的自绘框可能无效（需进程内注入 input_inject）。
-// 不需要前台 PID / task_for_pid，故与 /api/input_inject 互补，可在注入通道不可用时作为替代。
-- (TVNCHttpResponse *)handleInputKeyboard:(NSDictionary *)query body:(NSData *)body {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-
-    NSString *text = nil;
-    if (body && body.length > 0) {
-        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
-    }
-    if (!text || text.length == 0) {
-        NSString *q = query[@"text"];
-        if (q) text = [q stringByRemovingPercentEncoding];
-    }
-    if (!text || text.length == 0) {
-        response.statusCode = 400;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-
-    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaKeyboard:text];
-    response.statusCode = ok ? 200 : 400;
-    response.contentType = @"application/json";
-    NSDictionary *result = ok ?
-        @{@"success": @YES, @"method": @"keyboard", @"text": text, @"length": @(text.length),
-          @"note": @"via UIKeyboardImpl private API; no paste prompt, works with game engines / self-drawn fields"} :
-        @{@"success": @NO,
-          @"error": @"Keyboard input failed: UIKeyboardImpl unavailable, or no active keyboard session (daemon has no foreground input session). Try /api/input_inject for game self-drawn fields."};
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    return response;
-}
-
 - (TVNCHttpResponse *)handleClearAppsSmart {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
 
@@ -3763,12 +3541,7 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
-        "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式：第一响应者→UIKeyboardImpl→AX→HID，支持任何App，body: 纯文本）</li>\n"
-        "<li><b>POST /api/input_hid</b> - 【百分百方案】HID键盘事件逐字符输入(等价外接键盘，VNC同款通道，不依赖前台PID/task_for_pid/UIKit/AX)，body 或 ?text=；中文自动写剪贴板需游戏内长按粘贴</li>\n"
-        "<li><b>POST /api/input_ax</b> - 无障碍(AX)通道直接写聚焦元素文本（body 或 ?text=，无粘贴窗）</li>\n"
-        "<li><b>POST /api/input_keyboard</b> - 通过键盘系统输入（UIKeyboardImpl 私有API，绕过第一响应者，适用于游戏/自绘框，不弹粘贴窗）</li>\n"
-        "<li><b>POST /api/input_inject</b> - 进程内注入 dylib 直接调 UIKit insertText（游戏自绘框终极方案；枚举全部用户 App 注入，不依赖前台 PID 检测，需 task_for_pid entitlements）</li>\n"
-        "<li><b>GET /api/inject_probe</b> - 注入通道探针（枚举用户 App + 验证 task_for_pid 可取 task port，不依赖前台 PID 检测）</li>\n"
+        "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式：第一响应者→HID→UIKeyboardImpl→AX，支持任何App，body: 纯文本 或 ?text=）</li>\n"
         "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"

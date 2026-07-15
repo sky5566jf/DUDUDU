@@ -2,6 +2,14 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.03] – 2026-07-15
+
+### Changed（文本输入只保留 `/api/input` 一个入口）
+- 删除其余文本输入接口及其实现：`/api/input_hid`、`/api/input_ax`、`/api/input_keyboard`、`/api/input_inject`、`/api/inject_probe`。
+- 删除进程内注入相关源码：`src/TVNCProcessInject.{h,m}`、`src/tvnc_inject.m`，并从 Makefile 移除 `tvnc_inject` library 与 `TVNCProcessInject.m` 编译项、从 `TVNCHttpServer.mm` 移除 `#import "TVNCProcessInject.h"`。
+- `TVNCHttpServer.mm` 文档列表同步清理为只剩 `/api/input`（级联：第一响应者→HID→UIKeyboardImpl→AX）。
+- 说明：`/api/input` 仍走 v4.02 修复后的级联；HID/剪贴板/UIKeyboardImpl/AX 等内部方式保留为级联兜底，只是不再单独暴露为独立接口。
+
 ## [4.02] – 2026-07-15
 
 ### Fixed（`/api/input` v3.96 回归：UIKeyboardImpl 假成功短路 HID）
