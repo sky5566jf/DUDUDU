@@ -2,6 +2,17 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.04] – 2026-07-15
+
+### Changed（文本输入级联进一步收敛为「第一响应者 → 剪贴板 + Cmd+V」）
+- 按用户要求只保留两招：`insertText:`（第一响应者标准路径，UIKit `replaceRange:` 插入，中英文都行）+ `inputTextViaClipboard:`（写 UIPasteboard 后通过 `STHIDEventGenerator` 发 Cmd+V 组合键粘贴）。
+- **删除后期加入的文本通道**（v4.03 仍保留作级联兜底，本次彻底移除）：
+  - `inputTextViaHID:`（HID 逐键 ASCII 文本通道，v3.96 进级联）
+  - `inputTextViaKeyboard:` + `_keyboardInputSync:`（UIKeyboardImpl 私有 API，v3.93 独立接口 → v3.96 进级联，正是 v3.96 回归元凶）
+  - `inputTextViaAX:` + `_axInputSync:` + `TVNCLoadAX` + `gTVNCAX` 及整段 Accessibility `dlopen`/`dlsym` 块
+- `.h` 同步移除 `inputTextViaHID/AX/Keyboard` 三个声明；清理一条带「AX」误导注释的重复 `dlfcn.h` import（`dlfcn` 仍被 SpringBoardServices 前台检测使用，保留）。
+- **注意（架构影响）**：删 HID 后，`/api/input` 在 daemon（VNC 无界面守护进程，无键盘会话/辅助功能授权）场景下不再有"外接键盘等价"通道，第一响应者与剪贴板+Cmd+V 都依赖前台 App 的 UIKit 键盘会话/聚焦。此改法更适合主 App 内有焦点的场景；VNC 远程无界面环境若需稳定输中英文须保留 HID 层。
+
 ## [4.03] – 2026-07-15
 
 ### Changed（文本输入只保留 `/api/input` 一个入口）

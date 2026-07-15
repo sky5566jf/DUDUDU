@@ -46,7 +46,6 @@
 #import <spawn.h>   // 用于 posix_spawn
 #import <sys/sysctl.h>  // 用于 sysctl 枚举进程
 #import <libproc.h>     // 用于 proc_pidpath
-#import <dlfcn.h>        // 用于 dlopen/dlsym 动态加载 AX 私有框架
 #ifdef HAS_ROOT_SUPPORT
 #import "TSUtil.h"  // 用于 spawnRoot
 #endif
@@ -1034,7 +1033,7 @@ int tvncGetFBBytesPerPixel(void);
         return result;
     }
     
-    // 方法1: 尝试直接操作第一响应者
+    // 方法1: 尝试直接操作第一响应者（UIKit 标准方式，支持中英文）
     UIView *firstResponder = [self findFirstResponder];
     if (firstResponder) {
         TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
@@ -1075,69 +1074,15 @@ int tvncGetFBBytesPerPixel(void);
         }
     }
     
-    // 方式2: HID 键盘事件（daemon 下最可靠，VNC 远程打字同款通道，不依赖前台PID/UIKit/AX）
-    // 必须排在 UIKeyboardImpl / AX 之前：UIKeyboardImpl.addText: 在 daemon 无键盘会话时会"假成功"
-    // （返回 YES 但实际没送到前台 App），若排在前会短路级联、导致 HID 永远不执行（v3.96 回归点）。
-    TVLog(@"inputText: firstResponder failed, trying HID...");
-    if ([self inputTextViaHID:text]) {
-        TVLog(@"inputText: Success via HID");
-        return YES;
-    }
-
-    // 方式3: UIKeyboardImpl 私有 API（游戏/自绘框可能有效，不弹粘贴窗）—— 仅作 HID 之后的兜底
-    TVLog(@"inputText: HID failed, trying UIKeyboardImpl...");
-    if ([self inputTextViaKeyboard:text]) {
-        TVLog(@"inputText: Success via UIKeyboardImpl");
-        return YES;
-    }
-
-    // 方式4: Accessibility AX 通道（绕过剪贴板弹窗）
-    TVLog(@"inputText: UIKeyboardImpl failed, trying AX...");
-    if ([self inputTextViaAX:text]) {
-        TVLog(@"inputText: Success via AX");
+    // 方法2: 剪贴板 + Cmd+V 粘贴（中文等所有字符的兜底，无需 UIKit 第一响应者焦点）
+    TVLog(@"inputText: firstResponder failed, trying clipboard paste...");
+    if ([self inputTextViaClipboard:text]) {
+        TVLog(@"inputText: Success via clipboard");
         return YES;
     }
 
     TVLog(@"inputText: All methods failed");
     return NO;
-}
-
-// 通过 HID 事件输入文本（使用 STHIDEventGenerator）
-- (BOOL)inputTextViaHID:(NSString *)text {
-    if (!text || text.length == 0) {
-        return NO;
-    }
-    
-    // 检查是否包含非 ASCII 字符
-    BOOL hasNonASCII = NO;
-    for (NSUInteger i = 0; i < text.length; i++) {
-        unichar c = [text characterAtIndex:i];
-        if (c > 127) {
-            hasNonASCII = YES;
-            break;
-        }
-    }
-    
-    // 如果包含中文等非 ASCII 字符，使用剪贴板方式
-    if (hasNonASCII) {
-        TVLog(@"Text contains non-ASCII characters, using clipboard method");
-        return [self inputTextViaClipboard:text];
-    }
-    
-    @try {
-        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-        
-        // 逐个字符发送
-        for (NSUInteger i = 0; i < text.length; i++) {
-            NSString *character = [text substringWithRange:NSMakeRange(i, 1)];
-            [generator keyPress:character];
-        }
-        
-        return YES;
-    } @catch (NSException *exception) {
-        TVLog(@"HID input failed: %@", exception.reason);
-        return NO;
-    }
 }
 
 // 通过剪贴板输入文本
@@ -1159,119 +1104,6 @@ int tvncGetFBBytesPerPixel(void);
     });
     
     return success;
-}
-
-// MARK: - 无障碍(AX) 输入
-// 系统无障碍(Accessibility) 私有 API 动态加载。
-// iOS 上 AXUIElement 系列函数在私有 Accessibility 框架中，且不同 iOS 版本路径不同
-// （iOS16 在 PrivateFrameworks，iOS17+ 在 Frameworks）。用 dlopen/dlsym 动态解析，
-// 避免编译期/链接期依赖 SDK 中框架路径，CI 不会因框架定位失败。
-typedef CFTypeRef AXUIElementRef;
-typedef uint32_t AXError;
-typedef AXUIElementRef (*TVNC_AXCreateSystemWide)(void);
-typedef AXError (*TVNC_AXCopyAttr)(AXUIElementRef, CFStringRef, CFTypeRef *);
-typedef AXError (*TVNC_AXSetAttr)(AXUIElementRef, CFStringRef, CFTypeRef);
-typedef CFTypeID (*TVNC_AXGetTypeID)(void);
-
-static struct {
-    void *handle;
-    TVNC_AXCreateSystemWide createSystemWide;
-    TVNC_AXCopyAttr copyAttr;
-    TVNC_AXSetAttr setAttr;
-    TVNC_AXGetTypeID getTypeID;
-    BOOL tried;
-} gTVNCAX = {0};
-
-static BOOL TVNCLoadAX(void) {
-    if (gTVNCAX.tried) return gTVNCAX.handle != NULL;
-    gTVNCAX.tried = YES;
-    const char *paths[] = {
-        "/System/Library/PrivateFrameworks/Accessibility.framework/Accessibility",
-        "/System/Library/Frameworks/Accessibility.framework/Accessibility",
-        NULL
-    };
-    for (int i = 0; paths[i]; i++) {
-        gTVNCAX.handle = dlopen(paths[i], RTLD_LAZY);
-        if (gTVNCAX.handle) break;
-    }
-    if (!gTVNCAX.handle) {
-        TVLog(@"AX: dlopen Accessibility failed");
-        return NO;
-    }
-    gTVNCAX.createSystemWide = (TVNC_AXCreateSystemWide)dlsym(gTVNCAX.handle, "AXUIElementCreateSystemWide");
-    gTVNCAX.copyAttr        = (TVNC_AXCopyAttr)dlsym(gTVNCAX.handle, "AXUIElementCopyAttributeValue");
-    gTVNCAX.setAttr         = (TVNC_AXSetAttr)dlsym(gTVNCAX.handle, "AXUIElementSetAttributeValue");
-    gTVNCAX.getTypeID       = (TVNC_AXGetTypeID)dlsym(gTVNCAX.handle, "AXUIElementGetTypeID");
-    BOOL ok = gTVNCAX.createSystemWide && gTVNCAX.copyAttr && gTVNCAX.setAttr && gTVNCAX.getTypeID;
-    if (!ok) TVLog(@"AX: dlsym missing symbol");
-    return ok;
-}
-
-// 通过系统无障碍(AX)通道注入文本：直接对"当前聚焦的 UI 元素"写入文本值。
-// 与 inputText（firstResponder）、inputTextViaHID（HID/剪贴板）互补，专门解决
-// 游戏 / 引擎自绘 / WebView 等"任何字符都进不去"的输入框（懒人精灵巨魔版同款通道）。
-// 全程不碰剪贴板，不会触发 iOS 16 "允许粘贴" 弹窗。
-// 前置：设备需开启辅助功能访问（TrollStore 环境通常已授权），且当前光标停在目标文本区。
-- (BOOL)inputTextViaAX:(NSString *)text {
-    if (!text || text.length == 0) {
-        return NO;
-    }
-    if (!TVNCLoadAX()) {
-        return NO;
-    }
-    // 在独立工作线程跑 AX（AX XPC 需要 runloop；避免在主线程 dispatch_sync 死锁），
-    // 通过 NSCondition 回收结果。无论调用方处于哪个线程都不会死锁。
-    __block BOOL result = NO;
-    NSCondition *cond = [[NSCondition alloc] init];
-    __block BOOL done = NO;
-    NSThread *worker = [[NSThread alloc] initWithBlock:^{
-        @autoreleasepool {
-            result = [self _axInputSync:text];
-            [cond lock];
-            done = YES;
-            [cond signal];
-            [cond unlock];
-        }
-    }];
-    [worker start];
-    [cond lock];
-    while (!done) [cond wait];
-    [cond unlock];
-    return result;
-}
-
-// AX 实际写入逻辑（运行于独立工作线程）。
-- (BOOL)_axInputSync:(NSString *)text {
-    AXUIElementRef systemWide = gTVNCAX.createSystemWide();
-    if (!systemWide) {
-        TVLog(@"AX: createSystemWide failed");
-        return NO;
-    }
-
-    CFTypeRef focusedRaw = NULL;
-    AXError err = gTVNCAX.copyAttr(systemWide, CFSTR("AXFocusedUIElement"), &focusedRaw);
-    if (err != 0 || !focusedRaw || CFGetTypeID(focusedRaw) != gTVNCAX.getTypeID()) {
-        TVLog(@"AX: no focused element (err=%u)", (unsigned)err);
-        if (focusedRaw) CFRelease(focusedRaw);
-        CFRelease(systemWide);
-        return NO;
-    }
-    AXUIElementRef focused = (AXUIElementRef)focusedRaw;
-
-    // 优先：直接设置 AXValue（覆盖/填入文本框值）
-    AXError setErr = gTVNCAX.setAttr(focused, CFSTR("AXValue"), (__bridge CFTypeRef)text);
-    BOOL ok = (setErr == 0);
-
-    // 兜底：若目标不支持 AXValue，则写 AXSelectedText（替换选区 = 在光标处插入）
-    if (!ok) {
-        setErr = gTVNCAX.setAttr(focused, CFSTR("AXSelectedText"), (__bridge CFTypeRef)text);
-        ok = (setErr == 0);
-        TVLog(@"AX: AXValue failed (err=%u), fallback AXSelectedText ok=%d", (unsigned)setErr, ok);
-    }
-
-    CFRelease(focused);
-    CFRelease(systemWide);
-    return ok;
 }
 
 // 发送粘贴组合键 Command+V
@@ -1307,66 +1139,6 @@ static BOOL TVNCLoadAX(void) {
             return NO;
         }
     }
-}
-
-#pragma mark - 键盘系统输入（UIKeyboardImpl 私有 API）
-
-// 实际执行（必须在主线程）
-- (BOOL)_keyboardInputSync:(NSString *)text {
-    Class keyboardImplClass = NSClassFromString(@"UIKeyboardImpl");
-    if (!keyboardImplClass) {
-        TVLog(@"Keyboard: UIKeyboardImpl class not found (UIKit not linked?)");
-        return NO;
-    }
-    SEL sharedImplSel = NSSelectorFromString(@"sharedInstance");
-    if (![keyboardImplClass respondsToSelector:sharedImplSel]) {
-        TVLog(@"Keyboard: sharedInstance not available");
-        return NO;
-    }
-    id keyboardImpl = ((id(*)(id, SEL))[keyboardImplClass methodForSelector:sharedImplSel])(keyboardImplClass, sharedImplSel);
-    if (!keyboardImpl) {
-        TVLog(@"Keyboard: Failed to get UIKeyboardImpl instance");
-        return NO;
-    }
-    @try {
-        for (NSUInteger i = 0; i < text.length; i++) {
-            NSString *ch = [text substringWithRange:NSMakeRange(i, 1)];
-            SEL addTextSel = NSSelectorFromString(@"addText:");
-            if ([keyboardImpl respondsToSelector:addTextSel]) {
-                ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:addTextSel])(keyboardImpl, addTextSel, ch);
-            } else {
-                SEL insSel = NSSelectorFromString(@"insertText:");
-                if ([keyboardImpl respondsToSelector:insSel]) {
-                    ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:insSel])(keyboardImpl, insSel, ch);
-                }
-            }
-            usleep(10000); // 10ms，确保输入被处理
-        }
-        TVLog(@"Keyboard: inputted %lu chars via UIKeyboardImpl", (unsigned long)text.length);
-        return YES;
-    } @catch (NSException *e) {
-        TVLog(@"Keyboard input failed: %@", e.reason);
-        return NO;
-    }
-}
-
-// 通过 iOS 键盘系统直接输入文本（使用 UIKeyboardImpl 私有 API）
-// 绕过第一响应者限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗。
-// 适用：游戏/引擎自绘/标准输入框；对完全不接系统键盘的自绘框可能无效（需进程内注入 input_inject）。
-// 主线程安全：HTTP 处理线程若非主线程，dispatch_async 回主线程 + semaphore 等待，避免 dispatch_sync 死锁。
-- (BOOL)inputTextViaKeyboard:(NSString *)text {
-    if (!text || text.length == 0) return NO;
-    if ([NSThread isMainThread]) {
-        return [self _keyboardInputSync:text];
-    }
-    __block BOOL result = NO;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        result = [self _keyboardInputSync:text];
-        dispatch_semaphore_signal(sem);
-    });
-    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
-    return result;
 }
 
 - (BOOL)sendKeyCode:(NSInteger)keyCode {
