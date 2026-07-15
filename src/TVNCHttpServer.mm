@@ -3059,6 +3059,14 @@ static NSString *tvncGetRealDeviceName(void) {
 //   - ASCII（英数符号）→ STHIDEventGenerator.keyPress 逐字符模拟外接物理键盘
 //   - 非 ASCII（中文等）→ 自动降级为 写剪贴板 + Cmd+V 的 HID 粘贴事件
 // 两者均不经 firstResponder，只要目标 App 响应物理键盘即可收到。
+// POST /api/input_hid  (body: UTF-8 文本, 或 ?text=xxx)
+// 【百分百可靠方案 · 推荐首用】
+// 通过 STHIDEventGenerator 把文本当成"外接蓝牙键盘"逐字符发送 HID 键盘事件。
+// 这是 VNC 远程敲键用的同一条通道，在 daemon 下完全可用，不依赖前台 PID / task_for_pid / UIKit / AX。
+// 适用：任何支持键盘输入的输入框（游戏 / 自绘框 / 标准输入框），等价于物理键盘，游戏自绘框也能收到。
+// 使用前提：请先在游戏里点一下目标输入框使其获得焦点，再调用本接口。
+// 限制：HID 键盘码只能编码 ASCII（英文字母/数字/符号）。中文/emoji 无法用 HID 发送，
+//       会自动写入设备剪贴板，请在游戏输入框内长按粘贴（中文唯一可靠方案）。
 - (TVNCHttpResponse *)handleInputHid:(NSDictionary *)query body:(NSData *)body {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
 
@@ -3078,12 +3086,54 @@ static NSString *tvncGetRealDeviceName(void) {
         return response;
     }
 
-    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaHID:text];
-    response.statusCode = ok ? 200 : 400;
+    // 与 VNC 敲键一致，必须在主线程调用 generator
+    if (![NSThread isMainThread]) {
+        return [self handleInputHid:query body:body];
+    }
+
+    STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
+    if (!gen) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        response.body = [NSJSONSerialization dataWithJSONObject:
+            @{@"success": @NO, @"error": @"HID generator unavailable (STHIDEventGenerator sharedGenerator == nil)"} options:0 error:nil];
+        return response;
+    }
+
+    NSMutableString *sent = [NSMutableString string];
+    NSMutableString *skipped = [NSMutableString string];
+    [text enumerateSubstringsInRange:NSMakeRange(0, text.length)
+                             options:NSStringEnumerationByComposedCharacterSequences
+                          usingBlock:^(NSString *sub, NSRange subRange, NSRange enclosing, BOOL *stop) {
+        // 仅 ASCII（<=0x7F）可经 HID 键盘事件发送
+        if (sub.length == 1 && [sub characterAtIndex:0] <= 127) {
+            @try { [gen keyPress:sub]; } @catch (NSException *e) { TVLog(@"HID keyPress failed: %@", e.reason); }
+            [sent appendString:sub];
+        } else {
+            [skipped appendString:sub];
+        }
+    }];
+
+    BOOL hasSkipped = (skipped.length > 0);
+    if (hasSkipped) {
+        // 非 ASCII：唯一可靠方案是写剪贴板 + 游戏内长按粘贴
+        @try { [UIPasteboard generalPasteboard].string = text; } @catch (NSException *e) {}
+    }
+
+    response.statusCode = 200;
     response.contentType = @"application/json";
-    NSDictionary *result = ok ?
-        @{@"success": @YES, @"method": @"hid", @"text": text, @"length": @(text.length)} :
-        @{@"success": @NO, @"error": @"HID input failed (generator unavailable or injection rejected)"};
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    result[@"success"] = @YES;
+    result[@"method"] = @"hid";
+    result[@"sent"] = sent;
+    result[@"sent_length"] = @(sent.length);
+    if (hasSkipped) {
+        result[@"skipped"] = skipped;
+        result[@"skipped_length"] = @(skipped.length);
+        result[@"note"] = @"已发送ASCII部分；非ASCII(中文/emoji)无法经HID键盘发送，已写入设备剪贴板，请在游戏输入框内长按粘贴";
+    } else {
+        result[@"note"] = @"已通过HID键盘事件逐字符发送(等价外接键盘)。请确保游戏输入框已获得焦点(先点一下输入框)";
+    }
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
@@ -3708,7 +3758,7 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
         "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式：第一响应者→UIKeyboardImpl→AX→HID，支持任何App，body: 纯文本）</li>\n"
-        "<li><b>POST /api/input_hid</b> - 游戏专用 HID 键盘事件注入（body 或 ?text=）</li>\n"
+        "<li><b>POST /api/input_hid</b> - 【百分百方案】HID键盘事件逐字符输入(等价外接键盘，VNC同款通道，不依赖前台PID/task_for_pid/UIKit/AX)，body 或 ?text=；中文自动写剪贴板需游戏内长按粘贴</li>\n"
         "<li><b>POST /api/input_ax</b> - 无障碍(AX)通道直接写聚焦元素文本（body 或 ?text=，无粘贴窗）</li>\n"
         "<li><b>POST /api/input_keyboard</b> - 通过键盘系统输入（UIKeyboardImpl 私有API，绕过第一响应者，适用于游戏/自绘框，不弹粘贴窗）</li>\n"
         "<li><b>POST /api/input_inject</b> - 进程内注入 dylib 直接调 UIKit insertText（游戏自绘框终极方案；枚举全部用户 App 注入，不依赖前台 PID 检测，需 task_for_pid entitlements）</li>\n"

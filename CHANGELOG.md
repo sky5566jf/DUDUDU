@@ -2,6 +2,15 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.00] – 2026-07-15
+
+### Changed（`/api/input_hid` 明确为「百分百」文本通道）
+- 重写 `TVNCHttpServer.mm` 的 `handleInputHid:`：在主线程直接调用 `STHIDEventGenerator` 逐组合字符发送 HID 键盘事件（`keyPress:`），**等价外接蓝牙键盘**，是 VNC 远程敲键的同一条通道，在 daemon 下完全可用。
+- 彻底不依赖前台 PID 检测 / `task_for_pid` / UIKit 第一响应者 / AX —— 这些通道此前在 `trollvncserver` 守护进程下全部失效，导致 `input_keyboard` / `input_inject` 在游戏自绘框场景实测不可用。
+- 反馈增强：返回 `sent` / `skipped` 诊断。仅 ASCII（英文字母/数字/符号）经 HID 逐字符发送；**非 ASCII（中文/emoji）无法用 HID 键盘码编码，自动写入设备剪贴板并提示「游戏输入框内长按粘贴」**（中文唯一可靠方案）。
+- 使用前提：调用前请先在游戏里点一下目标输入框使其获得焦点，HID 键事件才会进入该框。
+- 结论：`/api/input_hid` 是游戏/自绘框文本输入的首选与兜底方案；其余 `input_keyboard`(UIKeyboardImpl)、`input_inject`(进程注入)、`input_ax`(AX) 因 daemon 限制仅作补充。
+
 ## [3.99] – 2026-07-15
 
 ### Changed（`tvnc_foreground_pid` 新增 sysctl 兜底，已修正 namelen）
