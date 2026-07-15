@@ -3704,7 +3704,7 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
-        "<li><b>POST /api/input</b> - 输入文本到当前焦点输入框（body: 纯文本）</li>\n"
+        "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式：第一响应者→UIKeyboardImpl→AX→HID，支持任何App，body: 纯文本）</li>\n"
         "<li><b>POST /api/input_hid</b> - 游戏专用 HID 键盘事件注入（body 或 ?text=）</li>\n"
         "<li><b>POST /api/input_ax</b> - 无障碍(AX)通道直接写聚焦元素文本（body 或 ?text=，无粘贴窗）</li>\n"
         "<li><b>POST /api/input_keyboard</b> - 通过键盘系统输入（UIKeyboardImpl 私有API，绕过第一响应者，适用于游戏/自绘框，不弹粘贴窗）</li>\n"

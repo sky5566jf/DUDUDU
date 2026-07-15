@@ -2,6 +2,19 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.96] – 2026-07-15
+
+### Changed（/api/input 升级为多级自动级联输入）
+- 用户修改了 `/api/input` 的文本输入逻辑（`TrollVNC/src/` 开发分支，不参与生产编译）。已将核心改进**移植**进根目录 `src/TVNCApiManager.mm` 的 `inputText:`。
+- `inputText:` 由原来「第一响应者 → HID」两级，升级为 **四级自动级联**：
+  1. 第一响应者（UITextField / UITextView / 任意 UITextInput）——直接 `replaceRange:withText:`
+  2. **UIKeyboardImpl 私有 API**（`inputTextViaKeyboard`，绕过第一响应者限制，不弹粘贴窗，适用于游戏/自绘框）
+  3. **Accessibility AX 通道**（`inputTextViaAX`，绕过剪贴板弹窗）
+  4. HID 键盘事件（最终兜底）
+- 每级失败自动降级，全部失败才返回 `NO`；并补充分级成功日志便于排错。
+- `/api/input` 文档措辞对齐为"自动选择最佳方式，支持任何App"。
+- 注：`inputTextViaKeyboard` 仍沿用根目录 v3.93 的**安全版**（`dispatch_async` + semaphore 主线程调度），未采用用户分支里的 `dispatch_sync` 写法（后者会触发 `http 000` 死锁）。
+
 ## [3.95] – 2026-07-15
 
 ### Changed（前台 App 检测新增 sysctl 进程枚举兜底）
