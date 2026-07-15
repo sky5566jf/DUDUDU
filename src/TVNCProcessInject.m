@@ -43,13 +43,6 @@ typedef AXError (*TVNC_AXGetPid)(AXUIElementRef, pid_t *);
 
 #define TVNC_RTLD_NOW 0x2
 
-// SBApplication 的进程号方法（运行时由 SpringBoard 实现，编译期 id 不认，故在此声明）。
-// 仅用于 [app processIdentifier] / [app pid] 的编译通过，运行时不会真的用到这个分类实现。
-@interface NSObject (TVNC_SBAppExt)
-- (NSInteger)processIdentifier;
-- (int)pid;
-@end
-
 #pragma mark - 目标进程内存读写
 
 // 从目标 task 读 len 字节，返回 malloc 缓冲（调用方 free）。失败返回 NULL。
@@ -147,16 +140,23 @@ static kern_return_t tvnc_call_in_task(task_t task,
 
 #pragma mark - 前台 App PID
 
-// 从 SBApplication 取进程号（兼容 processIdentifier / pid 两种属性名）
+// 从 SBApplication 取进程号（兼容 processIdentifier / pid 两种属性名）。
+// 用 NSInvocation 运行时调用，避免直接 [app processIdentifier] 与 SDK 中同名方法产生编译期歧义。
 static pid_t tvnc_pid_from_sbapp(id app) {
     if (!app) return -1;
-    pid_t pid = -1;
-    if ([app respondsToSelector:@selector(processIdentifier)]) {
-        pid = (pid_t)[app processIdentifier];
-    } else if ([app respondsToSelector:@selector(pid)]) {
-        pid = (pid_t)[app pid];
+    SEL sel = @selector(processIdentifier);
+    if (![app respondsToSelector:sel]) {
+        sel = @selector(pid);
+        if (![app respondsToSelector:sel]) return -1;
     }
-    return pid;
+    NSMethodSignature *sig = [app methodSignatureForSelector:sel];
+    if (!sig || sig.methodReturnLength == 0) return -1;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.selector = sel;
+    [inv invokeWithTarget:app];
+    int val = 0;
+    [inv getReturnValue:&val]; // processIdentifier/pid 均返回 32 位整数
+    return (pid_t)val;
 }
 
 // 通过 sysctl 枚举进程 + 读 .app Info.plist，将 bundle id 映射到 pid
