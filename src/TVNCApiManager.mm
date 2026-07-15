@@ -34,6 +34,8 @@
 #import <grp.h>
 #import <dlfcn.h>
 #import <objc/message.h>
+#import <sys/sysctl.h>   // KERN_PROC / kinfo_proc（Tier4 前台进程枚举兜底）
+#import <libproc.h>      // proc_pidpath（Tier4 取进程路径兜底）
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -2488,6 +2490,43 @@ static BOOL TVNCLoadAX(void) {
         TVLog(@"Frontmost app (SBS legacy): %@", bundleID);
         return info;
     }
+
+    // ===== Tier 4：sysctl 枚举 /Applications 下的用户进程（最后兜底）=====
+    // 用户空间 App 通常排在 procs 末尾，从后往前取第一个 /Applications/ 下的进程作为前台候选。
+    @try {
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+        size_t size = 0;
+        if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
+            struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+            if (procs && sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
+                int count = (int)(size / sizeof(struct kinfo_proc));
+                for (int i = count - 1; i >= 0; i--) {
+                    if (procs[i].kp_proc.p_stat == SRUN) {
+                        pid_t pid = procs[i].kp_proc.p_pid;
+                        char pathBuf[PROC_PIDPATH_MAXSIZE] = {0};
+                        if (proc_pidpath(pid, pathBuf, sizeof(pathBuf)) > 0) {
+                            NSString *procPath = [NSString stringWithUTF8String:pathBuf];
+                            if ([procPath hasPrefix:@"/Applications/"]) {
+                                NSString *appName = [[procPath lastPathComponent] stringByDeletingPathExtension];
+                                if (appName.length) {
+                                    info[@"bundleID"] = appName;
+                                    info[@"pid"] = @(pid);
+                                    info[@"method"] = @"sysctl";
+                                    TVLog(@"Frontmost app (sysctl): %@ from %@", appName, procPath);
+                                    free(procs);
+                                    return info;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            free(procs);
+        }
+    } @catch (NSException *e) {
+        TVLog(@"sysctl process scan failed: %@", e.reason);
+    }
+
     TVLog(@"Frontmost app: all methods returned nil");
     return info;
 }

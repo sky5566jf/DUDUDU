@@ -2,6 +2,14 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.95] – 2026-07-15
+
+### Changed（前台 App 检测新增 sysctl 进程枚举兜底）
+- 用户修改了清理后台 API 的前台检测逻辑（`TrollVNC/src/` 开发分支）。该目录不参与生产编译（编译只用根目录 `src/`），已将其**唯一有意义的新增**——`sysctl`/`proc_pidpath` 枚举 `/Applications/` 用户进程兜底——移植进根目录 `src/TVNCApiManager.mm` 的 `frontmostAppInfo`，作为 **Tier 4**（FBS → SBS XPC → legacy → sysctl）。
+- 保留 v3.94 已验证的 **FrontBoardServices 优先**策略（比用户分支里把 `SBSCopyFrontmostApplicationDisplayIdentifier()` 当首选更可靠，后者在 daemon 下必然返回 nil，正是原 bug）。
+- `/api/clearapps/smart` 文档措辞对齐用户意图（"不在桌面则关闭前台应用"）。
+- 注：用户 `TrollVNC/src/` 分支里 `p_stat == SZ.ACT` 写法无效（该宏不存在，会编译失败），移植时已改为标准 `SRUN`。
+
 ## [3.94] – 2026-07-15
 
 ### Fixed（前台 App 检测改用 FrontBoardServices，真正解决 daemon 下误判桌面）

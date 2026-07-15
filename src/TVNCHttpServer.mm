@@ -3727,7 +3727,7 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
         "<li><b>POST /api/home</b> - 返回桌面（按一次 Home 键）</li>"
         "<li><b>POST /api/taskmanager</b> - 打开任务管理器（双击 Home 键）</li>"
-        "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
+        "<li><b>POST /api/clearapps/smart</b> - 清理后台应用（不在桌面则关闭前台应用）</li>"
         "<li><b>POST /api/clearapps/force</b> - 强制清理后台应用（即使在桌面也执行：多任务+上滑杀进程）</li>"
         "<li><b>GET /api/frontmost</b> - 诊断：当前前台 App 的 bundleID 及命中的检测通道</li>"
         "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
