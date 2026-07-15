@@ -3086,9 +3086,15 @@ static NSString *tvncGetRealDeviceName(void) {
         return response;
     }
 
-    // 与 VNC 敲键一致，必须在主线程调用 generator
+    // 与 VNC 敲键一致，必须在主线程调用 generator。
+    // 注意：HTTP handler 跑在后台全局队列，这里要 dispatch_sync 回主线程，
+    // 绝不能递归调用自身（否则无限递归栈溢出）。
     if (![NSThread isMainThread]) {
-        return [self handleInputHid:query body:body];
+        __block TVNCHttpResponse *resp = nil;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            resp = [self handleInputHid:query body:body];
+        });
+        return resp;
     }
 
     STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];

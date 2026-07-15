@@ -2,6 +2,12 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.01] – 2026-07-15
+
+### Fixed（`/api/input_hid` v4.00 递归崩溃）
+- v4.00 的 `handleInputHid:` 在非主线程时写成了 `return [self handleInputHid:...]`（递归自身）→ HTTP handler 跑在后台队列时无限递归栈溢出崩溃。修正为 `dispatch_sync(dispatch_get_main_queue(), ...)` 回主线程执行。
+- 说明：`/api/input` 逻辑自 v3.96 起未削弱（v3.96 仅在「第一响应者→HID」间插入 UIKeyboardImpl/AX 两级尝试，属超集；中文剪贴板兜底一直存在）。daemon 下前三级（第一响应者/UIKeyboardImpl/AX）因无 UI/无授权必然失败，仅第四级 HID 能点火，故「以前能在备忘录等 App 输中英文、现在游戏里不行」是守护进程架构差异，非代码回归。
+
 ## [4.00] – 2026-07-15
 
 ### Changed（`/api/input_hid` 明确为「百分百」文本通道）
