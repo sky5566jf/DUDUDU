@@ -32,6 +32,7 @@
 #import <dirent.h>
 #import <pwd.h>
 #import <grp.h>
+#import <dlfcn.h>
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -2310,21 +2311,66 @@ static BOOL TVNCLoadAX(void) {
 
 #pragma mark - 智能清理后台应用
 
+// 运行时取 SBApplication 的 bundleIdentifier（编译期无声明，用 NSInvocation 避免与 SDK 同名方法歧义）
+- (NSString *)tvnc_sbsBundleId:(id)app {
+    if (!app) return nil;
+    SEL sel = @selector(bundleIdentifier);
+    if (![app respondsToSelector:sel]) return nil;
+    NSMethodSignature *sig = [app methodSignatureForSelector:sel];
+    if (!sig) return nil;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.target = app;
+    inv.selector = sel;
+    [inv invoke];
+    __unsafe_unretained id ret = nil;
+    [inv getReturnValue:&ret];
+    return ret;
+}
+
 // 获取当前前台应用的 Bundle ID
+//
+// 重要：trollvncserver 是 daemon（无 UIKit / backboard 连接），
+// 老的 SBSCopyFrontmostApplicationDisplayIdentifier() 在 daemon 上下文会返回 nil，
+// 导致上层把“前台有 App”误判成“在桌面(SpringBoard)”而跳过清理。
+// 这里改用 SpringBoardServices 的 XPC 直查接口（SBFrontmostApplicationBundleIdentifier /
+// SBFrontmostApplication），这些接口不依赖 backboard 连接，daemon 下可用。
 - (NSString *)getFrontmostAppBundleID {
-    // 方法1: 使用 SpringBoardServices 私有 API 获取前台应用
-    // 在 iOS 15 上这个 API 是可用的
+    static void *sbs = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+    });
+    if (sbs) {
+        // 1) SBFrontmostApplicationBundleIdentifier() 直接返回 bundle id（最稳，无 backboard 依赖）
+        NSString *(*sbFrontBid)(void) = (NSString *(*)(void))dlsym(sbs, "SBFrontmostApplicationBundleIdentifier");
+        if (sbFrontBid) {
+            NSString *bid = sbFrontBid();
+            if (bid.length) {
+                TVLog(@"Frontmost app (via SBFrontmostApplicationBundleIdentifier): %@", bid);
+                return bid;
+            }
+        }
+        // 2) SBFrontmostApplication() -> SBApplication -> bundleIdentifier（NSInvocation 调用）
+        id (*sbFrontmost)(void) = (id (*)(void))dlsym(sbs, "SBFrontmostApplication");
+        if (sbFrontmost) {
+            id app = sbFrontmost();
+            if (app) {
+                NSString *bid = [self tvnc_sbsBundleId:app];
+                if (bid.length) {
+                    TVLog(@"Frontmost app (via SBFrontmostApplication): %@", bid);
+                    return bid;
+                }
+            }
+        }
+    }
+    // 3) 最后兜底：老 API（部分越狱/旧环境可用）
     CFStringRef frontmostAppID = SBSCopyFrontmostApplicationDisplayIdentifier();
     if (frontmostAppID) {
         NSString *bundleID = (__bridge_transfer NSString *)frontmostAppID;
-        TVLog(@"Frontmost app (via SBS): %@", bundleID);
+        TVLog(@"Frontmost app (via SBS legacy): %@", bundleID);
         return bundleID;
     }
-    
-    TVLog(@"Frontmost app: SBSCopyFrontmostApplicationDisplayIdentifier returned nil");
-    
-    // 方法2: 尝试使用 FrontBoardServices（如果可用）
-    // 方法3: 返回 nil 让调用者处理
+    TVLog(@"Frontmost app: all methods returned nil");
     return nil;
 }
 

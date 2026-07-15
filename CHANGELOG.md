@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.92] – 2026-07-15
+
+### Fixed（修复 `clearapps/smart` 误判在桌面导致不清理）
+- **`/api/clearapps/smart` 在 App 处于前台时却返回 `frontmostApp:"unknown"` + `onSpringBoard:true` + `action:"skipped"`**：根因是 `getFrontmostAppBundleID` 使用了老的 `SBSCopyFrontmostApplicationDisplayIdentifier()`，该私有 API 在 `trollvncserver`（无 UIKit/backboard 连接的 daemon）上下文必然返回 nil，于是上层把"前台有 App"误判成"在桌面"，直接跳过清理。
+- `getFrontmostAppBundleID` 改用 **SpringBoardServices 的 XPC 直查接口**（`SBFrontmostApplicationBundleIdentifier()` 直接拿 bundle id；兜底 `SBFrontmostApplication()` → `bundleIdentifier`），与注入通道同款机制，**daemon 下可用、无需辅助功能授权**。老 API 保留为最后兜底。
+- 修复后：前台有 App 时 `frontmostApp` 能正确返回真实 bundle id，`clearapps/smart` 会正常下发 `menuPress` 把当前 App 退到后台（而非误判桌面跳过）。
+
 ## [3.91] – 2026-07-15
 
 ### Fixed（进程内注入可真正启动）
