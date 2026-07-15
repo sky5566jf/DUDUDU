@@ -214,6 +214,7 @@ const TESTS = [
   {id:'input_hid',method:'POST', path:'/api/input_hid',       desc:'🎮 游戏专用：HID 键盘事件注入，绕过输入框焦点（英文 KeyPress / 中文 HID 粘贴）', body:'qtext'},
   {id:'input_ax', method:'POST', path:'/api/input_ax',        desc:'🎯 无障碍(AX)通道：直接对聚焦 UI 元素写文本值（不碰剪贴板、不弹粘贴窗）', body:'qtext'},
   {id:'inject_probe',method:'GET', path:'/api/inject_probe', desc:'🔌 注入通道探针：只验证 task_for_pid 能否拿到前台 App 的 task port（不实际注入），排错第一步', body:null},
+  {id:'input_keyboard',method:'POST', path:'/api/input_keyboard', desc:'⌨ 键盘系统输入(UIKeyboardImpl 私有API)：绕过第一响应者，不弹粘贴窗，适用于游戏/自绘框，且不依赖前台 PID', body:'qtext'},
   {id:'input_inject',method:'POST', path:'/api/input_inject', desc:'💉 进程内注入(懒人精灵同款)：把 dylib 注入前台游戏进程直接调 UIKit insertText，可突破自绘框/游戏无 AX 节点限制', body:'qtext'},
 ];
 

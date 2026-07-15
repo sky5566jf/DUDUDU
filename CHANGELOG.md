@@ -2,6 +2,17 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.93] – 2026-07-15
+
+### Added（新增 `/api/input_keyboard` 键盘系统输入通道）
+- **`POST /api/input_keyboard`**：通过 iOS 键盘系统私有 API `UIKeyboardImpl`（单例 `sharedInstance` → `addText:` / 兜底 `insertText:`）直接输入文本。
+  - 绕过第一响应者类型限制，**不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗**。
+  - **不需要前台 PID / `task_for_pid`**，与 `/api/input_inject` 互补——在注入通道（含 `foreground_pid` 检测）不可用时，可作为独立的游戏/自绘框文本输入方案。
+  - 适用：游戏/引擎自绘/标准输入框；对完全不接系统键盘的自绘框可能无效（仍需进程内注入 `input_inject`）。
+  - 主线程安全：内部 `dispatch_async` 回主线程 + `dispatch_semaphore` 等待，避免 `dispatch_sync` 死锁（同 `input_ax` 修复思路）。
+  - `TVNCApiManager` 新增 `inputTextViaKeyboard:`，HTTP 层新增 `handleInputKeyboard:`。
+  - 测试页 `text_api_test.html` 新增 `input_keyboard` 测试项；`/api/endpoints` 文档补全 input_hid/input_ax/input_keyboard/input_inject/inject_probe 说明。
+
 ## [3.92] – 2026-07-15
 
 ### Fixed（修复 `clearapps/smart` 误判在桌面导致不清理）

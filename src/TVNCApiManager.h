@@ -155,6 +155,14 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)inputTextViaAX:(NSString *)text;
 
 /**
+ 通过 iOS 键盘系统私有 API（UIKeyboardImpl）直接输入文本
+ 绕过第一响应者类型限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗
+ @param text 要输入的文本内容
+ @return 是否成功
+ */
+- (BOOL)inputTextViaKeyboard:(NSString *)text;
+
+/**
  模拟按键事件
  @param keyCode 按键码（如回车键 13，退格键 8 等）
  @return 是否成功

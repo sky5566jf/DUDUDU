@@ -640,6 +640,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleInputAx:query body:body];
     } else if ([path isEqualToString:@"/api/input_inject"]) {
         return [self handleInputInject:query body:body];
+    } else if ([path isEqualToString:@"/api/input_keyboard"]) {
+        return [self handleInputKeyboard:query body:body];
     } else if ([path isEqualToString:@"/api/inject_probe"]) {
         return [self handleInjectProbe];
     } else if ([path isEqualToString:@"/api/assistivetouch"]) {
@@ -3166,6 +3168,42 @@ static NSString *tvncGetRealDeviceName(void) {
 
 // POST /api/clearapps/smart
 // 智能清理后台应用（识别当前应用，桌面则跳过）
+// POST /api/input_keyboard  (body: UTF-8 文本, 或 ?text=xxx)
+// 通过 iOS 键盘系统私有 API（UIKeyboardImpl）直接输入文本。
+// 绕过第一响应者类型限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗。
+// 适用：游戏/引擎自绘/标准输入框；对完全不接系统键盘的自绘框可能无效（需进程内注入 input_inject）。
+// 不需要前台 PID / task_for_pid，故与 /api/input_inject 互补，可在注入通道不可用时作为替代。
+- (TVNCHttpResponse *)handleInputKeyboard:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaKeyboard:text];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = ok ?
+        @{@"success": @YES, @"method": @"keyboard", @"text": text, @"length": @(text.length),
+          @"note": @"via UIKeyboardImpl private API; no paste prompt, works with game engines / self-drawn fields"} :
+        @{@"success": @NO,
+          @"error": @"Keyboard input failed: UIKeyboardImpl unavailable, or no active keyboard session (daemon has no foreground input session). Try /api/input_inject for game self-drawn fields."};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 - (TVNCHttpResponse *)handleClearAppsSmart {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
@@ -3626,7 +3664,12 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
-        "<li><b>POST /api/input</b> - 输入文本到当前焦点输入框（body: 纯文本）</li>"
+        "<li><b>POST /api/input</b> - 输入文本到当前焦点输入框（body: 纯文本）</li>\n"
+        "<li><b>POST /api/input_hid</b> - 游戏专用 HID 键盘事件注入（body 或 ?text=）</li>\n"
+        "<li><b>POST /api/input_ax</b> - 无障碍(AX)通道直接写聚焦元素文本（body 或 ?text=，无粘贴窗）</li>\n"
+        "<li><b>POST /api/input_keyboard</b> - 通过键盘系统输入（UIKeyboardImpl 私有API，绕过第一响应者，适用于游戏/自绘框，不弹粘贴窗）</li>\n"
+        "<li><b>POST /api/input_inject</b> - 进程内注入 dylib 直接调 UIKit insertText（游戏自绘框终极方案，需 task_for_pid entitlements）</li>\n"
+        "<li><b>GET /api/inject_probe</b> - 注入通道探针（仅验证 task_for_pid 是否可取前台 App task port）</li>\n"
         "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"

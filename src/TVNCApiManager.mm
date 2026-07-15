@@ -1284,6 +1284,66 @@ static BOOL TVNCLoadAX(void) {
     }
 }
 
+#pragma mark - 键盘系统输入（UIKeyboardImpl 私有 API）
+
+// 实际执行（必须在主线程）
+- (BOOL)_keyboardInputSync:(NSString *)text {
+    Class keyboardImplClass = NSClassFromString(@"UIKeyboardImpl");
+    if (!keyboardImplClass) {
+        TVLog(@"Keyboard: UIKeyboardImpl class not found (UIKit not linked?)");
+        return NO;
+    }
+    SEL sharedImplSel = NSSelectorFromString(@"sharedInstance");
+    if (![keyboardImplClass respondsToSelector:sharedImplSel]) {
+        TVLog(@"Keyboard: sharedInstance not available");
+        return NO;
+    }
+    id keyboardImpl = ((id(*)(id, SEL))[keyboardImplClass methodForSelector:sharedImplSel])(keyboardImplClass, sharedImplSel);
+    if (!keyboardImpl) {
+        TVLog(@"Keyboard: Failed to get UIKeyboardImpl instance");
+        return NO;
+    }
+    @try {
+        for (NSUInteger i = 0; i < text.length; i++) {
+            NSString *ch = [text substringWithRange:NSMakeRange(i, 1)];
+            SEL addTextSel = NSSelectorFromString(@"addText:");
+            if ([keyboardImpl respondsToSelector:addTextSel]) {
+                ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:addTextSel])(keyboardImpl, addTextSel, ch);
+            } else {
+                SEL insSel = NSSelectorFromString(@"insertText:");
+                if ([keyboardImpl respondsToSelector:insSel]) {
+                    ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:insSel])(keyboardImpl, insSel, ch);
+                }
+            }
+            usleep(10000); // 10ms，确保输入被处理
+        }
+        TVLog(@"Keyboard: inputted %lu chars via UIKeyboardImpl", (unsigned long)text.length);
+        return YES;
+    } @catch (NSException *e) {
+        TVLog(@"Keyboard input failed: %@", e.reason);
+        return NO;
+    }
+}
+
+// 通过 iOS 键盘系统直接输入文本（使用 UIKeyboardImpl 私有 API）
+// 绕过第一响应者限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗。
+// 适用：游戏/引擎自绘/标准输入框；对完全不接系统键盘的自绘框可能无效（需进程内注入 input_inject）。
+// 主线程安全：HTTP 处理线程若非主线程，dispatch_async 回主线程 + semaphore 等待，避免 dispatch_sync 死锁。
+- (BOOL)inputTextViaKeyboard:(NSString *)text {
+    if (!text || text.length == 0) return NO;
+    if ([NSThread isMainThread]) {
+        return [self _keyboardInputSync:text];
+    }
+    __block BOOL result = NO;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        result = [self _keyboardInputSync:text];
+        dispatch_semaphore_signal(sem);
+    });
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    return result;
+}
+
 - (BOOL)sendKeyCode:(NSInteger)keyCode {
     // 在主线程执行
     if (![NSThread isMainThread]) {
