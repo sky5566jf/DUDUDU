@@ -2,6 +2,14 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.05] – 2026-07-16
+
+### Changed（文本输入级联恢复为四级，解决 iOS 16 "是否允许粘贴" 弹窗）
+- 级联：`第一响应者(findFirstResponder → replaceRange:)` → `inputTextViaHID:`（纯 ASCII 逐键，等价于外接蓝牙键盘，daemon 下可靠且**零弹窗**）→ `inputTextViaKeyboard:`（UIKeyboardImpl 私有 API，主 App 有焦点时中英文均经键盘系统直接输入、**零弹窗**）→ `inputTextViaClipboard:`（UIPasteboard + Cmd+V，中文终级兜底，会触发 iOS 16 粘贴弹窗）。
+- **HID 必须排在 UIKeyboardImpl 之前**：后者 `addText:` 在 daemon 无键盘会话时会"假成功"（返回 YES 但实际没送到前台 App），若排在前会短路级联（v3.96 回归点）。HID 仅处理 ASCII，含中文主动返回 NO 交由下级。
+- 恢复 v4.04 删除的 `inputTextViaHID:`（非 ASCII 改为返回 NO 而非转剪贴板）与 `inputTextViaKeyboard:` + `_keyboardInputSync:`，并恢复 `.h` 声明。AX 通道仍保持删除。
+- **效果**：主 App 有焦点时英文走 HID、中文走 UIKeyboardImpl，均不碰剪贴板 → 不再弹"是否允许粘贴"；仅当 UIKeyboardImpl 也失败时中文才回退剪贴板弹窗。
+
 ## [4.04] – 2026-07-15
 
 ### Changed（文本输入级联进一步收敛为「第一响应者 → 剪贴板 + Cmd+V」）

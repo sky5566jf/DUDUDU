@@ -1074,8 +1074,26 @@ int tvncGetFBBytesPerPixel(void);
         }
     }
     
-    // 方法2: 剪贴板 + Cmd+V 粘贴（中文等所有字符的兜底，无需 UIKit 第一响应者焦点）
-    TVLog(@"inputText: firstResponder failed, trying clipboard paste...");
+    // 方法2: HID 键盘事件（daemon 下最可靠；仅 ASCII，不碰剪贴板→无 iOS16 粘贴弹窗）
+    // 必须排在 UIKeyboardImpl 之前：UIKeyboardImpl.addText: 在 daemon 无键盘会话时会"假成功"
+    // (返回 YES 但实际没送到前台 App)，若排在前会短路级联、导致 HID 永远不执行（v3.96 回归点）。
+    // 中文等含非 ASCII 字符时本方法主动返回 NO，交由后续 UIKeyboardImpl/剪贴板处理。
+    TVLog(@"inputText: firstResponder failed, trying HID...");
+    if ([self inputTextViaHID:text]) {
+        TVLog(@"inputText: Success via HID");
+        return YES;
+    }
+
+    // 方法3: UIKeyboardImpl 私有 API（主 App 有焦点时中英文都经键盘系统直接输入，零弹窗）
+    // daemon 无键盘会话下会假成功(返回 YES 但实际没输入)，故仅作 HID 之后的补充，不影响 daemon 可靠性。
+    TVLog(@"inputText: HID failed, trying UIKeyboardImpl...");
+    if ([self inputTextViaKeyboard:text]) {
+        TVLog(@"inputText: Success via UIKeyboardImpl");
+        return YES;
+    }
+
+    // 方法4: 剪贴板 + Cmd+V 粘贴（中文等所有字符的终级兜底，会触发 iOS16 粘贴弹窗）
+    TVLog(@"inputText: UIKeyboardImpl failed, trying clipboard paste...");
     if ([self inputTextViaClipboard:text]) {
         TVLog(@"inputText: Success via clipboard");
         return YES;
@@ -1083,6 +1101,35 @@ int tvncGetFBBytesPerPixel(void);
 
     TVLog(@"inputText: All methods failed");
     return NO;
+}
+
+// 通过 HID 事件输入文本（使用 STHIDEventGenerator）
+// 仅处理纯 ASCII（英文/数字/符号）。含非 ASCII（中文/emoji）时主动返回 NO，
+// 交由后续级联（UIKeyboardImpl / 剪贴板）处理——避免在此直接转剪贴板触发 iOS16 粘贴弹窗。
+// HID 事件等价于外接蓝牙键盘，daemon 无界面场景下唯一可靠，且不碰剪贴板故零弹窗。
+- (BOOL)inputTextViaHID:(NSString *)text {
+    if (!text || text.length == 0) {
+        return NO;
+    }
+    // 仅 ASCII 走 HID；含非 ASCII 字符返回 NO 让级联继续
+    for (NSUInteger i = 0; i < text.length; i++) {
+        if ([text characterAtIndex:i] > 127) {
+            TVLog(@"inputTextViaHID: text contains non-ASCII, skip to next cascade");
+            return NO;
+        }
+    }
+    @try {
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+        // 逐个字符发送
+        for (NSUInteger i = 0; i < text.length; i++) {
+            NSString *character = [text substringWithRange:NSMakeRange(i, 1)];
+            [generator keyPress:character];
+        }
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"HID input failed: %@", exception.reason);
+        return NO;
+    }
 }
 
 // 通过剪贴板输入文本
@@ -1139,6 +1186,67 @@ int tvncGetFBBytesPerPixel(void);
             return NO;
         }
     }
+}
+
+#pragma mark - 键盘系统输入（UIKeyboardImpl 私有 API）
+
+// 实际执行（必须在主线程）
+- (BOOL)_keyboardInputSync:(NSString *)text {
+    Class keyboardImplClass = NSClassFromString(@"UIKeyboardImpl");
+    if (!keyboardImplClass) {
+        TVLog(@"Keyboard: UIKeyboardImpl class not found (UIKit not linked?)");
+        return NO;
+    }
+    SEL sharedImplSel = NSSelectorFromString(@"sharedInstance");
+    if (![keyboardImplClass respondsToSelector:sharedImplSel]) {
+        TVLog(@"Keyboard: sharedInstance not available");
+        return NO;
+    }
+    id keyboardImpl = ((id(*)(id, SEL))[keyboardImplClass methodForSelector:sharedImplSel])(keyboardImplClass, sharedImplSel);
+    if (!keyboardImpl) {
+        TVLog(@"Keyboard: Failed to get UIKeyboardImpl instance");
+        return NO;
+    }
+    @try {
+        for (NSUInteger i = 0; i < text.length; i++) {
+            NSString *ch = [text substringWithRange:NSMakeRange(i, 1)];
+            SEL addTextSel = NSSelectorFromString(@"addText:");
+            if ([keyboardImpl respondsToSelector:addTextSel]) {
+                ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:addTextSel])(keyboardImpl, addTextSel, ch);
+            } else {
+                SEL insSel = NSSelectorFromString(@"insertText:");
+                if ([keyboardImpl respondsToSelector:insSel]) {
+                    ((void(*)(id, SEL, id))[keyboardImpl methodForSelector:insSel])(keyboardImpl, insSel, ch);
+                }
+            }
+            usleep(10000); // 10ms，确保输入被处理
+        }
+        TVLog(@"Keyboard: inputted %lu chars via UIKeyboardImpl", (unsigned long)text.length);
+        return YES;
+    } @catch (NSException *e) {
+        TVLog(@"Keyboard input failed: %@", e.reason);
+        return NO;
+    }
+}
+
+// 通过 iOS 键盘系统直接输入文本（使用 UIKeyboardImpl 私有 API）
+// 绕过第一响应者类型限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗。
+// 主 App 有键盘会话/焦点时中英文均可直接输入；daemon 无键盘会话下 addText: 会"假成功"
+// (返回 YES 但实际没送到前台 App)，故排在 HID 之后作补充，避免影响 daemon 可靠性。
+// 主线程安全：HTTP 处理线程若非主线程，dispatch_async 回主线程 + semaphore 等待，避免 dispatch_sync 死锁。
+- (BOOL)inputTextViaKeyboard:(NSString *)text {
+    if (!text || text.length == 0) return NO;
+    if ([NSThread isMainThread]) {
+        return [self _keyboardInputSync:text];
+    }
+    __block BOOL result = NO;
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        result = [self _keyboardInputSync:text];
+        dispatch_semaphore_signal(sem);
+    });
+    dispatch_semaphore_wait(sem, DISPATCH_TIME_FOREVER);
+    return result;
 }
 
 - (BOOL)sendKeyCode:(NSInteger)keyCode {
