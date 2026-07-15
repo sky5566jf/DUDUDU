@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.02] – 2026-07-15
+
+### Fixed（`/api/input` v3.96 回归：UIKeyboardImpl 假成功短路 HID）
+- **根因（更正 v4.01 结论）**：v3.96 把 `UIKeyboardImpl` 插到 HID **之前**作为级联方式2，但 `inputTextViaKeyboard:`→`_keyboardInputSync:` 在 daemon 无键盘会话时 `UIKeyboardImpl.addText:` 是空操作、不报错却**无条件 `return YES`**（TVNCApiManager.mm:1344）→ 级联被"假成功"短路，`inputTextViaHID:`（真正能打字的通道）**永远不执行**。改动前(v3.95及更早) `/api/input` 是「第一响应者→HID」直落 HID，故那时能输中英文；改后 UIKeyboardImpl 截胡，啥也不打。
+- `STHIDEventGenerator`(keyPress/HID) 自 v3.28 未改，HID 本身没坏，是级联**顺序**错了。
+- **修复**：级联重排为 `第一响应者 → HID → UIKeyboardImpl → AX`，恢复"先落 HID"可靠路径；UIKeyboardImpl/AX 降为 HID 之后的兜底。普通 App（备忘录/浏览器/有焦点输入框）`/api/input` 中文(剪贴板+Cmd+V)/英文(HID键)均恢复可用。游戏自绘框若不认外接键盘仍走不通（属 daemon 架构限制，非本回归）。
+
 ## [4.01] – 2026-07-15
 
 ### Fixed（`/api/input_hid` v4.00 递归崩溃）

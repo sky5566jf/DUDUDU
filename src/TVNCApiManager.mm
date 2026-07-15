@@ -1075,24 +1075,26 @@ int tvncGetFBBytesPerPixel(void);
         }
     }
     
-    // 方式2: UIKeyboardImpl 私有 API（绕过第一响应者限制，不弹粘贴窗，适用于游戏/自绘框）
-    TVLog(@"inputText: firstResponder failed, trying UIKeyboardImpl...");
+    // 方式2: HID 键盘事件（daemon 下最可靠，VNC 远程打字同款通道，不依赖前台PID/UIKit/AX）
+    // 必须排在 UIKeyboardImpl / AX 之前：UIKeyboardImpl.addText: 在 daemon 无键盘会话时会"假成功"
+    // （返回 YES 但实际没送到前台 App），若排在前会短路级联、导致 HID 永远不执行（v3.96 回归点）。
+    TVLog(@"inputText: firstResponder failed, trying HID...");
+    if ([self inputTextViaHID:text]) {
+        TVLog(@"inputText: Success via HID");
+        return YES;
+    }
+
+    // 方式3: UIKeyboardImpl 私有 API（游戏/自绘框可能有效，不弹粘贴窗）—— 仅作 HID 之后的兜底
+    TVLog(@"inputText: HID failed, trying UIKeyboardImpl...");
     if ([self inputTextViaKeyboard:text]) {
         TVLog(@"inputText: Success via UIKeyboardImpl");
         return YES;
     }
 
-    // 方式3: Accessibility AX 通道（绕过剪贴板弹窗）
+    // 方式4: Accessibility AX 通道（绕过剪贴板弹窗）
     TVLog(@"inputText: UIKeyboardImpl failed, trying AX...");
     if ([self inputTextViaAX:text]) {
         TVLog(@"inputText: Success via AX");
-        return YES;
-    }
-
-    // 方式4: HID 键盘事件（最终兜底）
-    TVLog(@"inputText: AX failed, falling back to HID...");
-    if ([self inputTextViaHID:text]) {
-        TVLog(@"inputText: Success via HID");
         return YES;
     }
 
