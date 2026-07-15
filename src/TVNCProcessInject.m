@@ -12,6 +12,7 @@
 #import <sys/sysctl.h>
 #import <libproc.h>
 #import <objc/runtime.h>
+#import <objc/message.h>
 
 // iOS SDK 不提供 <mach/mach_vm.h> 头（符号在 libsystem_kernel 里但无声明），
 // 手动 extern 声明我们用到的三个 mach_vm_* 函数，避免隐式声明编译错误。
@@ -243,9 +244,56 @@ static int tvnc_foreground_pid_ax(void) {
     return pid;
 }
 
-// 综合取前台 PID：SpringBoard 优先（daemon 可用），AX 兜底
+// 通过 FrontBoardServices 取前台 App PID（走 backboardd XPC，daemon 下比 SpringBoard XPC 更可靠）
+// 返回 >0 成功；<=0 失败。
+static int tvnc_foreground_pid_fbs(void) {
+    Class FBSWS = NSClassFromString(@"FBSApplicationWorkspace");
+    if (!FBSWS) FBSWS = NSClassFromString(@"FBApplicationWorkspace");
+    if (!FBSWS) FBSWS = NSClassFromString(@"SBApplicationWorkspace");
+    if (!FBSWS) return -1;
+    SEL dw = NSSelectorFromString(@"defaultWorkspace");
+    if (![FBSWS respondsToSelector:dw]) return -1;
+    id ws = ((id (*)(id, SEL))objc_msgSend)(FBSWS, dw);
+    SEL ra = NSSelectorFromString(@"runningApplications");
+    if (!ws || ![ws respondsToSelector:ra]) return -1;
+    NSArray *apps = ((id (*)(id, SEL))objc_msgSend)(ws, ra);
+    if (!apps.count) return -1;
+
+    id best = nil;
+    int bestScore = -1;
+    BOOL (*msgB)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+    for (id a in apps) {
+        int score = 0;
+        if ([a respondsToSelector:NSSelectorFromString(@"visibility")]) {
+            score = [[a valueForKey:@"visibility"] intValue] * 10;
+        }
+        if ([a respondsToSelector:NSSelectorFromString(@"isActive")] &&
+            msgB(a, NSSelectorFromString(@"isActive"))) score += 5;
+        if ([a respondsToSelector:NSSelectorFromString(@"isForeground")] &&
+            msgB(a, NSSelectorFromString(@"isForeground"))) score += 3;
+        if (score > bestScore) { bestScore = score; best = a; }
+    }
+    if (!best || bestScore <= 0) return -1;
+
+    // 取 PID（兼容 processIdentifier / pid）
+    SEL sel = @selector(processIdentifier);
+    if (![best respondsToSelector:sel]) sel = @selector(pid);
+    if (![best respondsToSelector:sel]) return -1;
+    NSMethodSignature *sig = [best methodSignatureForSelector:sel];
+    if (!sig) return -1;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.selector = sel;
+    [inv invokeWithTarget:best];
+    int v = 0;
+    [inv getReturnValue:&v];
+    return v > 0 ? v : -1;
+}
+
+// 综合取前台 PID：FrontBoard 优先（daemon 可用且最稳），其次 SpringBoard XPC，AX 兜底
 static int tvnc_foreground_pid(void) {
-    int pid = tvnc_foreground_pid_springboard();
+    int pid = tvnc_foreground_pid_fbs();
+    if (pid > 0) return pid;
+    pid = tvnc_foreground_pid_springboard();
     if (pid > 0) return pid;
     return tvnc_foreground_pid_ax();
 }

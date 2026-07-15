@@ -33,6 +33,7 @@
 #import <pwd.h>
 #import <grp.h>
 #import <dlfcn.h>
+#import <objc/message.h>
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -2387,144 +2388,216 @@ static BOOL TVNCLoadAX(void) {
     return ret;
 }
 
-// 获取当前前台应用的 Bundle ID
+// 诊断版：取前台 App 信息，并记录命中的检测通道（便于真机排障）。
+// 返回字典：{ method: NSString, bundleID: NSString|NSNull, pid: NSNumber }。
 //
-// 重要：trollvncserver 是 daemon（无 UIKit / backboard 连接），
-// 老的 SBSCopyFrontmostApplicationDisplayIdentifier() 在 daemon 上下文会返回 nil，
-// 导致上层把“前台有 App”误判成“在桌面(SpringBoard)”而跳过清理。
-// 这里改用 SpringBoardServices 的 XPC 直查接口（SBFrontmostApplicationBundleIdentifier /
-// SBFrontmostApplication），这些接口不依赖 backboard 连接，daemon 下可用。
-- (NSString *)getFrontmostAppBundleID {
+// 重要：trollvncserver 是 daemon（无 UIKit / backboard 应用连接）。
+// SpringBoardServices 的 XPC（SBFrontmostApplication*）在我们的 daemon 上下文里经常返回 nil
+// （即便加了 com.apple.springboard.appcontrol 也调不通——真机实测 stage:foreground_pid 失败），
+// 因此第一优先改用 FrontBoardServices：
+//   FBSApplicationWorkspace.defaultWorkspace.runningApplications
+// 它走 backboardd 的 FBSSystemService XPC，对 daemon 更可靠，能直接拿到每个前台 App 的
+// bundleIdentifier 与 processIdentifier（用 visibility/isActive/isForeground 判断真正的前台）。
+- (NSDictionary *)frontmostAppInfo {
+    NSMutableDictionary *info = [NSMutableDictionary dictionary];
+    info[@"method"] = @"none";
+    info[@"bundleID"] = [NSNull null];
+    info[@"pid"] = @(-1);
+
+    // ===== Tier 1：FrontBoardServices（走 backboardd XPC，daemon 下最可靠）=====
+    Class FBSWS = NSClassFromString(@"FBSApplicationWorkspace");
+    if (!FBSWS) FBSWS = NSClassFromString(@"FBApplicationWorkspace");
+    if (!FBSWS) FBSWS = NSClassFromString(@"SBApplicationWorkspace");
+    if (FBSWS) {
+        SEL dw = NSSelectorFromString(@"defaultWorkspace");
+        if ([FBSWS respondsToSelector:dw]) {
+            id ws = ((id (*)(id, SEL))objc_msgSend)(FBSWS, dw);
+            SEL ra = NSSelectorFromString(@"runningApplications");
+            if (ws && [ws respondsToSelector:ra]) {
+                NSArray *apps = ((id (*)(id, SEL))objc_msgSend)(ws, ra);
+                id best = nil;
+                int bestScore = -1;
+                BOOL (*msgB)(id, SEL) = (BOOL (*)(id, SEL))objc_msgSend;
+                for (id a in apps) {
+                    int score = 0;
+                    if ([a respondsToSelector:NSSelectorFromString(@"visibility")]) {
+                        score = [[a valueForKey:@"visibility"] intValue] * 10;
+                    }
+                    if ([a respondsToSelector:NSSelectorFromString(@"isActive")] &&
+                        msgB(a, NSSelectorFromString(@"isActive"))) score += 5;
+                    if ([a respondsToSelector:NSSelectorFromString(@"isForeground")] &&
+                        msgB(a, NSSelectorFromString(@"isForeground"))) score += 3;
+                    if (score > bestScore) { bestScore = score; best = a; }
+                }
+                if (best && bestScore > 0) {
+                    NSString *bid = [best respondsToSelector:@selector(bundleIdentifier)]
+                        ? ((NSString *(*)(id, SEL))objc_msgSend)(best, @selector(bundleIdentifier)) : nil;
+                    if (bid.length) {
+                        info[@"bundleID"] = bid;
+                        info[@"method"] = @"FrontBoardServices";
+                        int pid = [self tvnc_pidOfInfo:best];
+                        if (pid > 0) info[@"pid"] = @(pid);
+                        TVLog(@"Frontmost app (FBS): %@ pid=%d", bid, pid);
+                        return info;
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== Tier 2：SpringBoardServices XPC（部分环境可用）=====
     static void *sbs = NULL;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
     });
     if (sbs) {
-        // 1) SBFrontmostApplicationBundleIdentifier() 直接返回 bundle id（最稳，无 backboard 依赖）
+        // 1) SBFrontmostApplicationBundleIdentifier() 直接返回 bundle id
         NSString *(*sbFrontBid)(void) = (NSString *(*)(void))dlsym(sbs, "SBFrontmostApplicationBundleIdentifier");
         if (sbFrontBid) {
             NSString *bid = sbFrontBid();
             if (bid.length) {
-                TVLog(@"Frontmost app (via SBFrontmostApplicationBundleIdentifier): %@", bid);
-                return bid;
+                info[@"bundleID"] = bid;
+                info[@"method"] = @"SBS.BundleID";
+                TVLog(@"Frontmost app (SBS.BundleID): %@", bid);
+                return info;
             }
         }
-        // 2) SBFrontmostApplication() -> SBApplication -> bundleIdentifier（NSInvocation 调用）
+        // 2) SBFrontmostApplication() -> SBApplication -> bundleIdentifier
         id (*sbFrontmost)(void) = (id (*)(void))dlsym(sbs, "SBFrontmostApplication");
         if (sbFrontmost) {
             id app = sbFrontmost();
             if (app) {
                 NSString *bid = [self tvnc_sbsBundleId:app];
                 if (bid.length) {
-                    TVLog(@"Frontmost app (via SBFrontmostApplication): %@", bid);
-                    return bid;
+                    info[@"bundleID"] = bid;
+                    info[@"method"] = @"SBS.Frontmost";
+                    TVLog(@"Frontmost app (SBS.Frontmost): %@", bid);
+                    return info;
                 }
             }
         }
     }
-    // 3) 最后兜底：老 API（部分越狱/旧环境可用）
+
+    // ===== Tier 3：老 API（部分越狱/旧环境可用）=====
     CFStringRef frontmostAppID = SBSCopyFrontmostApplicationDisplayIdentifier();
     if (frontmostAppID) {
         NSString *bundleID = (__bridge_transfer NSString *)frontmostAppID;
-        TVLog(@"Frontmost app (via SBS legacy): %@", bundleID);
-        return bundleID;
+        info[@"bundleID"] = bundleID;
+        info[@"method"] = @"SBS.legacy";
+        TVLog(@"Frontmost app (SBS legacy): %@", bundleID);
+        return info;
     }
     TVLog(@"Frontmost app: all methods returned nil");
-    return nil;
+    return info;
+}
+
+// 从 FBS/SBS 的 app info 对象取进程号（兼容 processIdentifier / pid 两种属性名）。
+- (int)tvnc_pidOfInfo:(id)info {
+    SEL sel = @selector(processIdentifier);
+    if (![info respondsToSelector:sel]) {
+        sel = @selector(pid);
+        if (![info respondsToSelector:sel]) return -1;
+    }
+    NSMethodSignature *sig = [info methodSignatureForSelector:sel];
+    if (!sig || sig.methodReturnLength == 0) return -1;
+    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+    inv.selector = sel;
+    [inv invokeWithTarget:info];
+    int val = 0;
+    [inv getReturnValue:&val];
+    return val;
+}
+
+// 获取当前前台应用的 Bundle ID（FBS 优先，SBS XPC 与 legacy 兜底）
+- (NSString *)getFrontmostAppBundleID {
+    NSDictionary *info = [self frontmostAppInfo];
+    id bid = info[@"bundleID"];
+    return [bid isKindOfClass:[NSString class]] ? bid : nil;
 }
 
 // 检查是否在桌面（SpringBoard）
+//
+// daemon 下 [UIApplication sharedApplication] 返回 nil（没有 UIKit 应用环境），
+// 旧实现据此直接 return YES 会“永远判定在桌面”。改为以 frontmostBundleID 为主，
+// UIApplication 状态仅作最后兜底（且必须 app 真实存在时才用它）。
 - (BOOL)isOnSpringBoard {
-    UIApplication *app = [UIApplication sharedApplication];
-    if (!app) {
-        TVLog(@"isOnSpringBoard: UIApplication is nil, assuming on SpringBoard");
-        return YES;
-    }
-    
-    // 获取当前前台应用的 Bundle ID
+    // 优先用前台 App Bundle ID 判断
     NSString *frontmostBundleID = [self getFrontmostAppBundleID];
     TVLog(@"isOnSpringBoard: frontmostBundleID = %@", frontmostBundleID);
-    
-    // 如果无法获取前台应用，尝试通过应用状态判断
-    if (!frontmostBundleID) {
-        // 检查当前应用是否在后台
-        UIApplicationState state = [app applicationState];
-        TVLog(@"isOnSpringBoard: Could not get frontmost app, current app state = %ld", (long)state);
-        
-        // 如果当前应用在后台，可能用户在看别的应用
-        // 如果在前台，可能是 SpringBoard
-        if (state == UIApplicationStateBackground) {
-            TVLog(@"isOnSpringBoard: App in background, assuming not on SpringBoard");
-            return NO;
-        }
-        
-        // 无法确定，默认假设在桌面（跳过清理）
-        TVLog(@"isOnSpringBoard: Assuming on SpringBoard (fallback)");
-        return YES;
-    }
-    
-    // 如果是 SpringBoard 或者 com.apple.springboard，说明在桌面
-    if ([frontmostBundleID isEqualToString:@"com.apple.springboard"] ||
-        [frontmostBundleID isEqualToString:@"SpringBoard"]) {
-        TVLog(@"isOnSpringBoard: Detected SpringBoard");
-        return YES;
-    }
-    
-    // 检查是否是系统应用（在桌面上运行的）
-    NSArray *systemApps = @[
-        @"com.apple.springboard",
-        @"com.apple.PineBoard",  // tvOS SpringBoard
-        @"com.apple.home.screen",  // iPadOS 可能的桌面标识
-        @"com.apple.Home.HomeScreen"
-    ];
-    
-    for (NSString *systemApp in systemApps) {
-        if ([frontmostBundleID isEqualToString:systemApp]) {
-            TVLog(@"isOnSpringBoard: Detected system app %@", systemApp);
+
+    if (frontmostBundleID.length) {
+        if ([frontmostBundleID isEqualToString:@"com.apple.springboard"] ||
+            [frontmostBundleID isEqualToString:@"SpringBoard"]) {
+            TVLog(@"isOnSpringBoard: Detected SpringBoard");
             return YES;
         }
+        NSArray *systemApps = @[
+            @"com.apple.springboard",
+            @"com.apple.PineBoard",  // tvOS SpringBoard
+            @"com.apple.home.screen",  // iPadOS 可能的桌面标识
+            @"com.apple.Home.HomeScreen"
+        ];
+        for (NSString *systemApp in systemApps) {
+            if ([frontmostBundleID isEqualToString:systemApp]) {
+                TVLog(@"isOnSpringBoard: Detected system app %@", systemApp);
+                return YES;
+            }
+        }
+        TVLog(@"isOnSpringBoard: Not on SpringBoard, frontmost app is %@", frontmostBundleID);
+        return NO;
     }
-    
-    TVLog(@"isOnSpringBoard: Not on SpringBoard, frontmost app is %@", frontmostBundleID);
-    return NO;
+
+    // 拿不到前台 App：daemon 下 UIApplication 为 nil，不能再据此误判为桌面
+    UIApplication *app = [UIApplication sharedApplication];
+    if (app && [app applicationState] == UIApplicationStateBackground) {
+        TVLog(@"isOnSpringBoard: Could not get frontmost app, but app is in background -> not on SpringBoard");
+        return NO;
+    }
+    TVLog(@"isOnSpringBoard: Assuming on SpringBoard (fallback)");
+    return YES;
 }
 
-// 智能清理后台应用
+// 智能清理后台应用（force=NO：在桌面则跳过；force=YES：即使桌面也强制清理）
 - (NSDictionary *)clearBackgroundAppsSmart {
+    return [self clearBackgroundAppsSmartForce:NO];
+}
+
+- (NSDictionary *)clearBackgroundAppsSmartForce:(BOOL)force {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
+    result[@"force"] = @(force);
+
     @try {
-        TVLog(@"Smart clear: Starting...");
-        
+        TVLog(@"Smart clear: Starting... (force=%d)", force);
+
         // 获取当前前台应用
         NSString *frontmostApp = [self getFrontmostAppBundleID];
         result[@"frontmostApp"] = frontmostApp ?: @"unknown";
         TVLog(@"Smart clear: frontmostApp = %@", frontmostApp);
-        
-        // 如果是桌面（SpringBoard），跳过
+
         BOOL isSpringBoard = !frontmostApp ||
             [frontmostApp isEqualToString:@"com.apple.springboard"] ||
             [frontmostApp isEqualToString:@"SpringBoard"];
         result[@"onSpringBoard"] = @(isSpringBoard);
-        
-        if (isSpringBoard) {
+
+        // 非强制且在桌面：跳过
+        if (isSpringBoard && !force) {
             result[@"success"] = @YES;
             result[@"message"] = @"Already on SpringBoard, no apps to clear";
             result[@"action"] = @"skipped";
             TVLog(@"Smart clear: Skipped - already on SpringBoard");
             return result;
         }
-        
-        // 在主线程执行 HID 事件
+
+        // 必须在主线程执行 HID 事件
         if (![NSThread isMainThread]) {
             __block NSDictionary *syncResult = nil;
             dispatch_sync(dispatch_get_main_queue(), ^{
-                syncResult = [self clearBackgroundAppsSmart];
+                syncResult = [self clearBackgroundAppsSmartForce:force];
             });
             return syncResult ?: result;
         }
-        
+
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
         if (!generator) {
             TVLog(@"Smart clear: Failed - STHIDEventGenerator is nil");
@@ -2532,28 +2605,72 @@ static BOOL TVNCLoadAX(void) {
             result[@"message"] = @"HID generator not available";
             return result;
         }
-        
-        // 按 Home 键回到桌面（先确保退出当前应用）
-        TVLog(@"Smart clear: Sending menuPress to go home...");
-        [generator menuPress];
-        struct timespec ts = {0, 600000000}; // 0.6s
-        nanosleep(&ts, NULL);
-        
-        result[@"success"] = @YES;
-        result[@"message"] = @"App dismissed to background";
-        result[@"action"] = @"dismissed";
-        result[@"closedApp"] = frontmostApp ?: @"unknown";
-        
-        TVLog(@"Smart clear: Completed successfully");
-        
+
+        // 强制模式且当前在桌面：直接清理；否则先按 Home 回桌面再清理
+        if (!isSpringBoard) {
+            TVLog(@"Smart clear: Sending menuPress to go home...");
+            [generator menuPress];
+            struct timespec ts = {0, 600000000}; // 0.6s
+            nanosleep(&ts, NULL);
+            result[@"closedApp"] = frontmostApp ?: @"unknown";
+        } else {
+            TVLog(@"Smart clear: Force mode on SpringBoard, killing background apps directly");
+        }
+
+        // 执行后台应用清理（打开多任务 + 上滑杀进程）
+        [self performClearBackgroundApps:result];
+
     } @catch (NSException *exception) {
         result[@"success"] = @NO;
         result[@"error"] = exception.reason;
         result[@"message"] = @"Failed to clear background apps";
         TVLog(@"Smart clear background apps failed: %@", exception.reason);
     }
-    
+
     return result;
+}
+
+// 打开多任务管理器并上滑杀掉后台应用
+- (void)performClearBackgroundApps:(NSMutableDictionary *)result {
+    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+
+    // 双击 Home 打开多任务管理器
+    TVLog(@"Smart clear: Double pressing Home to open app switcher...");
+    [generator menuDoublePress];
+    struct timespec ts = {0, 800000000}; // 0.8s 等待多任务打开
+    nanosleep(&ts, NULL);
+
+    // 获取屏幕尺寸（daemon 下 UIScreen 可能取不到，给一个常见兜底值）
+    CGRect screenBounds = [UIScreen mainScreen].bounds;
+    CGFloat screenWidth = screenBounds.size.width;
+    CGFloat screenHeight = screenBounds.size.height;
+    if (screenWidth < 100 || screenHeight < 100) {
+        screenWidth = 390;
+        screenHeight = 844;
+        TVLog(@"Smart clear: UIScreen bounds invalid, fallback to %gx%g", screenWidth, screenHeight);
+    }
+
+    // 向上滑动清理应用（多次滑动覆盖）
+    int killed = 0;
+    for (int i = 0; i < 6; i++) {
+        CGPoint start = CGPointMake(screenWidth / 2, screenHeight * 0.65);
+        CGPoint end = CGPointMake(screenWidth / 2, screenHeight * 0.15);
+        [generator dragLinearWithStartPoint:start endPoint:end duration:0.3];
+        killed++;
+        struct timespec wt = {0, 300000000}; // 0.3s 等待动画
+        nanosleep(&wt, NULL);
+    }
+
+    // 回桌面
+    struct timespec ht = {0, 500000000};
+    nanosleep(&ht, NULL);
+    [generator menuPress];
+
+    result[@"success"] = @YES;
+    result[@"message"] = @"Background apps cleared";
+    result[@"action"] = @"cleared";
+    result[@"killed"] = @(killed);
+    TVLog(@"Smart clear: Completed, swiped %d cards", killed);
 }
 
 

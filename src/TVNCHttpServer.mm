@@ -634,6 +634,10 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleTaskManager];
     } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
         return [self handleClearAppsSmart];
+    } else if ([path isEqualToString:@"/api/clearapps/force"]) {
+        return [self handleClearAppsForce];
+    } else if ([path isEqualToString:@"/api/frontmost"]) {
+        return [self handleFrontmost];
     } else if ([path isEqualToString:@"/api/input_hid"]) {
         return [self handleInputHid:query body:body];
     } else if ([path isEqualToString:@"/api/input_ax"]) {
@@ -3206,15 +3210,51 @@ static NSString *tvncGetRealDeviceName(void) {
 
 - (TVNCHttpResponse *)handleClearAppsSmart {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+
     TVLog(@"HTTP Server: Smart clear apps request received");
-    
+
     NSDictionary *result = [[TVNCApiManager sharedManager] clearBackgroundAppsSmart];
-    
+
     response.statusCode = 200;
     response.contentType = @"application/json";
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
+
+    return response;
+}
+
+// POST /api/clearapps/force
+// 强制清理后台应用（即使在桌面也执行：打开多任务 + 上滑杀进程）
+- (TVNCHttpResponse *)handleClearAppsForce {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Force clear apps request received");
+
+    NSDictionary *result = [[TVNCApiManager sharedManager] clearBackgroundAppsSmartForce:YES];
+
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+
+    return response;
+}
+
+// GET /api/frontmost
+// 诊断接口：返回当前前台 App 信息及命中的检测通道，便于真机排障
+// （FrontBoardServices / SBS.BundleID / SBS.Frontmost / SBS.legacy / none）
+- (TVNCHttpResponse *)handleFrontmost {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSDictionary *info = [[TVNCApiManager sharedManager] frontmostAppInfo];
+    NSMutableDictionary *out = [NSMutableDictionary dictionaryWithDictionary:info];
+    id bid = info[@"bundleID"];
+    out[@"bundleID"] = [bid isKindOfClass:[NSString class]] ? bid : [NSNull null];
+    out[@"onSpringBoard"] = @(![bid isKindOfClass:[NSString class]] ||
+        [bid isEqualToString:@"com.apple.springboard"] || [bid isEqualToString:@"SpringBoard"]);
+
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:out options:0 error:nil];
+
     return response;
 }
 
@@ -3688,6 +3728,8 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/home</b> - 返回桌面（按一次 Home 键）</li>"
         "<li><b>POST /api/taskmanager</b> - 打开任务管理器（双击 Home 键）</li>"
         "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
+        "<li><b>POST /api/clearapps/force</b> - 强制清理后台应用（即使在桌面也执行：多任务+上滑杀进程）</li>"
+        "<li><b>GET /api/frontmost</b> - 诊断：当前前台 App 的 bundleID 及命中的检测通道</li>"
         "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
         "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"
         "<li><b>POST /api/assistivetouch?action=disable</b> - 禁用 AssistiveTouch（小白点）</li>"

@@ -284,6 +284,7 @@ NS_ASSUME_NONNULL_BEGIN
  * @return 包含操作结果的字典
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
+- (NSDictionary *)clearBackgroundAppsSmartForce:(BOOL)force;
 
 @end
 

@@ -2,6 +2,20 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.94] – 2026-07-15
+
+### Fixed（前台 App 检测改用 FrontBoardServices，真正解决 daemon 下误判桌面）
+- **根因定位**：3.91/3.92 把前台检测改成 SpringBoardServices 的 XPC（`SBFrontmostApplication*`）+ `com.apple.springboard.appcontrol` 授权，但真机实测该 XPC 从 `trollvncserver`（daemon）上下文**仍然返回 nil**（即 `stage:foreground_pid` 失败、clearapps 误判 `onSpringBoard:true`）。SpringBoard 的 XPC 对外部 daemon 不可靠。
+- **改为 FrontBoardServices 优先**：`FBSApplicationWorkspace.defaultWorkspace.runningApplications` 走的是 **backboardd 的 `FBSSystemService` XPC**（我们有 `com.apple.frontboard.launchapplications` 授权），daemon 下可靠；用 `visibility`/`isActive`/`isForeground` 评分挑出真正的前台 App，直接拿到 `bundleIdentifier` 与 `processIdentifier`。
+- `getFrontmostAppBundleID` 重构为诊断版 `frontmostAppInfo`（返回 `{method, bundleID, pid}`，记录命中通道），FBS → SBS XPC → legacy `SBSCopyFrontmostApplicationDisplayIdentifier` 三层兜底。
+- **修复 `isOnSpringBoard` 的误判**：旧实现在 daemon 下 `[UIApplication sharedApplication]` 返回 nil 会直接 `return YES`（永远判定桌面）。改为以 `frontmostBundleID` 为主判断，UIApplication 状态仅作最后兜底。
+- **`tvnc_foreground_pid` 新增 FBS 通道**（置于最优先）：直接救 `input_inject` 的 `foreground_pid` 阶段——此前该阶段因 SBS XPC 调不通而失败，进程内注入通道始终不可用。
+- 新增 `POST /api/clearapps/force`（强制清理：即使在桌面也执行"多任务+上滑杀进程"）与 `GET /api/frontmost`（诊断：当前前台 App 的 bundleID 及命中通道）。
+
+### Added
+- `clearBackgroundAppsSmartForce:(BOOL)force` + `performClearBackgroundApps:`，`/api/clearapps/force` 路由与 `handleClearAppsForce`。
+- `/api/frontmost` 诊断路由与 `handleFrontmost`。
+
 ## [3.93] – 2026-07-15
 
 ### Added（新增 `/api/input_keyboard` 键盘系统输入通道）
