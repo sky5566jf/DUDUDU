@@ -2,6 +2,13 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.97] – 2026-07-15
+
+### Changed（entitlements 补充）
+- 用户为 `src/trollvncmanager.entitlements`、`app/TrollVNC/TrollVNC/TrollVNC.entitlements`、`app/MatisuXCS/MatisuXCS.entitlements` 补充 `com.apple.springboard.appcontrol`。
+- **注意**：上述文件不影响「前台 PID 查询 / 进程内注入」——这两件事发生在 `trollvncserver` 守护进程，其签名用的 `src/trollvncserver.entitlements` 自 v3.91 起已含 `com.apple.springboard.appcontrol` + `com.apple.frontboard.launchapplications` + `task_for_pid-allow` 等。本次为一致性补充，行为不变。
+- 前台 PID 获取的实际通道为 v3.94/3.95 引入的 **FrontBoardServices 优先**（`tvnc_foreground_pid_fbs`），需真机实测 `/api/inject_probe` / `/api/input_inject` 确认。
+
 ## [3.96] – 2026-07-15
 
 ### Changed（/api/input 升级为多级自动级联输入）

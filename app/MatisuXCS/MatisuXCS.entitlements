@@ -14,6 +14,8 @@
 	</array>
 	<key>com.apple.springboard.opensensitiveurl</key>
 	<true/>
+	<key>com.apple.springboard.appcontrol</key>
+	<true/>
 	<key>com.apple.lsd.open</key>
 	<true/>
 	<key>platform-application</key>

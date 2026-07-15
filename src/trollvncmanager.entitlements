@@ -509,6 +509,8 @@
 	<true/>
 	<key>com.apple.springboard.openurlswhenlocked</key>
 	<true/>
+	<key>com.apple.springboard.appcontrol</key>
+	<true/>
 	<key>com.apple.usernotification.notificationregistrarproxy</key>
 	<true/>
 	<key>com.apple.usernotification.notificationschedulerproxy</key>
