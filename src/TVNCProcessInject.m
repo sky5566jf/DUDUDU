@@ -43,6 +43,13 @@ typedef AXError (*TVNC_AXGetPid)(AXUIElementRef, pid_t *);
 
 #define TVNC_RTLD_NOW 0x2
 
+// SBApplication 的进程号方法（运行时由 SpringBoard 实现，编译期 id 不认，故在此声明）。
+// 仅用于 [app processIdentifier] / [app pid] 的编译通过，运行时不会真的用到这个分类实现。
+@interface NSObject (TVNC_SBAppExt)
+- (NSInteger)processIdentifier;
+- (int)pid;
+@end
+
 #pragma mark - 目标进程内存读写
 
 // 从目标 task 读 len 字节，返回 malloc 缓冲（调用方 free）。失败返回 NULL。
