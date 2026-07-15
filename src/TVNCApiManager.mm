@@ -2503,7 +2503,7 @@ static BOOL TVNCLoadAX(void) {
                 for (int i = count - 1; i >= 0; i--) {
                     if (procs[i].kp_proc.p_stat == SRUN) {
                         pid_t pid = procs[i].kp_proc.p_pid;
-                        char pathBuf[PROC_PIDPATH_MAXSIZE] = {0};
+                        char pathBuf[4096] = {0};  // PROC_PIDPATH_MAXSIZE (4*MAXPATHLEN)，部分 SDK 未导出该宏，用字面值
                         if (proc_pidpath(pid, pathBuf, sizeof(pathBuf)) > 0) {
                             NSString *procPath = [NSString stringWithUTF8String:pathBuf];
                             if ([procPath hasPrefix:@"/Applications/"]) {
