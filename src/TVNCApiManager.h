@@ -285,6 +285,8 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
 - (NSDictionary *)clearBackgroundAppsSmartForce:(BOOL)force;
+- (NSDictionary *)frontmostAppInfo;
+- (NSString *)getFrontmostAppBundleID;
 
 @end
 
