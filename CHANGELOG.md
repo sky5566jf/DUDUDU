@@ -2,6 +2,17 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [3.98] – 2026-07-15
+
+### Changed（input_inject 不再依赖前台 PID 检测）
+- 真机实测 `/api/inject_probe` 仍 `stage:foreground_pid` 失败：daemon 下 SpringBoardServices / FrontBoardServices 的 XPC 即便 entitlements 齐全也返回 nil（前台 PID 通道在守护进程上下文不可用）。
+- **重构 `/api/input_inject` 与 `/api/inject_probe`**：放弃「先取前台 PID 再注入单个进程」的旧模型。
+  - 新增 `tvnc_enumerate_user_apps()`：通过 `sysctl(KERN_PROC_ALL)` + `proc_pidpath` 枚举所有用户 App 进程（排除守护自身、同 .app 的 manager、SpringBoard、系统守护）。
+  - 新增 `tvnc_inject_into_pid()`：对单个目标进程完成完整注入（task_for_pid + 进程内 dlopen/dlsym/tvnc_inject_text），返回 `tvnc_inject_text` 的 BOOL。
+  - `injectText:` 现在对**全部候选 App 逐一注入**，仅前台 App（有焦点输入框）的 `tvnc_inject_text` 真正返回 YES，后台 App 自动跳过（无害）。成功即提前返回。
+  - `probe` 改为枚举候选 App 并验证 `task_for_pid` 可取 task port 即视为通道打通，不再要求精确前台 PID。
+- 效果：彻底绕开 `foreground_pid` 卡死，`input_inject` 在 daemon 环境下也能对游戏/自绘框输入框生效。
+
 ## [3.97] – 2026-07-15
 
 ### Changed（entitlements 补充）

@@ -11,6 +11,7 @@
 #import <stdint.h>
 #import <sys/sysctl.h>
 #import <libproc.h>
+#import <unistd.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
@@ -485,33 +486,124 @@ static NSString *tvnc_dylib_path(void) {
     return nil;
 }
 
+#pragma mark - 候选 App 枚举（不依赖前台检测）
+
+// 枚举所有“用户 App”进程 PID（不含守护进程自身、同 .app 的 manager、SpringBoard、系统守护）。
+// 用于不依赖前台检测即可实施注入：对全部候选 App 注入，仅前台 App 的 tvnc_inject_text 会真正生效。
+static void tvnc_enumerate_user_apps(NSMutableArray *outPids) {
+    NSString *selfBundle = [[NSBundle mainBundle] bundlePath]; // .../MatisuXCS.app
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+    size_t size = 0;
+    if (sysctl(mib, 3, NULL, &size, NULL, 0) != 0) return;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return;
+    if (sysctl(mib, 3, procs, &size, NULL, 0) != 0) { free(procs); return; }
+    int count = (int)(size / sizeof(struct kinfo_proc));
+    pid_t selfPid = getpid();
+    char pathbuf[PROC_PIDPATHINFO_MAXSIZE];
+    for (int i = 0; i < count; i++) {
+        pid_t pid = procs[i].kp_proc.p_pid;
+        if (pid <= 0 || pid == selfPid) continue;
+        int ret = proc_pidpath(pid, pathbuf, sizeof(pathbuf));
+        if (ret <= 0) continue;
+        NSString *path = [NSString stringWithUTF8String:pathbuf];
+        // 仅保留 .app 内可执行（用户/系统 App），排除 /System、/usr、/sbin 下的系统守护
+        NSRange ar = [path rangeOfString:@".app/"];
+        if (ar.location == NSNotFound) continue;
+        if ([path hasPrefix:@"/System/"] || [path hasPrefix:@"/usr/"] ||
+            [path hasPrefix:@"/sbin/"] || [path hasPrefix:@"/private/var/db/"]) continue;
+        if ([path containsString:@"/CoreServices/SpringBoard.app/"]) continue;
+        // 排除守护进程自身及同 .app 的 manager
+        NSString *appDir = [path substringToIndex:ar.location + ar.length - 1];
+        if ([appDir isEqualToString:selfBundle]) continue;
+        [outPids addObject:@(pid)];
+    }
+    free(procs);
+}
+
+// 对单个目标进程执行完整注入（task_for_pid + 进程内 dlopen/dlsym/tvnc_inject_text）。
+// 返回 tvnc_inject_text 的 BOOL 结果（YES=成功写入文本）。diag 记录该 pid 的诊断。
+static BOOL tvnc_inject_into_pid(pid_t pid, NSString *dylibPath, NSString *text, NSMutableDictionary *diag) {
+    task_t task = MACH_PORT_NULL;
+    kern_return_t kr = task_for_pid(mach_task_self(), pid, &task);
+    if (kr != KERN_SUCCESS || task == MACH_PORT_NULL) {
+        diag[@"task_for_pid"] = [NSString stringWithFormat:@"kr=%d", (int)kr];
+        return NO;
+    }
+    uint64_t dlopenAddr = 0, dlsymAddr = 0;
+    if (!tvnc_find_libsystem_symbols(task, &dlopenAddr, &dlsymAddr)) {
+        diag[@"symbol_resolve"] = @"fail";
+        mach_port_deallocate(mach_task_self(), task);
+        return NO;
+    }
+    uint64_t pathAddr = tvnc_write_cstr(task, [dylibPath UTF8String]);
+    uint64_t fnNameAddr = tvnc_write_cstr(task, "tvnc_inject_text");
+    uint64_t textAddr = tvnc_write_cstr(task, [text UTF8String]);
+    uint64_t tramp = tvnc_alloc(task, 16);
+    if (tramp) { uint32_t trap = 0x14000000; tvnc_write(task, tramp, &trap, 4); }
+    uint64_t stack = tvnc_alloc(task, 0x4000);
+    uint64_t sp = stack ? (stack + 0x4000 - 16) : 0;
+    BOOL ok = NO;
+    if (!pathAddr || !fnNameAddr || !textAddr || !tramp || !stack) {
+        diag[@"alloc"] = @"fail";
+        goto cleanup_inject;
+    }
+    uint64_t handle = 0;
+    kr = tvnc_call_in_task(task, dlopenAddr, pathAddr, TVNC_RTLD_NOW, sp, tramp, &handle);
+    if (kr != KERN_SUCCESS || handle == 0) { diag[@"dlopen"] = [NSString stringWithFormat:@"kr=%d,handle=%llu",(int)kr,handle]; goto cleanup_inject; }
+    uint64_t fn = 0;
+    kr = tvnc_call_in_task(task, dlsymAddr, handle, fnNameAddr, sp, tramp, &fn);
+    if (kr != KERN_SUCCESS || fn == 0) { diag[@"dlsym"] = [NSString stringWithFormat:@"kr=%d,fn=%llu",(int)kr,fn]; goto cleanup_inject; }
+    uint64_t ret = 0;
+    kr = tvnc_call_in_task(task, fn, textAddr, 0, sp, tramp, &ret);
+    if (kr != KERN_SUCCESS) { diag[@"inject_call"] = [NSString stringWithFormat:@"kr=%d",(int)kr]; goto cleanup_inject; }
+    ok = (ret != 0);
+    diag[@"injected"] = ok ? @"yes" : @"no";
+
+cleanup_inject:
+    if (pathAddr) tvnc_dealloc(task, pathAddr, strlen([dylibPath UTF8String])+1);
+    if (fnNameAddr) tvnc_dealloc(task, fnNameAddr, strlen("tvnc_inject_text")+1);
+    if (textAddr) tvnc_dealloc(task, textAddr, strlen([text UTF8String])+1);
+    if (tramp) tvnc_dealloc(task, tramp, 16);
+    if (stack) tvnc_dealloc(task, stack, 0x4000);
+    mach_port_deallocate(mach_task_self(), task);
+    return ok;
+}
+
 #pragma mark - 公开接口
 
 @implementation TVNCProcessInject
 
 + (NSDictionary *)probe {
     NSMutableDictionary *r = [NSMutableDictionary dictionary];
-    int pid = tvnc_foreground_pid();
-    if (pid <= 0) {
+    NSMutableArray *cands = [NSMutableArray array];
+    tvnc_enumerate_user_apps(cands);
+    r[@"candidate_apps"] = @(cands.count);
+    // 仍尝试一次精确前台检测，作为诊断参考（失败时不影响通道可用性）
+    int fg = tvnc_foreground_pid();
+    if (fg > 0) r[@"foreground_pid_guess"] = @(fg);
+    if (cands.count == 0) {
         r[@"status"] = @"error";
-        r[@"stage"] = @"foreground_pid";
-        r[@"error"] = @"无法获取前台 App PID（当前需有 App 处于前台；若 SpringBoard 查询被拒，请在 entitlements 加 com.apple.springboard.appcontrol 并重签）";
+        r[@"stage"] = @"enumerate";
+        r[@"error"] = @"未枚举到任何用户 App 进程（确认有 App 处于前台/后台运行，且守护进程有 task_for_pid 权限）";
         return r;
     }
-    r[@"foreground_pid"] = @(pid);
-
+    // 取第一个候选验证 task_for_pid 通道
+    pid_t pid = [cands.firstObject intValue];
     task_t task = MACH_PORT_NULL;
     kern_return_t kr = task_for_pid(mach_task_self(), pid, &task);
     if (kr != KERN_SUCCESS || task == MACH_PORT_NULL) {
         r[@"status"] = @"error";
         r[@"stage"] = @"task_for_pid";
+        r[@"tried_pid"] = @(pid);
         r[@"error"] = [NSString stringWithFormat:@"task_for_pid 失败 (kr=%d)。确认 entitlements 含 task_for_pid-allow，且目标与守护进程同为 mobile 用户", (int)kr];
         return r;
     }
     r[@"status"] = @"ok";
     r[@"stage"] = @"task_for_pid";
     r[@"task_acquired"] = @YES;
-    r[@"message"] = @"task_for_pid 通道已打通，可实施进程内注入";
+    r[@"verified_pid"] = @(pid);
+    r[@"message"] = @"task_for_pid 通道已打通；注入将对全部候选 App 尝试，仅前台 App 会真正写入文本（不再依赖前台 PID 检测）";
     mach_port_deallocate(mach_task_self(), task);
     return r;
 }
@@ -532,102 +624,45 @@ static NSString *tvnc_dylib_path(void) {
     }
     r[@"dylib"] = dylibPath;
 
-    int pid = tvnc_foreground_pid();
-    if (pid <= 0) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"foreground_pid";
-        r[@"error"] = @"无法获取前台 App PID（需有 App 处于前台；若 SpringBoard 查询被拒，请在 entitlements 加 com.apple.springboard.appcontrol 并重签）";
-        return r;
+    // 候选 PID：先尝试精确前台检测（FBS/SBS/AX），再把全部用户 App 纳入兜底。
+    // 核心：不依赖前台检测也能工作——对全部候选注入，仅前台 App 的 tvnc_inject_text 生效。
+    NSMutableArray *pids = [NSMutableArray array];
+    int fg = tvnc_foreground_pid();
+    if (fg > 0) [pids addObject:@(fg)];
+    NSMutableArray *cands = [NSMutableArray array];
+    tvnc_enumerate_user_apps(cands);
+    for (NSNumber *p in cands) {
+        if (![pids containsObject:p]) [pids addObject:p];
     }
-    r[@"foreground_pid"] = @(pid);
-
-    task_t task = MACH_PORT_NULL;
-    kern_return_t kr = task_for_pid(mach_task_self(), pid, &task);
-    if (kr != KERN_SUCCESS || task == MACH_PORT_NULL) {
+    r[@"candidate_count"] = @(pids.count);
+    if (pids.count == 0) {
         r[@"status"] = @"error";
-        r[@"stage"] = @"task_for_pid";
-        r[@"error"] = [NSString stringWithFormat:@"task_for_pid 失败 (kr=%d)", (int)kr];
-        return r;
-    }
-
-    uint64_t dlopenAddr = 0, dlsymAddr = 0;
-    if (!tvnc_find_libsystem_symbols(task, &dlopenAddr, &dlsymAddr)) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"symbol_resolve";
-        r[@"error"] = @"目标进程内解析 dlopen/dlsym 失败（共享缓存基址或符号表读取异常）";
-        mach_port_deallocate(mach_task_self(), task);
-        return r;
-    }
-    r[@"symbol_resolve"] = @"ok";
-
-    // 在目标内分配：dylib 路径、函数名、文本、死循环蹦床、栈
-    uint64_t pathAddr = tvnc_write_cstr(task, [dylibPath UTF8String]);
-    uint64_t fnNameAddr = tvnc_write_cstr(task, "tvnc_inject_text");
-    uint64_t textAddr = tvnc_write_cstr(task, [text UTF8String]);
-    // 蹦床：ARM64 `b #0`（无限循环），地址需 4 字节对齐
-    uint64_t tramp = tvnc_alloc(task, 16);
-    if (tramp) {
-        uint32_t trap = 0x14000000; // b #0
-        tvnc_write(task, tramp, &trap, 4);
-    }
-    uint64_t stack = tvnc_alloc(task, 0x4000);
-    uint64_t sp = stack ? (stack + 0x4000 - 16) : 0; // 16 字节对齐
-
-    if (!pathAddr || !fnNameAddr || !textAddr || !tramp || !stack) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"alloc";
-        r[@"error"] = @"目标进程内分配内存失败";
-        if (pathAddr) tvnc_dealloc(task, pathAddr, strlen([dylibPath UTF8String])+1);
-        if (fnNameAddr) tvnc_dealloc(task, fnNameAddr, strlen("tvnc_inject_text")+1);
-        if (textAddr) tvnc_dealloc(task, textAddr, strlen([text UTF8String])+1);
-        if (tramp) tvnc_dealloc(task, tramp, 16);
-        if (stack) tvnc_dealloc(task, stack, 0x4000);
-        mach_port_deallocate(mach_task_self(), task);
+        r[@"stage"] = @"enumerate";
+        r[@"error"] = @"未枚举到任何用户 App 进程（确认有 App 运行）";
         return r;
     }
 
-    // 步骤 1：dlopen(dylibPath, RTLD_NOW) -> handle
-    uint64_t handle = 0;
-    kr = tvnc_call_in_task(task, dlopenAddr, pathAddr, TVNC_RTLD_NOW, sp, tramp, &handle);
-    if (kr != KERN_SUCCESS || handle == 0) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"dlopen";
-        r[@"error"] = [NSString stringWithFormat:@"注入 dlopen 失败 (kr=%d, handle=%llu)", (int)kr, handle];
-        goto cleanup;
+    NSMutableArray *details = [NSMutableArray array];
+    BOOL anyInjected = NO;
+    for (NSNumber *p in pids) {
+        pid_t pid = [p intValue];
+        NSMutableDictionary *diag = [NSMutableDictionary dictionary];
+        diag[@"pid"] = p;
+        BOOL ok = tvnc_inject_into_pid(pid, dylibPath, text, diag);
+        diag[@"result"] = ok ? @"injected" : @"skip";
+        if (ok) anyInjected = YES;
+        [details addObject:diag];
+        if (anyInjected) break; // 已成功写入，无需再试
     }
-    r[@"dlopen"] = @"ok";
-
-    // 步骤 2：dlsym(handle, "tvnc_inject_text") -> fn
-    uint64_t fn = 0;
-    kr = tvnc_call_in_task(task, dlsymAddr, handle, fnNameAddr, sp, tramp, &fn);
-    if (kr != KERN_SUCCESS || fn == 0) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"dlsym";
-        r[@"error"] = [NSString stringWithFormat:@"dlsym tvnc_inject_text 失败 (kr=%d, fn=%llu)", (int)kr, fn];
-        goto cleanup;
+    r[@"details"] = details;
+    if (anyInjected) {
+        r[@"status"] = @"ok";
+        r[@"injected"] = @YES;
+    } else {
+        r[@"status"] = @"fail";
+        r[@"injected"] = @NO;
+        r[@"error"] = @"所有候选 App 注入后 tvnc_inject_text 均返回 NO（前台 App 当前无焦点输入框，或该 App 完全未接系统文本输入）";
     }
-    r[@"dlsym"] = @"ok";
-
-    // 步骤 3：tvnc_inject_text(text) -> BOOL
-    uint64_t ret = 0;
-    kr = tvnc_call_in_task(task, fn, textAddr, 0, sp, tramp, &ret);
-    if (kr != KERN_SUCCESS) {
-        r[@"status"] = @"error";
-        r[@"stage"] = @"inject_call";
-        r[@"error"] = [NSString stringWithFormat:@"调用注入函数失败 (kr=%d)", (int)kr];
-        goto cleanup;
-    }
-    r[@"status"] = ret ? @"ok" : @"fail";
-    r[@"injected"] = @(ret ? YES : NO);
-    if (!ret) r[@"note"] = @"注入函数已执行但 insertText 未生效（该输入框可能无可编辑响应者）";
-
-cleanup:
-    tvnc_dealloc(task, pathAddr, strlen([dylibPath UTF8String])+1);
-    tvnc_dealloc(task, fnNameAddr, strlen("tvnc_inject_text")+1);
-    tvnc_dealloc(task, textAddr, strlen([text UTF8String])+1);
-    tvnc_dealloc(task, tramp, 16);
-    tvnc_dealloc(task, stack, 0x4000);
-    mach_port_deallocate(mach_task_self(), task);
     return r;
 }
 

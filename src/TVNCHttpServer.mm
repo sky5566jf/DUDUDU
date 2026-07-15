@@ -3126,9 +3126,11 @@ static NSString *tvncGetRealDeviceName(void) {
 }
 
 // POST /api/input_inject
-// 进程内注入：把 tvnc_inject.dylib 注入「前台游戏/目标 App 进程」，在其进程空间内
+// 进程内注入：把 tvnc_inject.dylib 注入目标 App 进程，在其进程空间内
 // 直接调用 UIKit insertText:（懒人精灵巨魔版「root模式直接输入文字」等价实现）。
 // 绕开输入法与 AX 节点限制，可解决游戏自绘框文本输入。需要 entitlements 含 task_for_pid-allow。
+// 不依赖前台 PID 检测：通过 sysctl 枚举全部用户 App 进程，逐一注入并调用 tvnc_inject_text，
+// 仅前台 App（有焦点输入框）会真正写入文本，后台 App 自动跳过。
 // 参数：body UTF-8 文本，或 ?text=xxx。返回每步详细状态，便于定位失败环节。
 - (TVNCHttpResponse *)handleInputInject:(NSDictionary *)query body:(NSData *)body {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
@@ -3158,8 +3160,9 @@ static NSString *tvncGetRealDeviceName(void) {
 }
 
 // GET /api/inject_probe
-// 仅探测：取前台 App PID + 验证 task_for_pid 是否可取 task port（不实际注入）。
+// 仅探测：枚举用户 App 进程 + 验证 task_for_pid 是否可取 task port（不实际注入）。
 // 用于在设备上确认 entitlements 的 task_for_pid-allow 是否生效，是注入能否成功的前提。
+// 不再要求精确前台 PID（daemon 下 SpringBoard/FrontBoard XPC 不可用），只要能枚举到 App 并取 task port 即视为通道打通。
 - (TVNCHttpResponse *)handleInjectProbe {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     NSDictionary *result = [TVNCProcessInject probe];
@@ -3708,8 +3711,8 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         "<li><b>POST /api/input_hid</b> - 游戏专用 HID 键盘事件注入（body 或 ?text=）</li>\n"
         "<li><b>POST /api/input_ax</b> - 无障碍(AX)通道直接写聚焦元素文本（body 或 ?text=，无粘贴窗）</li>\n"
         "<li><b>POST /api/input_keyboard</b> - 通过键盘系统输入（UIKeyboardImpl 私有API，绕过第一响应者，适用于游戏/自绘框，不弹粘贴窗）</li>\n"
-        "<li><b>POST /api/input_inject</b> - 进程内注入 dylib 直接调 UIKit insertText（游戏自绘框终极方案，需 task_for_pid entitlements）</li>\n"
-        "<li><b>GET /api/inject_probe</b> - 注入通道探针（仅验证 task_for_pid 是否可取前台 App task port）</li>\n"
+        "<li><b>POST /api/input_inject</b> - 进程内注入 dylib 直接调 UIKit insertText（游戏自绘框终极方案；枚举全部用户 App 注入，不依赖前台 PID 检测，需 task_for_pid entitlements）</li>\n"
+        "<li><b>GET /api/inject_probe</b> - 注入通道探针（枚举用户 App + 验证 task_for_pid 可取 task port，不依赖前台 PID 检测）</li>\n"
         "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
