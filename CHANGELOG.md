@@ -2,12 +2,20 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.08] – 2026-07-16
+
+### Fixed（输入转发端口 8183 → 8184，避开 daemon 自有 Group WebSocket 端口冲突 + /health 探活）
+- **根因**：daemon 的 Group WebSocket 服务器用 `INADDR_ANY` 绑定 **8183**（`TVNCHttpServer.mm` 设 `_groupWSPort=8183` 并真绑）。v4.07 设计用 8183 做 App 输入转发，与 daemon 自身 8183 冲突 → App `bind` 失败或 127.0.0.1 连接被 daemon 先截获 → 转发永远到不了 App → 干净通道静默回退剪贴板（v4.07 实际是死的）。
+- **修复**：App 输入转发与 App 监听统一改用 **8184**（全仓库无其他监听占用）。`TVNCHttpServer.mm` 转发 `http://127.0.0.1:8184/input`；`TVNCAppInputServer.m` 监听 `htons(8184)`（此改动在 v4.07 工作树已落，本版正式发版）。
+- **优化**：`handleInput` 转发前先 `GET http://127.0.0.1:8184/health` 探活（超时 0.3s）。App 被 iOS 挂起时 8184 失活，探活快速失败、立即回退 daemon，避免原 2.0s 超时干等。
+- ⚠️ 8183 为 daemon 自有 Group WS 端口，**输入转发端口后续严禁再改回 8183**。
+
 ## [4.07] – 2026-07-16
 
 ### Fixed（中文输入导致 VNC 断线 → 重做 AX 架构）
 - **根因（v4.06 回归）**：`inputTextViaAX`（AXUIElement 私有框架）在 `trollvncserver` 无界面 daemon 进程内调用，会直接使整个 daemon 崩溃退出 → VNC(5901)/REST(8182) 全部下线、需重连。AX 仅可用于有界面进程（TrollVNC.app），不能用于 daemon。
-- **架构重做**：daemon 不再直接调 AX。新增 TrollVNC.app 内本地 HTTP 服务 `TVNCAppInputServer`（端口 **8183**，监听 127.0.0.1），在 App 有界面进程里执行 AX API（`AXValue`/`AXSelectedText`，支持中文/emoji、零弹窗、不依赖键盘会话）。
-- **调用流程**：`POST /api/input`（8182，daemon）→ 转发 `POST http://127.0.0.1:8183/input` → App 执行 AX → 返回结果。App 未运行 / 8183 不通时，回退 daemon 自身 `inputText`（英文 HID，中文剪贴板+Cmd+V）。
+- **架构重做**：daemon 不再直接调 AX。新增 TrollVNC.app 内本地 HTTP 服务 `TVNCAppInputServer`（端口 **8184**，监听 127.0.0.1），在 App 有界面进程里执行 AX API（`AXValue`/`AXSelectedText`，支持中文/emoji、零弹窗、不依赖键盘会话）。
+- **调用流程**：`POST /api/input`（8182，daemon）→ 转发 `POST http://127.0.0.1:8184/input` → App 执行 AX → 返回结果。App 未运行 / 8184 不通时，回退 daemon 自身 `inputText`（英文 HID，中文剪贴板+Cmd+V）。
 - **代码改动**：`AppDelegate` 启动 `TVNCAppInputServer`；新增 `TVNCAppInputServer.{h,m}` 并注册进 Xcode 工程（bootstrap/TrollVNC scheme）。`src/TVNCHttpServer.mm` 的 `handleInput` 加转发逻辑。`src/TVNCApiManager.mm` 彻底移除 AX（级联仅：第一响应者 → 含中文走剪贴板 → 纯 ASCII 走 HID → UIKeyboardImpl → 剪贴板兜底）。
 - 注：`TVNCInjector.{h,m}` 已新增但未编入本版（进程内注入 dylib 方案尚不完整，且转发架构不依赖）。
 

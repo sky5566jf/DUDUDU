@@ -2081,35 +2081,59 @@ static NSString *tvncGetRealDeviceName(void) {
 
     TVLog(@"HTTP Server: Input text request - length: %lu", (unsigned long)text.length);
 
-    // 方案1: 转发到 TrollVNC.app (端口 8183) 执行 AX API
+    // 方案1: 转发到 TrollVNC.app (端口 8184) 执行 AX API
     // App 是有界面进程，可以安全使用 AX API 支持中文
+    // 先快速探活 App 的 /health：App 一旦被 iOS 挂起，8184 端口即失活，
+    // 探活超时(0.3s)可立即判定，避免直接 POST /input 干等 2 秒才回退。
+    BOOL appAlive = NO;
     @try {
-        NSURL *appUrl = [NSURL URLWithString:@"http://127.0.0.1:8183/input"];
-        NSMutableURLRequest *appRequest = [NSMutableURLRequest requestWithURL:appUrl];
-        [appRequest setHTTPMethod:@"POST"];
-        [appRequest setHTTPBody:body];
-        [appRequest setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
-        [appRequest setTimeoutInterval:2.0];
-
-        NSURLResponse *appResponse = nil;
-        NSError *appError = nil;
-        NSData *responseData = [NSURLConnection sendSynchronousRequest:appRequest
-                                                    returningResponse:&appResponse
-                                                                error:&appError];
-
-        if (!appError && responseData) {
-            NSDictionary *result = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
-            if ([result[@"success"] boolValue]) {
-                TVLog(@"HTTP Server: Input via App AX succeeded");
-                response.statusCode = 200;
-                response.contentType = @"application/json";
-                response.body = responseData;
-                return response;
-            }
+        NSURL *healthUrl = [NSURL URLWithString:@"http://127.0.0.1:8184/health"];
+        NSMutableURLRequest *healthReq = [NSMutableURLRequest requestWithURL:healthUrl];
+        [healthReq setHTTPMethod:@"GET"];
+        [healthReq setTimeoutInterval:0.3];
+        NSURLResponse *healthResp = nil;
+        NSError *healthErr = nil;
+        NSData *healthData = [NSURLConnection sendSynchronousRequest:healthReq
+                                                   returningResponse:&healthResp
+                                                               error:&healthErr];
+        if (!healthErr && healthData && [(NSHTTPURLResponse *)healthResp statusCode] == 200) {
+            appAlive = YES;
         }
-        TVLog(@"HTTP Server: App AX forward failed: %@", appError.localizedDescription ?: @"unknown");
-    } @catch (NSException *exception) {
-        TVLog(@"HTTP Server: App AX forward exception: %@", exception.reason);
+    } @catch (NSException *e) {
+        appAlive = NO;
+    }
+
+    if (appAlive) {
+        @try {
+            NSURL *appUrl = [NSURL URLWithString:@"http://127.0.0.1:8184/input"];
+            NSMutableURLRequest *appRequest = [NSMutableURLRequest requestWithURL:appUrl];
+            [appRequest setHTTPMethod:@"POST"];
+            [appRequest setHTTPBody:body];
+            [appRequest setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+            [appRequest setTimeoutInterval:2.0];
+
+            NSURLResponse *appResponse = nil;
+            NSError *appError = nil;
+            NSData *responseData = [NSURLConnection sendSynchronousRequest:appRequest
+                                                        returningResponse:&appResponse
+                                                                    error:&appError];
+
+            if (!appError && responseData) {
+                NSDictionary *result = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+                if ([result[@"success"] boolValue]) {
+                    TVLog(@"HTTP Server: Input via App AX succeeded");
+                    response.statusCode = 200;
+                    response.contentType = @"application/json";
+                    response.body = responseData;
+                    return response;
+                }
+            }
+            TVLog(@"HTTP Server: App AX forward failed: %@", appError.localizedDescription ?: @"unknown");
+        } @catch (NSException *exception) {
+            TVLog(@"HTTP Server: App AX forward exception: %@", exception.reason);
+        }
+    } else {
+        TVLog(@"HTTP Server: App 8184 not alive (suspended or not running), skip forward");
     }
 
     // 方案2: 回退到 daemon 自身的 inputText（仅支持 ASCII）

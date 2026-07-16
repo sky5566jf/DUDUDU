@@ -131,11 +131,11 @@ static BOOL inputTextViaAX(NSString *text) {
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(8183);
+    addr.sin_port = htons(8184);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 只监听本地
     
     if (bind(_serverSocket, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        NSLog(@"[TVNCAppInput] Failed to bind to port 8183");
+        NSLog(@"[TVNCAppInput] Failed to bind to port 8184");
         close(_serverSocket);
         return NO;
     }
@@ -153,7 +153,7 @@ static BOOL inputTextViaAX(NSString *text) {
         [self acceptLoop];
     });
     
-    NSLog(@"[TVNCAppInput] Server started on port 8183");
+    NSLog(@"[TVNCAppInput] Server started on port 8184");
     return YES;
 }
 
