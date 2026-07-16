@@ -4767,6 +4767,11 @@ static void setupOrientationObserver(void) {
         // iOS 13 fallback: Use UIDevice orientation notifications + polling
         TVLog(@"FBSOrientationObserver not available on iOS < 14, using UIDevice fallback");
 
+        // ★ 关键修复：必须先开启加速度计方向采样，否则 [UIDevice currentDevice].orientation
+        //   永远返回 UIDeviceOrientationUnknown(0)，且 UIDeviceOrientationDidChangeNotification
+        //   永不触发 → gRotationQuad 卡在竖屏(0)，开游戏/转设备都不旋转。
+        [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+
         // 监听设备方向变化通知
         [[NSNotificationCenter defaultCenter] addObserverForName:UIDeviceOrientationDidChangeNotification
                                                           object:nil
@@ -4825,9 +4830,8 @@ static void setupOrientationObserver(void) {
                 case UIDeviceOrientationLandscapeRight:
                     interfaceOrientation = UIInterfaceOrientationLandscapeLeft;
                     break;
-                default:
-                    interfaceOrientation = UIInterfaceOrientationPortrait;
-                    break;
+            default:
+                return; // 设备平放/方向未知：保持上次旋转，不强制竖屏（避免误翻转）
             }
 
             int newRotQ = rotationForOrientation(interfaceOrientation);

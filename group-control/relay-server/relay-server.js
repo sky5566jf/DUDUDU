@@ -170,16 +170,27 @@ httpServer.listen(HTTP_PORT, () => {
 const wss = new WebSocket.Server({ noServer: true });
 
 /**
+ * 解析 WS 连接 URL 中的 role / deviceId
+ * 兼容两种格式（双端兼容，避免客户端改动）：
+ *   1) path 参数（relay banner 推荐）：ws://host:8183/ws/{role}/{deviceId}?ts=xxx
+ *   2) query 参数（iOS app 与 pc 前端现有格式）：ws://host:8183/?role=X&deviceId=Y
+ * 优先 path，其次回退 query。
+ */
+function parseRelayRoleDeviceId(reqUrl) {
+  if (!reqUrl) return { role: 'unknown', deviceId: null };
+  const m = reqUrl.match(/^\/ws\/(\w+)\/([^\s?]+)/);
+  if (m) return { role: m[1], deviceId: m[2] };
+  const q = (url.parse(reqUrl, true).query) || {};
+  if (q.role) return { role: String(q.role), deviceId: q.deviceId ? String(q.deviceId) : null };
+  return { role: 'unknown', deviceId: null };
+}
+
+/**
  * 公共 upgrade 处理器
- * ★ 关键：把 role/deviceId 直接编码进 URL path
- *   客户端连：ws://host:8183/ws/{role}/{deviceId}?ts=xxx
- *   这样 req.url 里一定有 /ws/{role}/{deviceId}，100% 可靠
  */
 function handleUpgrade(req, socket, head) {
-  // 从 req.url 解析 role/deviceId（100% 可靠）
-  const m = req.url.match(/^\/ws\/(\w+)\/([^\s?]+)/);
-  const role     = m ? m[1] : 'unknown';
-  const deviceId = m ? m[2] : genDeviceId();
+  // 从 req.url 解析 role/deviceId（兼容 path 与 query 两种格式）
+  const { role, deviceId } = parseRelayRoleDeviceId(req.url);
   const ip       = socket.remoteAddress || '';
 
   // 挂到 req 上供 connection 事件读取（双重保险）
@@ -216,12 +227,10 @@ wss.on('connection', (ws, req) => {
   let ip = (req && req.socket && req.socket.remoteAddress) || 'unknown';
 
   if (req && req.url) {
-    // req.url = "/ws/master/abc123?ts=xxx" 或 "/ws/slave/abc123"
-    const m = req.url.match(/^\/ws\/(\w+)\/([^\s?]+)/);
-    if (m) {
-      role = m[1];
-      deviceId = m[2];
-    }
+    // 兼容 path(/ws/{role}/{id}) 与 query(?role=x&deviceId=y) 两种格式
+    const parsed = parseRelayRoleDeviceId(req.url);
+    role = parsed.role;
+    deviceId = parsed.deviceId;
   }
   if (!deviceId) deviceId = genDeviceId();
 
