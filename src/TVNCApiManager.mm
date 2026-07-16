@@ -1080,45 +1080,21 @@ int tvncGetFBBytesPerPixel(void);
     // /api/input 由 trollvncserver 的内嵌 HTTP server 处理，就跑在 daemon 进程里，故此处永不能碰 AX。
     // AX 通道仅可用于主 App(TrollVNC.app 有界面进程)，不在此级联出现。
 
-    // firstResponder 失败后的后备通道，按字符集分流：
-    // 含非 ASCII（中文/emoji）：HID 不支持、UIKeyboardImpl 在 daemon 无键盘会话下会"假成功"短路，
-    //   故直接走剪贴板 + Cmd+V —— daemon 下唯一能输中文且不使服务崩溃的通道。
-    //   代价：目标 App 粘贴时读 UIPasteboard 会触发 iOS16 "是否允许粘贴"（系统级，需设备侧授权免弹）。
-    BOOL hasNonASCII = NO;
-    for (NSUInteger i = 0; i < text.length; i++) {
-        if ([text characterAtIndex:i] > 127) { hasNonASCII = YES; break; }
-    }
-    if (hasNonASCII) {
-        TVLog(@"inputText: firstResponder failed, non-ASCII -> clipboard paste");
-        if ([self inputTextViaClipboard:text]) {
-            TVLog(@"inputText: Success via clipboard");
-            return YES;
-        }
-        TVLog(@"inputText: clipboard failed");
-        return NO;
-    }
-
-    // 纯 ASCII：HID 键盘事件（等价外接蓝牙键盘，daemon 下最可靠，不碰剪贴板→零弹窗）。
-    TVLog(@"inputText: firstResponder failed, trying HID...");
-    if ([self inputTextViaHID:text]) {
-        TVLog(@"inputText: Success via HID");
-        return YES;
-    }
-
-    // ⚠️ 此处故意不调用 UIKeyboardImpl.addText:：daemon 无键盘会话时它"假成功"
-    // (返回 YES 但实际没送到前台 App)，会短路下方剪贴板兜底，导致部分 App 英文/数字
-    // 静默丢失（v4.08 实测：部分 App 英文数字无法输入）。该私有 API 仅在主 App 有键盘
-    // 会话时有效，daemon 下不可信，故跳过、直接走剪贴板兜底（见下方）。
-
-    // 纯 ASCII 终级兜底：剪贴板 + Cmd+V（会触发 iOS16 粘贴弹窗，但所有 App 必到）。
-    // 放在 UIKeyboardImpl 之后才是真兜底——否则 UIKeyboardImpl 假成功会把这一级吃掉。
-    TVLog(@"inputText: HID failed, trying clipboard paste (final fallback)...");
+    // ⚠️ daemon(trollvncserver) 无界面、没有前台 App 的响应链，且绝不可调 AX（崩溃，见上方注释）。
+    // daemon 兜底唯一可靠的通道 = 剪贴板 + Cmd+V：已被 v4.08 实测证明「任何 App 中文都能到」
+    // （仅弹 iOS16 粘贴窗）。此前纯 ASCII 先走 HID(keyPress)，但 STHIDEventGenerator 在
+    // WKWebView / React Native / Flutter / 密码框等控件上会「假成功」（不抛异常却没把字符
+    // 送进前台 App），导致部分 App 英文/数字静默丢失（v4.08/v4.09 均复现）。
+    // 现统一走剪贴板，牺牲「英文零弹窗」换取「所有 App 必到」。中文/英文/数字全部可靠。
+    // 若日后需英文零弹窗，须走主 App(TrollVNC.app) 8184 的 AX 通道（第三方 App AX 受限）
+    // 或进程内注入(TVNCInjector，注入前台目标 App 自身进程执行输入)。
+    TVLog(@"inputText: firstResponder failed, fallback to clipboard paste (reliable for all apps)");
     if ([self inputTextViaClipboard:text]) {
         TVLog(@"inputText: Success via clipboard");
         return YES;
     }
 
-    TVLog(@"inputText: All methods failed");
+    TVLog(@"inputText: clipboard failed");
     return NO;
 }
 

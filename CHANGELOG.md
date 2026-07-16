@@ -2,6 +2,14 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.10] – 2026-07-16
+
+### Fixed（英文/数字部分 App 无法输入 —— daemon 兜底统一走剪贴板）
+- **根因（v4.08/v4.09 实测均复现）**：`inputText:` 纯 ASCII 分支先走 `inputTextViaHID:`（`STHIDEventGenerator keyPress:`）。该方法**不验证字符是否真送达前台 App**，在 WKWebView / React Native / Flutter / 密码框等控件上「假成功」（不抛异常却没把字符送进输入框）→ 直接 return → 英文/数字静默丢失，且永不走剪贴板兜底。v4.09 删 `UIKeyboardImpl` 无效（它排在 HID 之后、HID 已先假成功 return）。
+- **修复**：daemon 兜底去掉 HID / UIKeyboardImpl / 字符集分流，统一 `第一响应者 → inputTextViaClipboard:`（剪贴板 + Cmd+V）。剪贴板通道已被 v4.08 实测证明「任何 App 中文都能到」，故中/英/数字**任何 App 必到、不再丢失**。`inputTextViaHID:` 方法保留但未调用（死代码无害）。
+- **代价（用户已接受）**：英文/数字也走粘贴 → 触发 iOS16「是否允许粘贴」弹窗（与中文一致）。用户确认弹窗可接受，目标仅为「任何 App 都能文本输入」。
+- 说明：中文零弹窗的彻底解仍是 `TVNCInjector` 进程内注入（注入前台目标 App 自身进程执行输入，天然有 AX 上下文、不受挂起影响、deb/tipa 通吃），当前为半成品骨架，本版未投入（用户接受弹窗）。
+
 ## [4.09] – 2026-07-16
 
 ### Fixed（英文/数字部分 App 无法输入 + 中文弹窗根治仅 .tipa）
