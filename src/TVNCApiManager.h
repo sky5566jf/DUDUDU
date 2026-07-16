@@ -148,13 +148,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)inputTextViaHID:(NSString *)text;
 
 /**
- 通过系统无障碍(AX)通道注入文本（支持中文/emoji 等任意 Unicode，零弹窗，不依赖第一响应者/键盘会话）
- @param text 要输入的文本内容
- @return 是否成功
- */
-- (BOOL)inputTextViaAX:(NSString *)text;
-
-/**
  通过 iOS 键盘系统私有 API（UIKeyboardImpl）直接输入文本
  绕过第一响应者类型限制，不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗
  @param text 要输入的文本内容

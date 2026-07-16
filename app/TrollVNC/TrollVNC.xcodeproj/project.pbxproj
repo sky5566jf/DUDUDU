@@ -53,6 +53,8 @@
 		CC91EF972E6EF165002F5B2A /* TVNCListItemsController.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF962E6EF165002F5B2A /* TVNCListItemsController.m */; };
 		CC2BF93E2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */; };
 		CC2BF93F2F101B2F00111D97 /* BackgroundTasks.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CC2BF93D2F101B2F00111D97 /* BackgroundTasks.framework */; };
+		9F2A7B3C8E4D1A2B3C4D5E70 /* TVNCAppInputServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9F2A7B3C8E4D1A2B3C4D5E6F /* TVNCAppInputServer.m */; };
+		9F2A7B3C8E4D1A2B3C4D5E71 /* TVNCAppInputServer.m in Sources */ = {isa = PBXBuildFile; fileRef = 9F2A7B3C8E4D1A2B3C4D5E6F /* TVNCAppInputServer.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -68,6 +70,7 @@
 		61C756662E65B72E00B2B371 /* NetworkExtension.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = NetworkExtension.framework; path = System/Library/Frameworks/NetworkExtension.framework; sourceTree = SDKROOT; };
 		61C756992E65BDAC00B2B371 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		61C7569A2E65BDAC00B2B371 /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		9F2A7B3C8E4D1A2B3C4D5E6F /* TVNCAppInputServer.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TVNCAppInputServer.m; sourceTree = "<group>"; };
 		61C7569B2E65BDAC00B2B371 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		61C7569C2E65BDAC00B2B371 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		61C756A22E65BDAC00B2B371 /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
@@ -189,6 +192,7 @@
 				615401CC2EB11943009FDD6F /* Resources */,
 				61C756992E65BDAC00B2B371 /* AppDelegate.h */,
 				61C7569A2E65BDAC00B2B371 /* AppDelegate.m */,
+			9F2A7B3C8E4D1A2B3C4D5E6F /* TVNCAppInputServer.m */,
 				CC91EF942E6E03BD002F5B2A /* Control.h */,
 				CC80617A2E74967500B1AA3E /* DpkgVersion.h */,
 				CC80617B2E74967500B1AA3E /* DpkgVersion.m */,
@@ -371,6 +375,7 @@
 			files = (
 				CC91EF932E6CA6C5002F5B2A /* TVNCClientCell.m in Sources */,
 				61C756BF2E65BDAC00B2B371 /* AppDelegate.m in Sources */,
+				9F2A7B3C8E4D1A2B3C4D5E70 /* TVNCAppInputServer.m in Sources */,
 				61C756C02E65BDAC00B2B371 /* main.m in Sources */,
 				61C756C12E65BDAC00B2B371 /* SceneDelegate.m in Sources */,
 				CC80617F2E74967500B1AA3E /* GitHubReleaseUpdater.m in Sources */,
@@ -394,6 +399,7 @@
 			files = (
 				615401B02EB1180C009FDD6F /* TVNCClientCell.m in Sources */,
 				615401B12EB1180C009FDD6F /* AppDelegate.m in Sources */,
+				9F2A7B3C8E4D1A2B3C4D5E71 /* TVNCAppInputServer.m in Sources */,
 				615401B22EB1180C009FDD6F /* main.m in Sources */,
 				615401B32EB1180C009FDD6F /* SceneDelegate.m in Sources */,
 				615401B42EB1180C009FDD6F /* GitHubReleaseUpdater.m in Sources */,

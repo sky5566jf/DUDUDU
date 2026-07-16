@@ -2063,10 +2063,12 @@ static NSString *tvncGetRealDeviceName(void) {
 }
 
 // POST /api/input
+// POST /api/input
 // Body: 要输入的文本（UTF-8）
+// 优先转发到 TrollVNC.app（有界面进程）执行 AX API，支持中文
 - (TVNCHttpResponse *)handleInput:(NSDictionary *)query body:(NSData *)body {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+
     // 解析 body 为 UTF-8 文本
     NSString *text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
     if (!text) {
@@ -2076,14 +2078,48 @@ static NSString *tvncGetRealDeviceName(void) {
         response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
         return response;
     }
-    
-    // 检查是否有输入框焦点
+
+    TVLog(@"HTTP Server: Input text request - length: %lu", (unsigned long)text.length);
+
+    // 方案1: 转发到 TrollVNC.app (端口 8183) 执行 AX API
+    // App 是有界面进程，可以安全使用 AX API 支持中文
+    @try {
+        NSURL *appUrl = [NSURL URLWithString:@"http://127.0.0.1:8183/input"];
+        NSMutableURLRequest *appRequest = [NSMutableURLRequest requestWithURL:appUrl];
+        [appRequest setHTTPMethod:@"POST"];
+        [appRequest setHTTPBody:body];
+        [appRequest setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+        [appRequest setTimeoutInterval:2.0];
+
+        NSURLResponse *appResponse = nil;
+        NSError *appError = nil;
+        NSData *responseData = [NSURLConnection sendSynchronousRequest:appRequest
+                                                    returningResponse:&appResponse
+                                                                error:&appError];
+
+        if (!appError && responseData) {
+            NSDictionary *result = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
+            if ([result[@"success"] boolValue]) {
+                TVLog(@"HTTP Server: Input via App AX succeeded");
+                response.statusCode = 200;
+                response.contentType = @"application/json";
+                response.body = responseData;
+                return response;
+            }
+        }
+        TVLog(@"HTTP Server: App AX forward failed: %@", appError.localizedDescription ?: @"unknown");
+    } @catch (NSException *exception) {
+        TVLog(@"HTTP Server: App AX forward exception: %@", exception.reason);
+    }
+
+    // 方案2: 回退到 daemon 自身的 inputText（仅支持 ASCII）
+    TVLog(@"HTTP Server: Falling back to daemon inputText");
     BOOL hasFocus = [[TVNCApiManager sharedManager] inputText:text];
-    
+
     if (hasFocus) {
         response.statusCode = 200;
         response.contentType = @"application/json";
-        NSDictionary *result = @{@"success": @YES, @"text": text, @"length": @(text.length)};
+        NSDictionary *result = @{@"success": @YES, @"text": text, @"length": @(text.length), @"method": @"daemon"};
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     } else {
         response.statusCode = 400;
@@ -2091,9 +2127,10 @@ static NSString *tvncGetRealDeviceName(void) {
         NSDictionary *result = @{@"success": @NO, @"error": @"No active text input field found. Please focus an input field first."};
         response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     }
-    
+
     return response;
 }
+
 
 // POST /api/key?code=13
 // 发送单个按键
