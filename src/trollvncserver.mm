@@ -4744,7 +4744,7 @@ static void setupOrientationObserver(void) {
 
             UIInterfaceOrientation activeOrientation = [update orientation];
 
-            // Note: Actual framebuffer rotation will be handled in the next step.
+            // Note: Actual framebuffer rotation will be handled in the next step...
             gRotationQuad.store(rotationForOrientation(activeOrientation), std::memory_order_relaxed);
 
 #if DEBUG
@@ -4764,9 +4764,103 @@ static void setupOrientationObserver(void) {
         TVLog(@"Orientation observer registered (initial=%ld -> rotQ=%d)", (long)activeOrientation,
               gRotationQuad.load(std::memory_order_relaxed));
     } else {
-        TVLog(@"Orientation observer not available on iOS 13 or earlier; orientation sync disabled");
-        gOrientationSyncEnabled = NO;
+        // iOS 13 fallback: Use UIDevice orientation notifications + polling
+        TVLog(@"FBSOrientationObserver not available on iOS < 14, using UIDevice fallback");
+
+        // 监听设备方向变化通知
+        [[NSNotificationCenter defaultCenter] addObserverForName:UIDeviceOrientationDidChangeNotification
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification *note) {
+            UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
+            UIInterfaceOrientation interfaceOrientation;
+
+            switch (deviceOrientation) {
+                case UIDeviceOrientationPortrait:
+                    interfaceOrientation = UIInterfaceOrientationPortrait;
+                    break;
+                case UIDeviceOrientationPortraitUpsideDown:
+                    interfaceOrientation = UIInterfaceOrientationPortraitUpsideDown;
+                    break;
+                case UIDeviceOrientationLandscapeLeft:
+                    interfaceOrientation = UIInterfaceOrientationLandscapeRight;
+                    break;
+                case UIDeviceOrientationLandscapeRight:
+                    interfaceOrientation = UIInterfaceOrientationLandscapeLeft;
+                    break;
+                default:
+                    return; // 面朝上/面朝下忽略
+            }
+
+            int newRotQ = rotationForOrientation(interfaceOrientation);
+            int oldRotQ = gRotationQuad.load(std::memory_order_relaxed);
+
+            if (newRotQ != oldRotQ) {
+                gRotationQuad.store(newRotQ, std::memory_order_relaxed);
+                TVLog(@"iOS 13 orientation changed: device=%ld -> interface=%ld -> rotQ=%d",
+                      (long)deviceOrientation, (long)interfaceOrientation, newRotQ);
+            }
+        }];
+
+        // 启动定时器轮询方向（兜底方案）
+        static dispatch_source_t orientationTimer = nil;
+        orientationTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                  dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0));
+        dispatch_source_set_timer(orientationTimer, DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+        dispatch_source_set_event_handler(orientationTimer, ^{
+            // 强制更新方向状态
+            UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
+            UIInterfaceOrientation interfaceOrientation;
+
+            switch (deviceOrientation) {
+                case UIDeviceOrientationPortrait:
+                    interfaceOrientation = UIInterfaceOrientationPortrait;
+                    break;
+                case UIDeviceOrientationPortraitUpsideDown:
+                    interfaceOrientation = UIInterfaceOrientationPortraitUpsideDown;
+                    break;
+                case UIDeviceOrientationLandscapeLeft:
+                    interfaceOrientation = UIInterfaceOrientationLandscapeRight;
+                    break;
+                case UIDeviceOrientationLandscapeRight:
+                    interfaceOrientation = UIInterfaceOrientationLandscapeLeft;
+                    break;
+                default:
+                    interfaceOrientation = UIInterfaceOrientationPortrait;
+                    break;
+            }
+
+            int newRotQ = rotationForOrientation(interfaceOrientation);
+            int oldRotQ = gRotationQuad.load(std::memory_order_relaxed);
+
+            if (newRotQ != oldRotQ) {
+                gRotationQuad.store(newRotQ, std::memory_order_relaxed);
+                TVLog(@"iOS 13 orientation poll: rotQ=%d", newRotQ);
+            }
+        });
+        dispatch_resume(orientationTimer);
+
+        // 初始方向
+        UIDeviceOrientation initialOrientation = [UIDevice currentDevice].orientation;
+        UIInterfaceOrientation initialInterface;
+        switch (initialOrientation) {
+            case UIDeviceOrientationLandscapeLeft:
+                initialInterface = UIInterfaceOrientationLandscapeRight;
+                break;
+            case UIDeviceOrientationLandscapeRight:
+                initialInterface = UIInterfaceOrientationLandscapeLeft;
+                break;
+            default:
+                initialInterface = UIInterfaceOrientationPortrait;
+                break;
+        }
+        gRotationQuad.store(rotationForOrientation(initialInterface), std::memory_order_relaxed);
+
+        TVLog(@"iOS 13 orientation fallback registered (initial=%ld -> rotQ=%d)",
+              (long)initialInterface, gRotationQuad.load(std::memory_order_relaxed));
     }
+}
+
 }
 
 #pragma mark - Setups (RFB)
