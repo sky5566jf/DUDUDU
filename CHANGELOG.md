@@ -2,6 +2,15 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.09] – 2026-07-16
+
+### Fixed（英文/数字部分 App 无法输入 + 中文弹窗根治仅 .tipa）
+- **英文/数字部分 App 无法输入（所有构建通用）**：`inputText:` 纯 ASCII 级联原顺序为 `HID → UIKeyboardImpl → 剪贴板`。`UIKeyboardImpl.addText:` 在 daemon 无键盘会话时会"假成功"（返回 YES 但没真送到前台 App），把最后的**剪贴板兜底短路**了 → 英文/数字静默丢失、方法还回报成功。改为 `HID → 剪贴板`：`UIKeyboardImpl` 调用已移除，HID 失效的 App 必走到剪贴板（弹窗但必到）。
+- **中文弹窗根治（仅 .tipa / TrollVNC.app 生效）**：`TrollVNC.app` 的 `Info.plist` 增加 `voip` 后台模式。其机制是——8184 监听 socket 上有连接到达时，iOS 会唤醒被挂起的 App 来处理。于是切到 Safari/微信打字、daemon 转发 `/input` 的瞬间，iOS 把 `TrollVNC.app` 叫醒、走 App 的 AX 通道输中文 → 零弹窗，中英文都可靠。
+- `AppDelegate.m` 顺手修正误写多年的"端口 8183"注释为 8184。
+- ⚠️ voip 保活需真机验证：iOS 13+ 对 voip 模式有收紧，若实测中文仍弹窗，下一步将 8184 socket 显式标记为 VoIP socket（`kCFStreamNetworkServiceTypeVoIP`）。
+- ⚠️ 该 voip 修复只在 `.tipa`（Xcode 工程 TrollVNC.app）里；3 个 `.deb` 无 8184 服务器，中文照常弹窗（英文/digits 因上述级联修复而能输）。`.deb` 想零弹窗中文需走 `TVNCInjector` 进程内注入，另议。
+
 ## [4.08] – 2026-07-16
 
 ### Fixed（输入转发端口 8183 → 8184，避开 daemon 自有 Group WebSocket 端口冲突 + /health 探活）

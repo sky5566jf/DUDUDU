@@ -1099,23 +1099,20 @@ int tvncGetFBBytesPerPixel(void);
     }
 
     // 纯 ASCII：HID 键盘事件（等价外接蓝牙键盘，daemon 下最可靠，不碰剪贴板→零弹窗）。
-    // 必须排在 UIKeyboardImpl 之前：UIKeyboardImpl.addText: 在 daemon 无键盘会话时会"假成功"
-    // (返回 YES 但实际没送到前台 App)，若排在前会短路级联（v3.96 回归点）。
     TVLog(@"inputText: firstResponder failed, trying HID...");
     if ([self inputTextViaHID:text]) {
         TVLog(@"inputText: Success via HID");
         return YES;
     }
 
-    // 纯 ASCII 兜底：UIKeyboardImpl 私有 API（主 App 有焦点时经键盘系统直接输入，零弹窗）。
-    TVLog(@"inputText: HID failed, trying UIKeyboardImpl...");
-    if ([self inputTextViaKeyboard:text]) {
-        TVLog(@"inputText: Success via UIKeyboardImpl");
-        return YES;
-    }
+    // ⚠️ 此处故意不调用 UIKeyboardImpl.addText:：daemon 无键盘会话时它"假成功"
+    // (返回 YES 但实际没送到前台 App)，会短路下方剪贴板兜底，导致部分 App 英文/数字
+    // 静默丢失（v4.08 实测：部分 App 英文数字无法输入）。该私有 API 仅在主 App 有键盘
+    // 会话时有效，daemon 下不可信，故跳过、直接走剪贴板兜底（见下方）。
 
-    // 纯 ASCII 终级兜底：剪贴板 + Cmd+V（会触发 iOS16 粘贴弹窗）。
-    TVLog(@"inputText: UIKeyboardImpl failed, trying clipboard paste...");
+    // 纯 ASCII 终级兜底：剪贴板 + Cmd+V（会触发 iOS16 粘贴弹窗，但所有 App 必到）。
+    // 放在 UIKeyboardImpl 之后才是真兜底——否则 UIKeyboardImpl 假成功会把这一级吃掉。
+    TVLog(@"inputText: HID failed, trying clipboard paste (final fallback)...");
     if ([self inputTextViaClipboard:text]) {
         TVLog(@"inputText: Success via clipboard");
         return YES;

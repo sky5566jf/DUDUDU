@@ -40,7 +40,7 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"TrollVNC"];
 
-    // 启动本地 HTTP 服务器（端口 8183）用于文本输入转发
+    // 启动本地 HTTP 服务器（端口 8184）用于文本输入转发
     [[TVNCAppInputServer sharedServer] startServer];
 
     // v3.43: 注册 BGTaskScheduler

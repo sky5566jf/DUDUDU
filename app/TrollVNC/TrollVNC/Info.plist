@@ -37,6 +37,7 @@
 	<array>
 		<string>network-authentication</string>
 		<string>fetch</string>
+		<string>voip</string>
 	</array>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
