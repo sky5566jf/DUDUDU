@@ -4861,8 +4861,6 @@ static void setupOrientationObserver(void) {
     }
 }
 
-}
-
 #pragma mark - Setups (RFB)
 
 static void setupRfbScreen(int argc, const char *argv[]) {
