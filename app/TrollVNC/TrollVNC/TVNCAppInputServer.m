@@ -242,7 +242,10 @@ static BOOL inputTextViaAX(NSString *text) {
         dispatch_sync(dispatch_get_main_queue(), ^{
             canOpen = [[UIApplication sharedApplication] canOpenURL:url];
             if (canOpen) {
-                opened = [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+                opened = [[UIApplication sharedApplication] openURL:url];
+#pragma clang diagnostic pop
             }
         });
         
