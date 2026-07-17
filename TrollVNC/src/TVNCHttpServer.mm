@@ -264,6 +264,8 @@
         return [self handleInputHid:query body:body];
     } else if ([path isEqualToString:@"/api/input_ax"]) {
         return [self handleInputAx:query body:body];
+    } else if ([path isEqualToString:@"/api/input_keyboard"]) {
+        return [self handleInputKeyboard:query body:body];
     } else if ([path isEqualToString:@"/api/clients"]) {
         return [self handleClients];
     } else if ([path isEqualToString:@"/api/status"]) {
@@ -1172,6 +1174,41 @@
     return response;
 }
 
+// POST /api/input_keyboard  (body: UTF-8 文本, 或 ?text=xxx)
+// 通过 iOS 键盘系统私有 API (UIKeyboardImpl) 直接输入文本
+// 绕过第一响应者限制，适用于游戏/自绘输入框/无法通过常规方式输入的场景
+// 不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗
+- (TVNCHttpResponse *)handleInputKeyboard:(NSDictionary *)query body:(NSData *)body {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    NSString *text = nil;
+    if (body && body.length > 0) {
+        text = [[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding];
+    }
+    if (!text || text.length == 0) {
+        NSString *q = query[@"text"];
+        if (q) text = [q stringByRemovingPercentEncoding];
+    }
+    if (!text || text.length == 0) {
+        response.statusCode = 400;
+        response.contentType = @"application/json";
+        NSDictionary *error = @{@"error": @"Empty text. Provide UTF-8 body or ?text=..."};
+        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+        return response;
+    }
+
+    BOOL ok = [[TVNCApiManager sharedManager] inputTextViaKeyboard:text];
+    response.statusCode = ok ? 200 : 400;
+    response.contentType = @"application/json";
+    NSDictionary *result = ok ?
+        @{@"success": @YES, @"method": @"keyboard", @"text": text, @"length": @(text.length),
+          @"note": @"via UIKeyboardImpl private API; no paste prompt"} :
+        @{@"success": @NO,
+          @"error": @"Keyboard input failed: UIKeyboardImpl unavailable or injection rejected"};
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 // GET /api/volume - 获取当前音量
 // POST /api/volume?value=0.5 - 设置音量
 - (TVNCHttpResponse *)handleVolume:(NSDictionary *)query body:(NSData *)body {
@@ -1490,15 +1527,15 @@
 // 智能清理后台应用（识别当前应用，桌面则跳过）
 - (TVNCHttpResponse *)handleClearAppsSmart {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+
     TVLog(@"HTTP Server: Smart clear apps request received");
-    
+
     NSDictionary *result = [[TVNCApiManager sharedManager] clearBackgroundAppsSmart];
-    
+
     response.statusCode = 200;
     response.contentType = @"application/json";
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    
+
     return response;
 }
 
@@ -1908,7 +1945,7 @@
         "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
         "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
         "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
-        "<li><b>POST /api/input</b> - 输入文本到当前焦点输入框（body: 纯文本）</li>"
+        "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式，支持任何App）</li>"
         "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
         "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
         "<li><b>GET /api/status</b> - 获取服务器状态</li>"
@@ -1926,7 +1963,7 @@
         "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
         "<li><b>POST /api/home</b> - 返回桌面（按一次 Home 键）</li>"
         "<li><b>POST /api/taskmanager</b> - 打开任务管理器（双击 Home 键）</li>"
-        "<li><b>POST /api/clearapps/smart</b> - 智能清理后台应用（桌面则跳过）</li>"
+        "<li><b>POST /api/clearapps/smart</b> - 清理后台应用（不在桌面则关闭前台应用）</li>"
         "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
         "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"
         "<li><b>POST /api/assistivetouch?action=disable</b> - 禁用 AssistiveTouch（小白点）</li>"

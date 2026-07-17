@@ -829,7 +829,7 @@ extern Class _SBLockScreenManager(void);
     if (!text || text.length == 0) {
         return NO;
     }
-    
+
     // 在主线程执行
     if (![NSThread isMainThread]) {
         __block BOOL result = NO;
@@ -838,24 +838,24 @@ extern Class _SBLockScreenManager(void);
         });
         return result;
     }
-    
-    // 方法1: 尝试直接操作第一响应者
+
+    // 方式1: 直接操作第一响应者 (UITextField/UITextView)
     UIView *firstResponder = [self findFirstResponder];
     if (firstResponder) {
-        TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
-        
-        // 尝试直接插入文本
+        TVLog(@"inputText: Found first responder: %@", NSStringFromClass([firstResponder class]));
+
         if ([firstResponder isKindOfClass:[UITextField class]]) {
             UITextField *textField = (UITextField *)firstResponder;
             UITextRange *selectedTextRange = textField.selectedTextRange;
             if (!selectedTextRange) {
-                selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument 
+                selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument
                                                           toPosition:textField.endOfDocument];
             }
             [textField replaceRange:selectedTextRange withText:text];
             [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+            TVLog(@"inputText: Success via UITextField");
             return YES;
-            
+
         } else if ([firstResponder isKindOfClass:[UITextView class]]) {
             UITextView *textView = (UITextView *)firstResponder;
             NSRange selectedRange = textView.selectedRange;
@@ -866,23 +866,45 @@ extern Class _SBLockScreenManager(void);
             if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
                 [textView.delegate textViewDidChange:textView];
             }
+            TVLog(@"inputText: Success via UITextView");
             return YES;
-            
+
         } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
             id<UITextInput> textInput = (id<UITextInput>)firstResponder;
             UITextRange *selectedRange = textInput.selectedTextRange;
             if (!selectedRange) {
-                selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument 
+                selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument
                                                       toPosition:textInput.endOfDocument];
             }
             [textInput replaceRange:selectedRange withText:text];
+            TVLog(@"inputText: Success via UITextInput protocol");
             return YES;
         }
     }
-    
-    // 方法2: 使用 HID 事件直接发送键盘输入
-    TVLog(@"No accessible first responder, using HID event method");
-    return [self inputTextViaHID:text];
+
+    // 方式2: UIKeyboardImpl 私有 API (绕过第一响应者限制)
+    TVLog(@"inputText: firstResponder failed, trying UIKeyboardImpl...");
+    if ([self inputTextViaKeyboard:text]) {
+        TVLog(@"inputText: Success via UIKeyboardImpl");
+        return YES;
+    }
+
+    // 方式3: Accessibility AX 通道 (绕过剪贴板弹窗)
+    TVLog(@"inputText: UIKeyboardImpl failed, trying AX...");
+    if ([self inputTextViaAX:text]) {
+        TVLog(@"inputText: Success via AX");
+        return YES;
+    }
+
+    // 方式4: HID 键盘事件 (最终兜底)
+    TVLog(@"inputText: AX failed, falling back to HID...");
+    if ([self inputTextViaHID:text]) {
+        TVLog(@"inputText: Success via HID");
+        return YES;
+    }
+
+    TVLog(@"inputText: All methods failed");
+    return NO;
 }
 
 // 通过 HID 事件输入文本（使用 STHIDEventGenerator）
@@ -1040,6 +1062,75 @@ static BOOL TVNCLoadAX(void) {
     CFRelease(focused);
     CFRelease(systemWide);
     return ok;
+}
+
+// 通过 iOS 键盘系统私有 API 直接输入文本（UIKeyboardImpl）
+// 绕过第一响应者限制，适用于游戏/引擎自绘/WebView 等无法通过常规方式输入的场景
+// 不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗
+- (BOOL)inputTextViaKeyboard:(NSString *)text {
+    if (!text || text.length == 0) {
+        return NO;
+    }
+
+    if (![NSThread isMainThread]) {
+        __block BOOL result = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            result = [self inputTextViaKeyboard:text];
+        });
+        return result;
+    }
+
+    @try {
+        // 动态获取 UIKeyboardImpl 类
+        Class keyboardImplClass = NSClassFromString(@"UIKeyboardImpl");
+        if (!keyboardImplClass) {
+            TVLog(@"Keyboard: UIKeyboardImpl class not found");
+            return NO;
+        }
+
+        // 获取 UIKeyboardImpl 单例
+        SEL sharedSel = NSSelectorFromString(@"sharedInstance");
+        if (![keyboardImplClass respondsToSelector:sharedSel]) {
+            TVLog(@"Keyboard: sharedInstance not available");
+            return NO;
+        }
+
+        id keyboardImpl = ((id(*)(id, SEL))objc_msgSend)(keyboardImplClass, sharedSel);
+        if (!keyboardImpl) {
+            TVLog(@"Keyboard: UIKeyboardImpl instance is nil");
+            return NO;
+        }
+
+        // 逐字符输入
+        for (NSUInteger i = 0; i < text.length; i++) {
+            NSString *character = [text substringWithRange:NSMakeRange(i, 1)];
+
+            // 优先使用 addText: 方法
+            SEL addTextSel = NSSelectorFromString(@"addText:");
+            if ([keyboardImpl respondsToSelector:addTextSel]) {
+                ((void(*)(id, SEL, id))objc_msgSend)(keyboardImpl, addTextSel, character);
+            } else {
+                // 备用：使用 insertText: 方法
+                SEL insertSel = NSSelectorFromString(@"insertText:");
+                if ([keyboardImpl respondsToSelector:insertSel]) {
+                    ((void(*)(id, SEL, id))objc_msgSend)(keyboardImpl, insertSel, character);
+                } else {
+                    TVLog(@"Keyboard: neither addText: nor insertText: available");
+                    return NO;
+                }
+            }
+
+            // 短暂延迟确保输入被处理
+            usleep(5000); // 5ms
+        }
+
+        TVLog(@"Keyboard: inputted %lu characters via UIKeyboardImpl", (unsigned long)text.length);
+        return YES;
+
+    } @catch (NSException *exception) {
+        TVLog(@"Keyboard input failed: %@", exception.reason);
+        return NO;
+    }
 }
 
 // 发送粘贴组合键 Command+V
@@ -2073,18 +2164,84 @@ static BOOL TVNCLoadAX(void) {
 // 获取当前前台应用的 Bundle ID
 - (NSString *)getFrontmostAppBundleID {
     // 方法1: 使用 SpringBoardServices 私有 API 获取前台应用
-    // 在 iOS 15 上这个 API 是可用的
     CFStringRef frontmostAppID = SBSCopyFrontmostApplicationDisplayIdentifier();
     if (frontmostAppID) {
         NSString *bundleID = (__bridge_transfer NSString *)frontmostAppID;
         TVLog(@"Frontmost app (via SBS): %@", bundleID);
         return bundleID;
     }
-    
     TVLog(@"Frontmost app: SBSCopyFrontmostApplicationDisplayIdentifier returned nil");
-    
-    // 方法2: 尝试使用 FrontBoardServices（如果可用）
-    // 方法3: 返回 nil 让调用者处理
+
+    // 方法2: 使用 FrontBoardServices 私有 API
+    @try {
+        void *fbHandle = dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
+        if (!fbHandle) {
+            fbHandle = dlopen("/System/Library/Frameworks/FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
+        }
+        if (fbHandle) {
+            Class FBSApp = NSClassFromString(@"FBSApplicationworkspace");
+            if (FBSApp) {
+                SEL defSel = NSSelectorFromString(@"defaultworkspace");
+                if ([FBSApp respondsToSelector:defSel]) {
+                    id workspace = ((id(*)(id, SEL))objc_msgSend)(FBSApp, defSel);
+                    if (workspace) {
+                        SEL runningSel = NSSelectorFromString(@"runningApplications");
+                        if ([workspace respondsToSelector:runningSel]) {
+                            NSArray *apps = ((id(*)(id, SEL))objc_msgSend)(workspace, runningSel);
+                            // runningApplications 第一个通常是前台应用
+                            for (id app in apps) {
+                                SEL bidSel = NSSelectorFromString(@"bundleIdentifier");
+                                if ([app respondsToSelector:bidSel]) {
+                                    NSString *bid = ((id(*)(id, SEL))objc_msgSend)(app, bidSel);
+                                    if (bid && bid.length > 0) {
+                                        TVLog(@"Frontmost app (via FBS): %@", bid);
+                                        return bid;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            dlclose(fbHandle);
+        }
+    } @catch (NSException *e) {
+        TVLog(@"FrontBoardServices failed: %@", e.reason);
+    }
+
+    // 方法3: 通过 sysctl 枚举前台进程（取用户空间第一个非系统进程）
+    @try {
+        int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+        size_t size = 0;
+        if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
+            struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+            if (procs && sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
+                int count = (int)(size / sizeof(struct kinfo_proc));
+                // 从后往前找，最新的前台进程通常在最后
+                for (int i = count - 1; i >= 0; i--) {
+                    if (procs[i].kp_proc.p_stat == SZ.ACT) {
+                        pid_t pid = procs[i].kp_proc.p_pid;
+                        char pathBuf[4024];
+                        if (proc_pidpath(pid, pathBuf, sizeof(pathBuf)) > 0) {
+                            NSString *procPath = [NSString stringWithUTF8String:pathBuf];
+                            // 只关心 /Applications/ 下的用户应用
+                            if ([procPath hasPrefix:@"/Applications/"]) {
+                                // 从路径提取 bundle ID
+                                NSString *appName = [[procPath lastPathComponent] stringByDeletingPathExtension];
+                                TVLog(@"Frontmost app (via sysctl): %@ from %@", appName, procPath);
+                                return appName;
+                            }
+                        }
+                    }
+                }
+            }
+            free(procs);
+        }
+    } @catch (NSException *e) {
+        TVLog(@"sysctl process scan failed: %@", e.reason);
+    }
+
+    TVLog(@"Frontmost app: all methods failed");
     return nil;
 }
 
@@ -2147,21 +2304,35 @@ static BOOL TVNCLoadAX(void) {
 // 智能清理后台应用
 - (NSDictionary *)clearBackgroundAppsSmart {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
-    
+
     @try {
         TVLog(@"Smart clear: Starting...");
-        
+
         // 获取当前前台应用
         NSString *frontmostApp = [self getFrontmostAppBundleID];
         result[@"frontmostApp"] = frontmostApp ?: @"unknown";
         TVLog(@"Smart clear: frontmostApp = %@", frontmostApp);
-        
-        // 如果是桌面（SpringBoard），跳过
-        BOOL isSpringBoard = !frontmostApp ||
-            [frontmostApp isEqualToString:@"com.apple.springboard"] ||
-            [frontmostApp isEqualToString:@"SpringBoard"];
+
+        // 判断是否在桌面
+        BOOL isSpringBoard = NO;
+        if (frontmostApp) {
+            isSpringBoard = [frontmostApp isEqualToString:@"com.apple.springboard"] ||
+                            [frontmostApp isEqualToString:@"SpringBoard"];
+        } else {
+            // 无法获取前台应用时，通过 UIApplication 状态推断
+            UIApplication *app = [UIApplication sharedApplication];
+            if (app) {
+                UIApplicationState state = app.applicationState;
+                TVLog(@"Smart clear: frontmostApp unknown, app state = %ld", (long)state);
+                // App 在前台说明用户正在使用某个应用，不在桌面
+                isSpringBoard = (state != UIApplicationStateActive);
+            } else {
+                isSpringBoard = YES;
+            }
+        }
         result[@"onSpringBoard"] = @(isSpringBoard);
-        
+
+        // 在桌面则跳过
         if (isSpringBoard) {
             result[@"success"] = @YES;
             result[@"message"] = @"Already on SpringBoard, no apps to clear";
@@ -2169,7 +2340,7 @@ static BOOL TVNCLoadAX(void) {
             TVLog(@"Smart clear: Skipped - already on SpringBoard");
             return result;
         }
-        
+
         // 在主线程执行 HID 事件
         if (![NSThread isMainThread]) {
             __block NSDictionary *syncResult = nil;
@@ -2178,7 +2349,7 @@ static BOOL TVNCLoadAX(void) {
             });
             return syncResult ?: result;
         }
-        
+
         STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
         if (!generator) {
             TVLog(@"Smart clear: Failed - STHIDEventGenerator is nil");
@@ -2186,27 +2357,26 @@ static BOOL TVNCLoadAX(void) {
             result[@"message"] = @"HID generator not available";
             return result;
         }
-        
-        // 按 Home 键回到桌面（先确保退出当前应用）
-        TVLog(@"Smart clear: Sending menuPress to go home...");
+
+        // 按 Home 键关闭前台应用
+        TVLog(@"Smart clear: Sending menuPress to close foreground app...");
         [generator menuPress];
         struct timespec ts = {0, 600000000}; // 0.6s
         nanosleep(&ts, NULL);
-        
+
         result[@"success"] = @YES;
-        result[@"message"] = @"App dismissed to background";
+        result[@"message"] = @"Foreground app dismissed";
         result[@"action"] = @"dismissed";
-        result[@"closedApp"] = frontmostApp ?: @"unknown";
-        
-        TVLog(@"Smart clear: Completed successfully");
-        
+        result[@"closedApp"] = frontmostApp;
+        TVLog(@"Smart clear: Completed - dismissed %@", frontmostApp);
+
     } @catch (NSException *exception) {
         result[@"success"] = @NO;
         result[@"error"] = exception.reason;
         result[@"message"] = @"Failed to clear background apps";
-        TVLog(@"Smart clear background apps failed: %@", exception.reason);
+        TVLog(@"Smart clear failed: %@", exception.reason);
     }
-    
+
     return result;
 }
 

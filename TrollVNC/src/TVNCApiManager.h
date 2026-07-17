@@ -117,6 +117,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)inputText:(NSString *)text;
 
 /**
+ 通过 iOS 键盘系统私有 API 直接输入文本
+ 绕过第一响应者限制，适用于游戏/自绘输入框
+ 不依赖剪贴板，不会触发 iOS 16 "允许粘贴"弹窗
+ @param text 要输入的文本内容
+ @return 是否成功
+ */
+- (BOOL)inputTextViaKeyboard:(NSString *)text;
+
+/**
  模拟按键事件
  @param keyCode 按键码（如回车键 13，退格键 8 等）
  @return 是否成功
@@ -233,8 +242,9 @@ NS_ASSUME_NONNULL_BEGIN
 #pragma mark - 智能清理后台应用
 
 /**
- * 智能清理后台应用
- * 识别当前运行的应用并关闭，如果在桌面则跳过
+ * 清理后台应用
+ * 如果当前不在桌面，检测前台应用并关闭（按Home键）
+ * 如果在桌面则跳过
  * @return 包含操作结果的字典
  */
 - (NSDictionary *)clearBackgroundAppsSmart;
