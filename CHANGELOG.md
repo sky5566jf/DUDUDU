@@ -2,6 +2,18 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.19] – 2026-07-18
+
+### Feature（护栏模块运行时接入 + 护栏扩面）
+- 纯 C 护栏模块从「仅 CI 单测」升级为「链入 daemon 运行时」：
+  - `TVNCTextClassifier`：输入通道的 `tvncIsAllASCII:` 改为委托纯 C 模块 `TVNCIsAllASCII`（单一真源，已单测），消除 ObjC 与 C 重复实现。
+  - `TVNCRouteSafety`：HTTP 服务启动时跑 `TVNCRouteSafetySelfTest()` 自检 57 条路由分类表一致性（无重复/空字段），不阻塞分发，仅观测。
+- 两个 `.c` 已登记进 `Makefile` 的 `trollvncserver_FILES`，与 `TVNCInputStrategy` 一同编译链入四个 scheme。
+- `quality-gate` 单测脚本改为 glob 自动发现 `quality/*_test.c`，新增模块零脚本改动即纳入 CI；静态分析遍历 `quality/*.c`。
+
+### 质量护栏（防护升级）
+- 路由安全分类表成为「只读/写/敏感」的规范真源；未来可在分发前调 `TVNCRouteLookup` 做 method + 权限校验（加固项）。
+
 ## [4.18] – 2026-07-18
 
 ### Fixed（链入 TVNCInputStrategy 后 rootless/default/roothide 链接失败）

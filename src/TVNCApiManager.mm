@@ -37,6 +37,7 @@
 #import <sys/sysctl.h>   // KERN_PROC / kinfo_proc（Tier4 前台进程枚举兜底）
 #import <libproc.h>      // proc_pidpath（Tier4 取进程路径兜底）
 #include "TVNCInputStrategy.h"   // 输入级联决策（纯 C，已单测验证，见 quality/）
+#include "TVNCTextClassifier.h"    // 文本特征分类（纯 C，已单测验证，见 quality/）
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -1023,12 +1024,11 @@ int tvncGetFBBytesPerPixel(void);
 #pragma mark - 输入决策/执行分离（TVNCInputStrategy）
 
 /// 判断文本是否纯 ASCII（用于输入策略决策）
+/// 委托给纯 C 模块 TVNCTextClassifier（已在 quality/ 单测验证，单一真源）。
+/// 保留 nil/空串 -> YES 语义（与上游决策一致）。
 static BOOL tvncIsAllASCII(NSString *text) {
     if (!text || text.length == 0) return YES;
-    for (NSUInteger i = 0; i < text.length; i++) {
-        if ([text characterAtIndex:i] > 127) return NO;
-    }
-    return YES;
+    return TVNCIsAllASCII([text UTF8String]) ? YES : NO;
 }
 
 /// 通过第一响应者直接插入文本（UIKit 标准方式，支持中英文）

@@ -14,7 +14,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run TVNCInputStrategy unit tests
+      - name: Run pure-C unit tests
         run: bash quality/run_tests.sh
 
   static-analysis:
@@ -24,10 +24,12 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
-      - name: Analyze pure-C strategy module
+      - name: Analyze all pure-C modules (best-effort)
         run: |
-          clang --analyze -std=c11 -Wall quality/TVNCInputStrategy.c -o /dev/null || true
-          clang --analyze -std=c11 -Wall quality/TVNCInputStrategy_test.c -o /dev/null || true
+          for f in quality/*.c; do
+            echo ">> analyzing $f"
+            clang --analyze -std=c11 -Wall "$f" -o /dev/null || true
+          done
           echo "static-analysis (pure-C) done (best-effort)"
       # 注：daemon 源（src/*.mm）的深入静态分析需完整 theos + iOS SDK 环境，
       # 接入方式见 docs/QUALITY_GATE.md，后续可逐步启用 scan-build。

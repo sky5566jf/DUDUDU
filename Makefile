@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 4.18
+export PACKAGE_VERSION := 4.19
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -31,6 +31,8 @@ trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 trollvncserver_FILES += quality/TVNCInputStrategy.c   # 纯 C 输入级联策略（已单测验证，作为真实决策引擎链入）
+trollvncserver_FILES += quality/TVNCTextClassifier.c   # 纯 C 文本特征分类（已单测，运行时 tvncIsAllASCII 委托）
+trollvncserver_FILES += quality/TVNCRouteSafety.c      # 纯 C 路由安全分类表（已单测，启动时自检）
 
 # v3.40: Dropped iOS < 13.4 support. Removed fishhook and weak symbol shim.
 # ___darwin_check_fd_set_overflow is natively available on iOS 13.4+.

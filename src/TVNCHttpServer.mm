@@ -38,6 +38,8 @@
 // iOS 私有 persona API（用于以 root 身份执行命令）
 extern "C" int posix_spawnattr_set_persona_np(const posix_spawnattr_t* __restrict attr, uid_t persona_id, uint32_t flags);
 extern "C" int posix_spawnattr_set_persona_uid_np(const posix_spawnattr_t* __restrict attr, uid_t uid);
+
+#include "TVNCRouteSafety.h"   // 路由安全分类单一真源（纯 C，已单测，见 quality/）
 extern "C" int posix_spawnattr_set_persona_gid_np(const posix_spawnattr_t* __restrict attr, gid_t gid);
 
 #ifndef POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE
@@ -464,7 +466,12 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     if (_running) {
         return YES;
     }
-    
+
+    // 路由安全分类表启动自检（纯 C 模块 TVNCRouteSafety，单一真源；不阻塞分发）
+    if (TVNCRouteSafetySelfTest() != 0) {
+        TVLog(@"[RouteSafety] self-test FAILED: route table inconsistent!");
+    }
+
     // 创建 socket
     _serverSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (_serverSocket < 0) {
