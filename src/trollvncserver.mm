@@ -4728,29 +4728,45 @@ NS_INLINE int rotationForOrientation(UIInterfaceOrientation o) {
 // trollvncserver 是无 UI 的守护进程，本进程没有 UIWindow / UIKit 主运行循环，
 // UIDevice.orientation 的加速度计采样在我们的进程里常常不更新（恒为 Unknown），
 // 导致开游戏/转设备时 gRotationQuad 卡在竖屏 -> noVNC 不旋转（iOS 13 老设备典型症状）。
-// 这里优先走 SpringBoardServices 的 SBGetActiveInterfaceOrientation()：
-// 它直接返回前台 App / SpringBoard 当前真正显示的方向，不依赖本进程 UIKit 事件，daemon 内稳定可靠。
-// UIDevice.orientation 仅作符号不可用时的最终兜底（即便取不到也不会崩，只会退回旧逻辑）。
-static int (*gSBGetActiveInterfaceOrientation)(void) = NULL;
+// 这里走 SpringBoardServices 的私有 C 函数（通过 XPC 到 SpringBoard 读当前界面方向，
+// 不依赖本进程 UIKit 事件，daemon 内稳定可靠）：
+//   - iOS 14+ ：SBGetActiveInterfaceOrientation()
+//   - iOS 13  ：SBGetInterfaceOrientation()（iOS 13 上没有 SBGetActiveInterfaceOrientation，
+//              该符号是 iOS 14 才随 FBSOrientationObserver 一起引入的，硬用只会 dlsym 失败）
+// UIDevice.orientation 仅作符号全部不可用时的最终兜底（即便取不到也不会崩，只会退回旧逻辑）。
+static int (*gSBGetActiveInterfaceOrientation)(void) = NULL; // iOS 14+
+static int (*gSBGetInterfaceOrientation)(void) = NULL;       // iOS 13 (SpringBoardServices)
 static BOOL gSBOrientationResolved = NO;
 
 static UIInterfaceOrientation tvnc_currentInterfaceOrientation(void) {
     if (!gSBOrientationResolved) {
         gSBOrientationResolved = YES;
-        void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
-        if (sbs) {
-            gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetActiveInterfaceOrientation");
+        // 优先从已加载镜像取（若 trollvncserver 已链接 SpringBoardServices 则直接命中）
+        gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(RTLD_DEFAULT, "SBGetActiveInterfaceOrientation");
+        gSBGetInterfaceOrientation = (int (*)(void))dlsym(RTLD_DEFAULT, "SBGetInterfaceOrientation");
+        if (!gSBGetActiveInterfaceOrientation && !gSBGetInterfaceOrientation) {
+            // 未链接则显式 dlopen（与 TVNCApiManager frontmost 检测同一方式：完整路径优先，再用 framework 名）
+            void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+            if (!sbs) sbs = dlopen("SpringBoardServices", RTLD_LAZY);
+            if (sbs) {
+                gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetActiveInterfaceOrientation");
+                gSBGetInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetInterfaceOrientation");
+            }
         }
-        TVLog(@"Orientation: SBGetActiveInterfaceOrientation %s",
-              gSBGetActiveInterfaceOrientation ? "resolved" : "unavailable(fallback to UIDevice)");
+        TVLog(@"Orientation: SBGetActiveInterfaceOrientation=%s SBGetInterfaceOrientation=%s",
+              gSBGetActiveInterfaceOrientation ? "resolved" : "-",
+              gSBGetInterfaceOrientation ? "resolved" : "-");
     }
+    int r = 0;
     if (gSBGetActiveInterfaceOrientation) {
-        int r = gSBGetActiveInterfaceOrientation();
-        if (r >= UIInterfaceOrientationPortrait && r <= UIInterfaceOrientationLandscapeLeft) {
-            return (UIInterfaceOrientation)r;
-        }
+        r = gSBGetActiveInterfaceOrientation();
+    } else if (gSBGetInterfaceOrientation) {
+        r = gSBGetInterfaceOrientation();
     }
-    // 兜底：加速度计方向
+    if (r >= UIInterfaceOrientationPortrait && r <= UIInterfaceOrientationLandscapeLeft) {
+        return (UIInterfaceOrientation)r;
+    }
+    // 兜底：加速度计方向（daemon 内通常不可靠，仅最终保险）
     UIDeviceOrientation dev = [UIDevice currentDevice].orientation;
     switch (dev) {
         case UIDeviceOrientationPortrait:           return UIInterfaceOrientationPortrait;
@@ -4801,12 +4817,13 @@ static void setupOrientationObserver(void) {
         TVLog(@"Orientation observer registered (initial=%ld -> rotQ=%d)", (long)activeOrientation,
               gRotationQuad.load(std::memory_order_relaxed));
     } else {
-        // iOS 13 fallback: SpringBoardServices active-orientation (UIDevice as fallback)
-        TVLog(@"FBSOrientationObserver not available on iOS < 14, using SBGetActiveInterfaceOrientation (UIDevice fallback)");
+        // iOS 13 fallback: 走 tvnc_currentInterfaceOrientation() 取 SpringBoardServices 当前界面方向
+        // （iOS 13 用 SBGetInterfaceOrientation；UIDevice.orientation 仅作最终兜底）。
+        TVLog(@"FBSOrientationObserver not available on iOS < 14, using SBGetInterfaceOrientation (UIDevice fallback)");
 
         // 仍开启加速度计方向采样：在 SpringBoardServices 符号不可用时，UIDevice.orientation
         // 是最终兜底来源。daemon 内它常返回 Unknown，故已改为主用
-        // SBGetActiveInterfaceOrientation 取系统当前真实界面方向（见 tvnc_currentInterfaceOrientation）。
+        // SBGetInterfaceOrientation 取系统当前真实界面方向（见 tvnc_currentInterfaceOrientation）。
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
 
         // 监听设备方向变化通知
