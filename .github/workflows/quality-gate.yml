@@ -1,0 +1,33 @@
+name: Quality Gate
+
+# 与 build.yml 平行运行，不阻塞主构建（build.yml 的 release job 依赖其自身 build job）。
+on:
+  push:
+    branches: [release, main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Pure-C unit tests (zero theos dependency)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run TVNCInputStrategy unit tests
+        run: bash quality/run_tests.sh
+
+  static-analysis:
+    name: Clang static analysis (best-effort)
+    runs-on: macos-latest
+    # 静态分析可能因子模块偶发拉取失败而不稳定；设为 best-effort 不阻塞主流程。
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analyze pure-C strategy module
+        run: |
+          clang --analyze -std=c11 -Wall quality/TVNCInputStrategy.c -o /dev/null || true
+          clang --analyze -std=c11 -Wall quality/TVNCInputStrategy_test.c -o /dev/null || true
+          echo "static-analysis (pure-C) done (best-effort)"
+      # 注：daemon 源（src/*.mm）的深入静态分析需完整 theos + iOS SDK 环境，
+      # 接入方式见 docs/QUALITY_GATE.md，后续可逐步启用 scan-build。
