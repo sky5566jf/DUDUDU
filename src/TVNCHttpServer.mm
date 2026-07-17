@@ -2324,9 +2324,12 @@ static NSString *tvncGetRealDeviceName(void) {
 
 // POST /api/install/tipa?path=/var/mobile/Media/Downloads/app.tipa
 // 通过 TrollStore 安装 .tipa 文件（巨魔）
+// 注意：HTTP server 运行在无 UI 的 daemon 进程，无法调用 UIApplication openURL。
+// 本方法将请求转发给 TrollVNC.app（端口 8184），由 App 用 UIApplication openURL
+// 真正拉起 TrollStore 安装界面（复用 /api/input 的 daemon->App 转发模式）。
 - (TVNCHttpResponse *)handleInstallTipa:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
+
     NSString *tipaPath = query[@"path"];
     if (!tipaPath || tipaPath.length == 0) {
         response.statusCode = 400;
@@ -2335,16 +2338,7 @@ static NSString *tvncGetRealDeviceName(void) {
         response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
         return response;
     }
-    
-    // 检查 TrollStore 是否可用
-    if (![[TVNCApiManager sharedManager] isTrollStoreAvailable]) {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"success": @NO, @"error": @"TrollStore is not available. Please ensure TrollStore is installed."};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-        return response;
-    }
-    
+
     // 检查 .tipa 文件是否存在
     if (access([tipaPath UTF8String], F_OK) != 0) {
         response.statusCode = 400;
@@ -2353,28 +2347,64 @@ static NSString *tvncGetRealDeviceName(void) {
         response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
         return response;
     }
-    
+
     TVLog(@"HTTP Server: Install tipa request - path: %@", tipaPath);
-    
-    // 使用 TrollStore URL scheme 触发安装
-    NSString *encodedPath = [tipaPath stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
-    NSString *urlStr = [NSString stringWithFormat:@"trollstore://install?file=%@", encodedPath];
-    NSURL *url = [NSURL URLWithString:urlStr];
-    
-    dispatch_async(dispatch_get_main_queue(), ^{
-        [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:^(BOOL success) {
-            TVLog(@"HTTP Server: TrollStore install URL opened: %@", success ? @"YES" : @"NO");
-        }];
-    });
-    
-    response.statusCode = 200;
+
+    // 1) 探活 TrollVNC.app（端口 8184）。App 被 iOS 挂起时 8184 会失活。
+    BOOL appAlive = NO;
+    @try {
+        NSURL *healthUrl = [NSURL URLWithString:@"http://127.0.0.1:8184/health"];
+        NSMutableURLRequest *healthReq = [NSMutableURLRequest requestWithURL:healthUrl];
+        [healthReq setHTTPMethod:@"GET"];
+        [healthReq setTimeoutInterval:0.3];
+        NSURLResponse *hResp = nil;
+        NSError *hErr = nil;
+        [NSURLConnection sendSynchronousRequest:healthReq returningResponse:&hResp error:&hErr];
+        appAlive = (hErr == nil);
+    } @catch (NSException *e) {
+        appAlive = NO;
+    }
+
+    // 2) App 在线：转发给 App，由 App 用 UIApplication openURL 触发 TrollStore
+    if (appAlive) {
+        @try {
+            NSURL *appUrl = [NSURL URLWithString:@"http://127.0.0.1:8184/install/tipa"];
+            NSMutableURLRequest *appReq = [NSMutableURLRequest requestWithURL:appUrl];
+            [appReq setHTTPMethod:@"POST"];
+            [appReq setHTTPBody:[tipaPath dataUsingEncoding:NSUTF8StringEncoding]];
+            [appReq setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+            [appReq setTimeoutInterval:3.0];
+            NSURLResponse *appResp = nil;
+            NSError *appErr = nil;
+            NSData *appData = [NSURLConnection sendSynchronousRequest:appReq returningResponse:&appResp error:&appErr];
+            if (appData && appData.length > 0) {
+                response.statusCode = 200;
+                response.contentType = @"application/json";
+                response.body = appData;
+                TVLog(@"HTTP Server: Tipta install forwarded to App: %@", [[NSString alloc] initWithData:appData encoding:NSUTF8StringEncoding]);
+                return response;
+            }
+            response.statusCode = 502;
+            response.contentType = @"application/json";
+            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success": @NO, @"error": @"App install handler returned empty response"} options:0 error:nil];
+            return response;
+        } @catch (NSException *e) {
+            response.statusCode = 502;
+            response.contentType = @"application/json";
+            response.body = [NSJSONSerialization dataWithJSONObject:@{@"success": @NO, @"error": [NSString stringWithFormat:@"Failed to reach App install handler: %@", e.reason]} options:0 error:nil];
+            return response;
+        }
+    }
+
+    // 3) App 不可用（.deb 无 8184，或 App 被挂起）：daemon 无 UIApplication 无法 openURL，明确提示
+    response.statusCode = 503;
     response.contentType = @"application/json";
-    NSDictionary *result = @{@"success": @YES, @"message": @"TrollStore install requested", @"path": tipaPath};
-    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
-    TVLog(@"HTTP Server: Tipta install triggered: %@", tipaPath);
-    
+    NSDictionary *error = @{@"success": @NO, @"error": @"TrollVNC.app is not reachable on port 8184. Keep the app running (foreground) so it can hand off the TrollStore install."};
+    response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
+    TVLog(@"HTTP Server: Tipta install aborted - App not reachable");
     return response;
 }
+
 
 // POST /api/install/deb?path=/var/mobile/Media/Downloads/app.deb
 // POST /api/install/deb (with file upload in body)

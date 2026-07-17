@@ -12,6 +12,7 @@
 #import <netinet/in.h>
 #import <arpa/inet.h>
 #import <unistd.h>
+#import <UIKit/UIKit.h>
 
 // AX 动态加载
 static struct {
@@ -218,6 +219,37 @@ static BOOL inputTextViaAX(NSString *text) {
     // 处理 GET /health
     else if ([method isEqualToString:@"GET"] && [path isEqualToString:@"/health"]) {
         [self sendResponse:clientSocket body:@"{\"status\":\"ok\",\"service\":\"TVNCAppInputServer\"}"];
+    }
+    // 处理 POST /install/tipa  (由 daemon 8182 转发；App 用 UIApplication openURL 触发 TrollStore)
+    else if ([method isEqualToString:@"POST"] && [path isEqualToString:@"/install/tipa"]) {
+        NSRange bodyRange = [request rangeOfString:@"\r\n\r\n"];
+        NSString *tipaPath = @"";
+        if (bodyRange.location != NSNotFound) {
+            tipaPath = [request substringFromIndex:bodyRange.location + 4];
+            tipaPath = [tipaPath stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        }
+        
+        if (tipaPath.length == 0 || access([tipaPath UTF8String], F_OK) != 0) {
+            [self sendResponse:clientSocket body:[NSString stringWithFormat:@"{\"success\":false,\"error\":\"tipa file not found: %@\"}", tipaPath] statusCode:400];
+            return;
+        }
+        
+        NSString *encoded = [tipaPath stringByAddingPercentEncodingWithAllowedCharacters:[NSCharacterSet URLQueryAllowedCharacterSet]];
+        NSURL *url = [NSURL URLWithString:[NSString stringWithFormat:@"trollstore://install?file=%@", encoded]];
+        
+        __block BOOL canOpen = NO;
+        __block BOOL opened = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            canOpen = [[UIApplication sharedApplication] canOpenURL:url];
+            if (canOpen) {
+                opened = [[UIApplication sharedApplication] openURL:url options:@{} completionHandler:nil];
+            }
+        });
+        
+        NSString *resp = [NSString stringWithFormat:
+                          @"{\"success\":%@,\"canOpenURL\":%@,\"message\":\"TrollStore install requested\",\"path\":\"%@\"}",
+                          opened ? @"true" : @"false", canOpen ? @"true" : @"false", tipaPath];
+        [self sendResponse:clientSocket body:resp];
     }
     // 404
     else {

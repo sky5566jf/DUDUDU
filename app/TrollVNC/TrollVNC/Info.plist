@@ -43,5 +43,10 @@
 	<array>
 		<string>com.82flex.trollvnc.servicemonitor</string>
 	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>trollstore</string>
+		<string>apple-magnifier</string>
+	</array>
 </dict>
 </plist>

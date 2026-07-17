@@ -2,6 +2,17 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.20] – 2026-07-18
+
+### Fixed（巨魔版 TrollStore 自动安装 —— 真因修复）
+
+- **根因（推翻 v4.19 前的误诊）**：`install/tipa` 与 `isTrollStoreAvailable` 都跑在**无界面的 daemon 进程（trollvncserver / 8182）**。daemon 没有 `UIApplication`，`[UIApplication sharedApplication]` 返回 nil → `canOpenURL:` 恒 NO、`openURL:` 向 nil 发消息静默失败。旧实现的 `isTrollStoreAvailable` 方法4（`canOpenURL`）在 daemon 下根本不成立；即便检测通过，真正触发安装的 `openURL(trollstore://…)` 也弹不出 TrollStore。之前误判「缺 `LSApplicationQueriesSchemes` 声明」是错的——TrollStore 已安装、scheme 已开仍 500，正因调用方在无 UI 的 daemon。
+- **修复（复用 daemon→App(8184) 转发模式，同 `/api/input`）**：
+  - `app/TrollVNC/TrollVNC/TVNCAppInputServer.m` 新增 `POST /install/tipa`：在主线程用 `UIApplication openURL(trollstore://install?file=<encoded>)` 真正拉起 TrollStore。App 有 UI，此路能生效。
+  - `src/TVNCHttpServer.mm` 的 `handleInstallTipa`：改为先探活 `127.0.0.1:8184/health`(0.3s)，App 在线则转发安装请求由 App 执行；App 不可用（.deb 无 8184 / App 被 iOS 挂起）返回 503 明确提示「保持 App 前台」，不再用 `isTrollStoreAvailable` 当闸门。
+  - 保留两份 App `Info.plist` 的 `LSApplicationQueriesSchemes→trollstore`：这是 App 进程 `openURL(trollstore://)` 的必要声明（越狱版走 `SBSOpenURL` 不需要，但声明无害）。
+- **前置条件**：`.tipa` 设备自动安装时 `TrollVNC.app` 须保持前台（被挂起则 8184 失活，daemon 回 503）。
+
 ## [4.19] – 2026-07-18
 
 ### Feature（护栏模块运行时接入 + 护栏扩面）

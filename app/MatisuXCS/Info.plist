@@ -54,12 +54,17 @@
             </array>
         </dict>
     </dict>
-    <key>CFBundleIconFiles</key>
-    <array>
-        <string>Icon-60@2x</string>
-        <string>Icon-60@3x</string>
-        <string>Icon-29@2x</string>
-        <string>Icon-29@3x</string>
-    </array>
+	<key>CFBundleIconFiles</key>
+	<array>
+		<string>Icon-60@2x</string>
+		<string>Icon-60@3x</string>
+		<string>Icon-29@2x</string>
+		<string>Icon-29@3x</string>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>trollstore</string>
+		<string>apple-magnifier</string>
+	</array>
 </dict>
 </plist>
