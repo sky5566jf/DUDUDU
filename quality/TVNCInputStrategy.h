@@ -10,6 +10,7 @@
  */
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>   // NULL（接口契约：函数参数为指针，调用方与实现均可能用 NULL）
 
 typedef enum {
     kTVNCInputNone = 0,
