@@ -4738,43 +4738,84 @@ static int (*gSBGetActiveInterfaceOrientation)(void) = NULL; // iOS 14+
 static int (*gSBGetInterfaceOrientation)(void) = NULL;       // iOS 13 (SpringBoardServices)
 static BOOL gSBOrientationResolved = NO;
 
+// —— 临时诊断（v4.15）：把方向检测的真相写文件，便于 SSH 读取真实返回值 ——
+// 命中状态 / SB 函数原始返回值 / UIDevice 原始值 / 最终 rotQ 全部落地，
+// 仅在值变化时写，避免日志刷屏。定位清楚后下个版本移除。
+static FILE *gOrientLogFile = NULL;
+static int gOrientLastSB = -999;
+static int gOrientLastUID = -999;
+static int gOrientLastRot = -999;
+
 static UIInterfaceOrientation tvnc_currentInterfaceOrientation(void) {
     if (!gSBOrientationResolved) {
         gSBOrientationResolved = YES;
+        gOrientLogFile = fopen("/var/mobile/Media/xcs/tvnc_orient.log", "w");
         // 优先从已加载镜像取（若 trollvncserver 已链接 SpringBoardServices 则直接命中）
         gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(RTLD_DEFAULT, "SBGetActiveInterfaceOrientation");
         gSBGetInterfaceOrientation = (int (*)(void))dlsym(RTLD_DEFAULT, "SBGetInterfaceOrientation");
+        const char *e1 = NULL, *e2 = NULL;
         if (!gSBGetActiveInterfaceOrientation && !gSBGetInterfaceOrientation) {
             // 未链接则显式 dlopen（与 TVNCApiManager frontmost 检测同一方式：完整路径优先，再用 framework 名）
             void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+            e1 = dlerror();
             if (!sbs) sbs = dlopen("SpringBoardServices", RTLD_LAZY);
+            e2 = dlerror();
             if (sbs) {
                 gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetActiveInterfaceOrientation");
                 gSBGetInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetInterfaceOrientation");
             }
+        }
+        if (gOrientLogFile) {
+            fprintf(gOrientLogFile, "[orient-init] RTLD_DEFAULT: active=%s interface=%s\n",
+                    gSBGetActiveInterfaceOrientation ? "YES" : "NO",
+                    gSBGetInterfaceOrientation ? "YES" : "NO");
+            fprintf(gOrientLogFile, "[orient-init] dlopen path1_err=%s path2_err=%s\n",
+                    e1 ? e1 : "none", e2 ? e2 : "none");
+            fprintf(gOrientLogFile, "[orient-init] FINAL: active=%s interface=%s\n",
+                    gSBGetActiveInterfaceOrientation ? "YES" : "NO",
+                    gSBGetInterfaceOrientation ? "YES" : "NO");
+            fflush(gOrientLogFile);
         }
         TVLog(@"Orientation: SBGetActiveInterfaceOrientation=%s SBGetInterfaceOrientation=%s",
               gSBGetActiveInterfaceOrientation ? "resolved" : "-",
               gSBGetInterfaceOrientation ? "resolved" : "-");
     }
     int r = 0;
+    int sbRaw = -1; // -1 表示符号缺失、未真正调用
     if (gSBGetActiveInterfaceOrientation) {
-        r = gSBGetActiveInterfaceOrientation();
+        sbRaw = gSBGetActiveInterfaceOrientation();
+        r = sbRaw;
     } else if (gSBGetInterfaceOrientation) {
-        r = gSBGetInterfaceOrientation();
+        sbRaw = gSBGetInterfaceOrientation();
+        r = sbRaw;
     }
+    int uidRaw = (int)[UIDevice currentDevice].orientation;
+    UIInterfaceOrientation finalOri = UIInterfaceOrientationUnknown;
     if (r >= UIInterfaceOrientationPortrait && r <= UIInterfaceOrientationLandscapeLeft) {
-        return (UIInterfaceOrientation)r;
+        finalOri = (UIInterfaceOrientation)r;
+    } else {
+        // 兜底：加速度计方向（daemon 内通常不可靠，仅最终保险）
+        switch (uidRaw) {
+            case UIDeviceOrientationPortrait:           finalOri = UIInterfaceOrientationPortrait; break;
+            case UIDeviceOrientationPortraitUpsideDown: finalOri = UIInterfaceOrientationPortraitUpsideDown; break;
+            case UIDeviceOrientationLandscapeLeft:      finalOri = UIInterfaceOrientationLandscapeRight; break;
+            case UIDeviceOrientationLandscapeRight:     finalOri = UIInterfaceOrientationLandscapeLeft; break;
+            default:                                    finalOri = UIInterfaceOrientationUnknown; break;
+        }
     }
-    // 兜底：加速度计方向（daemon 内通常不可靠，仅最终保险）
-    UIDeviceOrientation dev = [UIDevice currentDevice].orientation;
-    switch (dev) {
-        case UIDeviceOrientationPortrait:           return UIInterfaceOrientationPortrait;
-        case UIDeviceOrientationPortraitUpsideDown: return UIInterfaceOrientationPortraitUpsideDown;
-        case UIDeviceOrientationLandscapeLeft:      return UIInterfaceOrientationLandscapeRight;
-        case UIDeviceOrientationLandscapeRight:     return UIInterfaceOrientationLandscapeLeft;
-        default:                                    return UIInterfaceOrientationUnknown;
+    int rotQ = rotationForOrientation(finalOri);
+    if (gOrientLogFile) {
+        if (sbRaw != gOrientLastSB || uidRaw != gOrientLastUID || rotQ != gOrientLastRot) {
+            long long t = (long long)[[NSDate date] timeIntervalSince1970];
+            fprintf(gOrientLogFile, "[orient] t=%lld mode=%s sbRaw=%d uidRaw=%d rotQ=%d\n",
+                    t,
+                    gSBGetActiveInterfaceOrientation ? "active" : (gSBGetInterfaceOrientation ? "interface" : "none"),
+                    sbRaw, uidRaw, rotQ);
+            fflush(gOrientLogFile);
+            gOrientLastSB = sbRaw; gOrientLastUID = uidRaw; gOrientLastRot = rotQ;
+        }
     }
+    return finalOri;
 }
 
 static void setupOrientationObserver(void) {
