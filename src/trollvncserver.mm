@@ -4724,6 +4724,43 @@ NS_INLINE int rotationForOrientation(UIInterfaceOrientation o) {
     }
 }
 
+// 取系统"当前真正在显示"的界面方向。
+// trollvncserver 是无 UI 的守护进程，本进程没有 UIWindow / UIKit 主运行循环，
+// UIDevice.orientation 的加速度计采样在我们的进程里常常不更新（恒为 Unknown），
+// 导致开游戏/转设备时 gRotationQuad 卡在竖屏 -> noVNC 不旋转（iOS 13 老设备典型症状）。
+// 这里优先走 SpringBoardServices 的 SBGetActiveInterfaceOrientation()：
+// 它直接返回前台 App / SpringBoard 当前真正显示的方向，不依赖本进程 UIKit 事件，daemon 内稳定可靠。
+// UIDevice.orientation 仅作符号不可用时的最终兜底（即便取不到也不会崩，只会退回旧逻辑）。
+static int (*gSBGetActiveInterfaceOrientation)(void) = NULL;
+static BOOL gSBOrientationResolved = NO;
+
+static UIInterfaceOrientation tvnc_currentInterfaceOrientation(void) {
+    if (!gSBOrientationResolved) {
+        gSBOrientationResolved = YES;
+        void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+        if (sbs) {
+            gSBGetActiveInterfaceOrientation = (int (*)(void))dlsym(sbs, "SBGetActiveInterfaceOrientation");
+        }
+        TVLog(@"Orientation: SBGetActiveInterfaceOrientation %s",
+              gSBGetActiveInterfaceOrientation ? "resolved" : "unavailable(fallback to UIDevice)");
+    }
+    if (gSBGetActiveInterfaceOrientation) {
+        int r = gSBGetActiveInterfaceOrientation();
+        if (r >= UIInterfaceOrientationPortrait && r <= UIInterfaceOrientationLandscapeLeft) {
+            return (UIInterfaceOrientation)r;
+        }
+    }
+    // 兜底：加速度计方向
+    UIDeviceOrientation dev = [UIDevice currentDevice].orientation;
+    switch (dev) {
+        case UIDeviceOrientationPortrait:           return UIInterfaceOrientationPortrait;
+        case UIDeviceOrientationPortraitUpsideDown: return UIInterfaceOrientationPortraitUpsideDown;
+        case UIDeviceOrientationLandscapeLeft:      return UIInterfaceOrientationLandscapeRight;
+        case UIDeviceOrientationLandscapeRight:     return UIInterfaceOrientationLandscapeLeft;
+        default:                                    return UIInterfaceOrientationUnknown;
+    }
+}
+
 static void setupOrientationObserver(void) {
     if (!gOrientationSyncEnabled)
         return;
@@ -4764,12 +4801,12 @@ static void setupOrientationObserver(void) {
         TVLog(@"Orientation observer registered (initial=%ld -> rotQ=%d)", (long)activeOrientation,
               gRotationQuad.load(std::memory_order_relaxed));
     } else {
-        // iOS 13 fallback: Use UIDevice orientation notifications + polling
-        TVLog(@"FBSOrientationObserver not available on iOS < 14, using UIDevice fallback");
+        // iOS 13 fallback: SpringBoardServices active-orientation (UIDevice as fallback)
+        TVLog(@"FBSOrientationObserver not available on iOS < 14, using SBGetActiveInterfaceOrientation (UIDevice fallback)");
 
-        // ★ 关键修复：必须先开启加速度计方向采样，否则 [UIDevice currentDevice].orientation
-        //   永远返回 UIDeviceOrientationUnknown(0)，且 UIDeviceOrientationDidChangeNotification
-        //   永不触发 → gRotationQuad 卡在竖屏(0)，开游戏/转设备都不旋转。
+        // 仍开启加速度计方向采样：在 SpringBoardServices 符号不可用时，UIDevice.orientation
+        // 是最终兜底来源。daemon 内它常返回 Unknown，故已改为主用
+        // SBGetActiveInterfaceOrientation 取系统当前真实界面方向（见 tvnc_currentInterfaceOrientation）。
         [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
 
         // 监听设备方向变化通知
@@ -4777,33 +4814,18 @@ static void setupOrientationObserver(void) {
                                                           object:nil
                                                            queue:[NSOperationQueue mainQueue]
                                                       usingBlock:^(NSNotification *note) {
-            UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
-            UIInterfaceOrientation interfaceOrientation;
-
-            switch (deviceOrientation) {
-                case UIDeviceOrientationPortrait:
-                    interfaceOrientation = UIInterfaceOrientationPortrait;
-                    break;
-                case UIDeviceOrientationPortraitUpsideDown:
-                    interfaceOrientation = UIInterfaceOrientationPortraitUpsideDown;
-                    break;
-                case UIDeviceOrientationLandscapeLeft:
-                    interfaceOrientation = UIInterfaceOrientationLandscapeRight;
-                    break;
-                case UIDeviceOrientationLandscapeRight:
-                    interfaceOrientation = UIInterfaceOrientationLandscapeLeft;
-                    break;
-                default:
-                    return; // 面朝上/面朝下忽略
-            }
+            // 即时触发；真正取值走 tvnc_currentInterfaceOrientation（SB 优先，UIDevice 兜底）
+            UIInterfaceOrientation interfaceOrientation = tvnc_currentInterfaceOrientation();
+            if (interfaceOrientation == UIInterfaceOrientationUnknown)
+                return; // 过渡/平放：保持上次旋转
 
             int newRotQ = rotationForOrientation(interfaceOrientation);
             int oldRotQ = gRotationQuad.load(std::memory_order_relaxed);
 
             if (newRotQ != oldRotQ) {
                 gRotationQuad.store(newRotQ, std::memory_order_relaxed);
-                TVLog(@"iOS 13 orientation changed: device=%ld -> interface=%ld -> rotQ=%d",
-                      (long)deviceOrientation, (long)interfaceOrientation, newRotQ);
+                TVLog(@"iOS 13 orientation changed: interface=%ld -> rotQ=%d",
+                      (long)interfaceOrientation, newRotQ);
             }
         }];
 
@@ -4811,53 +4833,27 @@ static void setupOrientationObserver(void) {
         static dispatch_source_t orientationTimer = nil;
         orientationTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                   dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0));
-        dispatch_source_set_timer(orientationTimer, DISPATCH_TIME_NOW, 1.0 * NSEC_PER_SEC, 0.5 * NSEC_PER_SEC);
+        dispatch_source_set_timer(orientationTimer, DISPATCH_TIME_NOW, 0.3 * NSEC_PER_SEC, 0.1 * NSEC_PER_SEC);
         dispatch_source_set_event_handler(orientationTimer, ^{
-            // 强制更新方向状态
-            UIDeviceOrientation deviceOrientation = [UIDevice currentDevice].orientation;
-            UIInterfaceOrientation interfaceOrientation;
-
-            switch (deviceOrientation) {
-                case UIDeviceOrientationPortrait:
-                    interfaceOrientation = UIInterfaceOrientationPortrait;
-                    break;
-                case UIDeviceOrientationPortraitUpsideDown:
-                    interfaceOrientation = UIInterfaceOrientationPortraitUpsideDown;
-                    break;
-                case UIDeviceOrientationLandscapeLeft:
-                    interfaceOrientation = UIInterfaceOrientationLandscapeRight;
-                    break;
-                case UIDeviceOrientationLandscapeRight:
-                    interfaceOrientation = UIInterfaceOrientationLandscapeLeft;
-                    break;
-            default:
+            // 主来源：SBGetActiveInterfaceOrientation 取系统当前真实界面方向，UIDevice 兜底
+            UIInterfaceOrientation interfaceOrientation = tvnc_currentInterfaceOrientation();
+            if (interfaceOrientation == UIInterfaceOrientationUnknown)
                 return; // 设备平放/方向未知：保持上次旋转，不强制竖屏（避免误翻转）
-            }
 
             int newRotQ = rotationForOrientation(interfaceOrientation);
             int oldRotQ = gRotationQuad.load(std::memory_order_relaxed);
 
             if (newRotQ != oldRotQ) {
                 gRotationQuad.store(newRotQ, std::memory_order_relaxed);
-                TVLog(@"iOS 13 orientation poll: rotQ=%d", newRotQ);
+                TVLog(@"iOS 13 orientation poll: interface=%ld -> rotQ=%d", (long)interfaceOrientation, newRotQ);
             }
         });
         dispatch_resume(orientationTimer);
 
-        // 初始方向
-        UIDeviceOrientation initialOrientation = [UIDevice currentDevice].orientation;
-        UIInterfaceOrientation initialInterface;
-        switch (initialOrientation) {
-            case UIDeviceOrientationLandscapeLeft:
-                initialInterface = UIInterfaceOrientationLandscapeRight;
-                break;
-            case UIDeviceOrientationLandscapeRight:
-                initialInterface = UIInterfaceOrientationLandscapeLeft;
-                break;
-            default:
-                initialInterface = UIInterfaceOrientationPortrait;
-                break;
-        }
+        // 初始方向（SB 优先；未知回退竖屏）
+        UIInterfaceOrientation initialInterface = tvnc_currentInterfaceOrientation();
+        if (initialInterface == UIInterfaceOrientationUnknown)
+            initialInterface = UIInterfaceOrientationPortrait;
         gRotationQuad.store(rotationForOrientation(initialInterface), std::memory_order_relaxed);
 
         TVLog(@"iOS 13 orientation fallback registered (initial=%ld -> rotQ=%d)",
