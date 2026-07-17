@@ -13,6 +13,11 @@ const url        = require('url');
 const WS_PORT   = 8183;
 const HTTP_PORT = 9527;
 
+// ── 可选 WS 鉴权 ──────────────────────────────────
+// 设置环境变量 RELAY_TOKEN 后，所有 WS 连接必须携带 ?token=XXX，否则 401 拒绝。
+// 未设置则不校验（向后兼容历史客户端）。注意：手机端 WS URL 也需同步带上 token。
+const RELAY_TOKEN = process.env.RELAY_TOKEN || '';
+
 // ── State ─────────────────────────────────────────────
 const masters  = new Map();  // ws → { deviceId, ip }
 const slaves   = new Map();  // ws → { deviceId, ip }
@@ -134,6 +139,25 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
+  if (pathname === '/api/device' && req.method === 'GET') {
+    const targetIp = parsedUrl.query.ip;
+    if (!targetIp) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Missing ip parameter' }));
+      return;
+    }
+    // 代理到手机端 REST /api/device，取回真实设备名/型号/系统版本
+    const deviceUrl = `http://${targetIp}:8182/api/device`;
+    http.get(deviceUrl, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode, proxyRes.headers);
+      proxyRes.pipe(res);
+    }).on('error', (err) => {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Device info proxy failed: ${err.message}` }));
+    });
+    return;
+  }
+
   // Serve group-control HTML (proxy from master phone or serve static)
   if (pathname === '/' || pathname === '/group-control') {
     const masterInfo = masters.values().next().value;
@@ -192,6 +216,21 @@ function handleUpgrade(req, socket, head) {
   // 从 req.url 解析 role/deviceId（兼容 path 与 query 两种格式）
   const { role, deviceId } = parseRelayRoleDeviceId(req.url);
   const ip       = socket.remoteAddress || '';
+
+  // ── 可选 WS 鉴权（仅当设置了 RELAY_TOKEN 时强制）──
+  if (RELAY_TOKEN) {
+    const q = url.parse(req.url, true).query || {};
+    const token = q.token ? String(q.token) : null;
+    if (token !== RELAY_TOKEN) {
+      console.log(`[Relay] Auth rejected: role=${role} deviceId=${deviceId} (bad/missing token)`);
+      try {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\nContent-Length: 0\r\n\r\n');
+      } catch (e) { /* ignore */ }
+      socket.destroy();
+      return;
+    }
+  }
+
 
   // 挂到 req 上供 connection 事件读取（双重保险）
   req._relayRole     = role;

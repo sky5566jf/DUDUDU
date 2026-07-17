@@ -30,13 +30,15 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
+trollvncserver_FILES += quality/TVNCInputStrategy.c   # 纯 C 输入级联策略（已单测验证，作为真实决策引擎链入）
 
 # v3.40: Dropped iOS < 13.4 support. Removed fishhook and weak symbol shim.
 # ___darwin_check_fd_set_overflow is natively available on iOS 13.4+.
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
-trollvncserver_CFLAGS += -Wno-unused-but-set-variable
+# 注意：已移除 -Wno-unused-but-set-variable —— 该抑制会掩盖「变量赋值但未使用」类未初始化 bug。
+# 若 CI/本地因此出现告警，应修复代码而非重新抑制（符合质量护栏「暴露而非隐藏」原则）。
 ifeq ($(THEOS_DEVICE_SIMULATOR),)
 trollvncserver_CFLAGS += -march=armv8-a+crc
 endif
@@ -60,6 +62,7 @@ trollvncserver_LDFLAGS += -Llib-simulator
 trollvncserver_LDFLAGS += -FPrivateFrameworks
 else
 trollvncserver_CFLAGS += -Iinclude
+trollvncserver_CFLAGS += -Iquality   # 让 src/*.mm 能 #include "TVNCInputStrategy.h"
 trollvncserver_LDFLAGS += -Llib
 endif
 

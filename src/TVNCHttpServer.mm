@@ -16,7 +16,7 @@
 */
 
 #if !__has_feature(objc_arc)
-#warning This file must be compiled with ARC. Use -fobjc-arc flag.
+#error "This file must be compiled with ARC. Configure build with -fobjc-arc (Makefile already does)."
 #endif
 
 #import <Foundation/Foundation.h>

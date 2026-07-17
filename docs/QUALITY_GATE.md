@@ -72,11 +72,12 @@ bash quality/run_tests.sh
 
 体检发现编译期信号基本被无视，需收敛：
 
-- **9 处 `#warning`（编译时不触发）**：均为 `#if !__has_feature(objc_arc)` 保护的
-  `This file must be compiled with ARC`。Makefile 已加 `-fobjc-arc`，故 `__has_feature(objc_arc)` 为真，warning 不打印。
-  **处置建议**：改为 `#error`（若真没 ARC 直接编译失败，比弱 warning 更严）或直接删除（Makefile 已保证）。
-- **`-Wno-unused-but-set-variable`**（Makefile:39）：抑制「已赋值未使用变量」，会掩盖未初始化/死代码。
-  **处置建议**：删除该抑制，让真实告警暴露，逐个修掉。
+- **9 处 `#warning` → 已升级为 `#error`**：原为 `#if !__has_feature(objc_arc)` 保护的
+  `This file must be compiled with ARC`。现已改为 `#error`——正常 ARC 构建下 `#if` 为假不触发；
+  若有人误以非 ARC 编译，直接编译失败（比弱 warning 更严，符合「暴露而非隐藏」）。涉及 8 个真实源文件
+  （`.bak` 副本保留原样）。
+- **`-Wno-unused-but-set-variable`（Makefile）已删除**：不再抑制「已赋值未使用变量」，让潜在未初始化/死代码
+  告警暴露。CI 若出现相关告警应修代码而非重新抑制。
 - **目标**：逐步把 `make` 的告警数收敛到 0，并可考虑对纯 C 模块强制 `-Werror`（已在 `run_tests.sh` 启用）。
 
 ---
@@ -96,6 +97,30 @@ bash quality/run_tests.sh
 - `docs/代码评审Checklist.md`：Code Review 时逐条核对。
 - `docs/团队技术能力提升方案.md`：团队整体提升路线图。
 - 本文件：聚焦**质量护栏的技术接入**与**输入级联不变式**。
+
+---
+
+## 7. 已落地进展（架构解耦第一步）
+
+`TVNCInputStrategy` 已从「仅 CI 单测」升级为 **daemon 真实决策引擎**：
+
+- `Makefile`：将 `quality/TVNCInputStrategy.c` 链入 `trollvncserver` 构建，并加 `-Iquality` 使 `src/*.mm` 可 `#include "TVNCInputStrategy.h"`。
+- `src/TVNCApiManager.mm` 的 `inputText:` 改为**先查 `TVNCSelectPrimaryInput()` 决策、再调保留的执行方法**；
+  第一响应者插入抽成 `tvncInsertViaFirstResponder:`，决策上下文由 `tvncBuildInputContextForText:` 构建。
+- 行为完全保持（daemon 下有焦点走第一响应者、否则走剪贴板兜底），但「选通道」这一步现在由已单测验证的策略统一决定，
+  从根上消除 v4.01–v4.10 的级联顺序反复横跳。
+
+> 这是「逐步迁移」的第一步：决策已策略化，后续可把 HID/AX/剪贴板等执行方法也按需收敛，进一步削薄巨文件。
+
+## 8. 群控前端现代化（已落地）
+
+`group-control/relay-server/relay-server.js` 与 `pc_group_control.html`：
+
+- **WS 鉴权（可选）**：relay 读取环境变量 `RELAY_TOKEN`，设置后所有 WS 连接须带 `?token=XXX`，否则 401 拒绝；
+  未设置则向后兼容历史客户端。浏览器端新增 Token 输入框并随连接 URL 带上、本地保存。
+- **真实设备名**：relay 新增 `GET /api/device?ip=` 代理（转发到手机 REST `:8182/api/device`）；
+  浏览器在设备加载/中继连接成功后经该代理拉取真实设备名，替换扫码占位名（失败保留原名，不阻断）。
+- 两文件均通过语法校验（relay `node --check`、HTML 内联 JS `new Function` 解析均 0 错误）。
 
 **落地顺序建议**：先让 `quality-gate.yml` + `quality/` 单测在 CI 跑绿（护栏就位）→
 再把 daemon 输入级联逻辑逐步迁移到 `TVNCInputStrategy` 决策接口（解耦）→

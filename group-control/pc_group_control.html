@@ -320,6 +320,8 @@
     <div class="relay-config" id="relayConfigBox">
       <label>🖥️ 中继IP:</label>
       <input type="text" id="relayIpInput" placeholder="本机(自动)" value="" />
+      <label>🔑 Token:</label>
+      <input type="text" id="relayTokenInput" placeholder="可选(中继设了才校验)" value="" />
       <button class="btn btn-xs btn-primary" onclick="connectRelayWS()">连接中继</button>
       <button class="btn btn-xs btn-default" onclick="disconnectRelayWS()">断开</button>
       <span class="conn-status disconnected" id="wsConnStatus">未连接</span>
@@ -540,6 +542,12 @@ var qualityPresets = {
     localStorage.setItem('tvnc_relay_ip', relayIp);
   }
 
+  // 恢复已保存的 Token（中继开启鉴权时自动回填）
+  var savedToken = localStorage.getItem('tvnc_relay_token');
+  if (savedToken && document.getElementById('relayTokenInput')) {
+    document.getElementById('relayTokenInput').value = savedToken;
+  }
+
   // 恢复缩放设置
   var savedZoom = localStorage.getItem('tvnc_grid_zoom');
   if (savedZoom) {
@@ -636,6 +644,8 @@ function parseQkurl(text) {
   log('从 qkurl.txt 加载 ' + devices.length + ' 台设备', 'ok');
   renderScreens();
   updateTopInfo();
+  // 拉取真实设备名（中继可达时覆盖占位名）
+  refreshAllDeviceNames();
   // 不再这里启动截图，等中继 WS 连接成功后再启动（connectRelayWS 的 onopen 里会调用）
 }
 
@@ -749,6 +759,32 @@ function bindGlobalTouchEvents() {
   // 移除旧的监听器（简单方式：不记录引用，直接靠 DOM 重建）
 }
 
+// ==================== 真实设备名解析（经中继 HTTP 代理）====================
+// 设备扫码只带 IP/别名，真实设备名由手机端 REST /api/device 提供。
+// 浏览器通过中继 9527 的 /api/device?ip= 代理拉取，失败则保留原名（不阻断流程）。
+function fetchDeviceRealName(dev) {
+  if (!dev || !dev.ip || !relayIp) return;
+  var url = 'http://' + relayIp + ':9527/api/device?ip=' + encodeURIComponent(dev.ip);
+  fetch(url).then(function(r) { return r.json(); }).then(function(info) {
+    if (!info) return;
+    var name = info.name || info.deviceName || info.devicename || info.device_name;
+    if (name) {
+      dev.name = name;
+      if (info.systemVersion) dev.systemVersion = info.systemVersion;
+      else if (info.version) dev.systemVersion = info.version;
+      if (info.model) dev.model = info.model;
+      renderScreens();
+      updateTopInfo();
+      log('✓ 获取真实设备名: ' + dev.ip + ' → ' + dev.name, 'ok');
+    }
+  }).catch(function() { /* 中继/设备不可达，保留原名 */ });
+}
+
+function refreshAllDeviceNames() {
+  if (!devices || !devices.length) return;
+  devices.forEach(function(d) { if (d.ip) fetchDeviceRealName(d); });
+}
+
 // ==================== 中继 WebSocket 管理（浏览器 → 中继服务器）====================
 function connectRelayWS() {
   var inputEl = document.getElementById('relayIpInput');
@@ -761,12 +797,15 @@ function connectRelayWS() {
     toast('IP/主机名格式不正确', 'err'); return;
   }
   localStorage.setItem('tvnc_relay_ip', relayIp);
+  var relayTokenEl = document.getElementById('relayTokenInput');
+  if (relayTokenEl) localStorage.setItem('tvnc_relay_token', (relayTokenEl.value || '').trim());
 
   if (relayWs) { try { relayWs.close(); } catch(e) {} relayWs = null; }
   wsStatus = 'connecting';
   updateWsStatusUI();
 
-  var url = 'ws://' + relayIp + ':8183?role=browser';
+  var token = (document.getElementById('relayTokenInput').value || '').trim();
+  var url = 'ws://' + relayIp + ':8183?role=browser' + (token ? '&token=' + encodeURIComponent(token) : '');
   log('连接中继 WS: ' + url, 'info');
 
   try {
@@ -785,6 +824,8 @@ function connectRelayWS() {
 
     // 启动截图（走中继代理）
     startScreensOnly();
+    // 拉取各设备真实名称（替换扫码时的占位名）
+    refreshAllDeviceNames();
   };
 
   relayWs.onmessage = function(e) {

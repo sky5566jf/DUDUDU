@@ -16,7 +16,7 @@
 */
 
 #if !__has_feature(objc_arc)
-#warning This file must be compiled with ARC. Use -fobjc-arc flag.
+#error "This file must be compiled with ARC. Configure build with -fobjc-arc (Makefile already does)."
 #endif
 
 #import <UIKit/UIKit.h>
@@ -36,6 +36,7 @@
 #import <objc/message.h>
 #import <sys/sysctl.h>   // KERN_PROC / kinfo_proc（Tier4 前台进程枚举兜底）
 #import <libproc.h>      // proc_pidpath（Tier4 取进程路径兜底）
+#include "TVNCInputStrategy.h"   // 输入级联决策（纯 C，已单测验证，见 quality/）
 
 // HID Page 常量
 #ifndef kHIDPage_KeyboardOrKeypad
@@ -1019,6 +1020,69 @@ int tvncGetFBBytesPerPixel(void);
 
 #pragma mark - 键盘输入 API
 
+#pragma mark - 输入决策/执行分离（TVNCInputStrategy）
+
+/// 判断文本是否纯 ASCII（用于输入策略决策）
+static BOOL tvncIsAllASCII(NSString *text) {
+    if (!text || text.length == 0) return YES;
+    for (NSUInteger i = 0; i < text.length; i++) {
+        if ([text characterAtIndex:i] > 127) return NO;
+    }
+    return YES;
+}
+
+/// 通过第一响应者直接插入文本（UIKit 标准方式，支持中英文）
+/// 仅负责「执行」，决策由 tvncBuildInputContextForText / TVNCSelectPrimaryInput 统一给出。
+- (BOOL)tvncInsertViaFirstResponder:(NSString *)text {
+    UIView *firstResponder = [self findFirstResponder];
+    if (!firstResponder) return NO;
+    TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
+
+    if ([firstResponder isKindOfClass:[UITextField class]]) {
+        UITextField *textField = (UITextField *)firstResponder;
+        UITextRange *selectedTextRange = textField.selectedTextRange;
+        if (!selectedTextRange) {
+            selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument
+                                                      toPosition:textField.endOfDocument];
+        }
+        [textField replaceRange:selectedTextRange withText:text];
+        [textField sendActionsForControlEvents:UIControlEventEditingChanged];
+        return YES;
+    } else if ([firstResponder isKindOfClass:[UITextView class]]) {
+        UITextView *textView = (UITextView *)firstResponder;
+        NSRange selectedRange = textView.selectedRange;
+        NSMutableString *newText = [textView.text mutableCopy] ?: [NSMutableString string];
+        [newText replaceCharactersInRange:selectedRange withString:text];
+        textView.text = newText;
+        textView.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
+        if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
+            [textView.delegate textViewDidChange:textView];
+        }
+        return YES;
+    } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
+        id<UITextInput> textInput = (id<UITextInput>)firstResponder;
+        UITextRange *selectedRange = textInput.selectedTextRange;
+        if (!selectedRange) {
+            selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument
+                                                  toPosition:textInput.endOfDocument];
+        }
+        [textInput replaceRange:selectedRange withText:text];
+        return YES;
+    }
+    return NO;
+}
+
+/// 根据当前上下文构建输入策略决策所需的判定上下文
+- (TVNCInputContext)tvncBuildInputContextForText:(NSString *)text {
+    TVNCInputContext ctx;
+    ctx.hasFirstResponder   = ([self findFirstResponder] != nil);
+    ctx.isAllASCII          = tvncIsAllASCII(text);
+    ctx.isDaemon            = ([UIApplication sharedApplication] == nil); // daemon 无 UIKit 应用环境
+    ctx.hasAXEntitlement    = NO;   // daemon 无 AX 授权；即便持有也绝不可用于输入（v4.07 根因）
+    ctx.appProcessAvailable = NO;   // daemon 内 8184 App 输入服务不可达（仅 .tipa 提供）
+    return ctx;
+}
+
 - (BOOL)inputText:(NSString *)text {
     if (!text || text.length == 0) {
         return NO;
@@ -1033,46 +1097,23 @@ int tvncGetFBBytesPerPixel(void);
         return result;
     }
     
+    // —— 决策与执行分离 ——
+    // 输入「选哪条通道」统一交给已单测验证的纯 C 策略 TVNCInputStrategy（见 quality/）。
+    // 执行方法（第一响应者 / 剪贴板）保持原实现不变；从设计上杜绝
+    // v4.01–v4.10「UIKeyboardImpl 假成功短路级联」「daemon 误调 AX 崩溃」等回归。
+    TVNCInputContext ctx = [self tvncBuildInputContextForText:text];
+    TVNCInputMethod method = TVNCSelectPrimaryInput(&ctx);
+    TVLog(@"inputText: strategy=>%d (FR=%d, daemon=%d, ascii=%d)",
+          (int)method, ctx.hasFirstResponder, ctx.isDaemon, ctx.isAllASCII);
+
     // 方法1: 尝试直接操作第一响应者（UIKit 标准方式，支持中英文）
-    UIView *firstResponder = [self findFirstResponder];
-    if (firstResponder) {
-        TVLog(@"Found first responder: %@", NSStringFromClass([firstResponder class]));
-        
-        // 尝试直接插入文本
-        if ([firstResponder isKindOfClass:[UITextField class]]) {
-            UITextField *textField = (UITextField *)firstResponder;
-            UITextRange *selectedTextRange = textField.selectedTextRange;
-            if (!selectedTextRange) {
-                selectedTextRange = [textField textRangeFromPosition:textField.endOfDocument 
-                                                          toPosition:textField.endOfDocument];
-            }
-            [textField replaceRange:selectedTextRange withText:text];
-            [textField sendActionsForControlEvents:UIControlEventEditingChanged];
-            return YES;
-            
-        } else if ([firstResponder isKindOfClass:[UITextView class]]) {
-            UITextView *textView = (UITextView *)firstResponder;
-            NSRange selectedRange = textView.selectedRange;
-            NSMutableString *newText = [textView.text mutableCopy] ?: [NSMutableString string];
-            [newText replaceCharactersInRange:selectedRange withString:text];
-            textView.text = newText;
-            textView.selectedRange = NSMakeRange(selectedRange.location + text.length, 0);
-            if ([textView.delegate respondsToSelector:@selector(textViewDidChange:)]) {
-                [textView.delegate textViewDidChange:textView];
-            }
-            return YES;
-            
-        } else if ([firstResponder conformsToProtocol:@protocol(UITextInput)]) {
-            id<UITextInput> textInput = (id<UITextInput>)firstResponder;
-            UITextRange *selectedRange = textInput.selectedTextRange;
-            if (!selectedRange) {
-                selectedRange = [textInput textRangeFromPosition:textInput.endOfDocument 
-                                                      toPosition:textInput.endOfDocument];
-            }
-            [textInput replaceRange:selectedRange withText:text];
+    if (method == kTVNCInputFirstResponder) {
+        if ([self tvncInsertViaFirstResponder:text]) {
             return YES;
         }
+        TVLog(@"inputText: FR insert failed, fallback to clipboard");
     }
+
     
     // ⚠️⚠️ 绝不在 daemon(trollvncserver) 进程内调用 AX（Accessibility 私有框架）！
     // AXUIElementCreateSystemWide / AXFocusedUIElement 在无界面守护进程里调用会直接让
