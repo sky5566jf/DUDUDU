@@ -12,6 +12,14 @@
 #include <stdbool.h>
 #include <stddef.h>   // NULL（接口契约：函数参数为指针，调用方与实现均可能用 NULL）
 
+// extern "C"：本头同时被 C（TVNCInputStrategy.c）与 C++（src/*.mm 以 ObjC++ 编译）
+// 包含。不加此包裹，C++ 会对函数名做 name mangling，链接时与 .c 产出的 C 符号对不上，
+// 出现「symbol(s) not found for architecture arm64」。这是 v4.17 之后链入策略模块时
+// 踩到的真实链接坑，已通过 CI 暴露。
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef enum {
     kTVNCInputNone = 0,
     kTVNCInputFirstResponder,   // UIKit 第一响应者 replaceRange:
@@ -39,3 +47,7 @@ bool TVNCIsPortSafeForInputForwarding(int port);
 
 // 当前上下文是否允许调用 AX（v4.07 根因：daemon 内调用 AX 必崩 -> 永远 false）。
 bool TVNCCanUseAXInCurrentContext(const TVNCInputContext *ctx);
+
+#ifdef __cplusplus
+}
+#endif

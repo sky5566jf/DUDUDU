@@ -2,6 +2,21 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.18] – 2026-07-18
+
+### Fixed（链入 TVNCInputStrategy 后 rootless/default/roothide 链接失败）
+- **根因**：`TVNCApiManager.mm`（ObjC++，C++ 编译）`#include "TVNCInputStrategy.h"`，但头文件未做 `extern "C"` 包裹 → C++ 对 `TVNCSelectPrimaryInput` 做 name mangling，与 `TVNCInputStrategy.c`（C 编译，C 符号）对不上 → `ld: symbol(s) not found for architecture arm64`。编译期不报错、仅链接期暴露，CI 真实工具链抓到。
+- **修复**：`quality/TVNCInputStrategy.h` 整段声明用 `#ifdef __cplusplus extern "C" { ... } #endif` 包裹。同时覆盖 default/rootless/roothide 三 scheme；bootstrap 不链该头不受影响。
+- 这是质量护栏继 `NULL` 未声明之后抓到的第二个真实符号/链接层 bug（纯逻辑等价验证测不到）。
+
+### Refactored（输入级联决策接入策略模块 + 警告暴露）
+- `src/TVNCApiManager.mm` 的 `inputText:` 改为先 `TVNCSelectPrimaryInput(&ctx)` 决策：第一响应者命中走 `tvncInsertViaFirstResponder:`，否则回退 `inputTextViaClipboard:`（v4.10 剪贴板终态保留）。决策与执行分离，从设计上杜绝 v4.02「假成功短路级联」回归。
+- 9 处 `#warning`（ARC 提示）升级为 `#error`（均在 `#if !__has_feature(objc_arc)` 保护内，Makefile `-fobjc-arc` 下不触发）；Makefile 移除 `-Wno-unused-but-set-variable`（暴露而非隐藏）。
+
+### Added（群控前端现代化）
+- `group-control/relay-server.js`：新增可选 `RELAY_TOKEN` WebSocket 鉴权；新增 `GET /api/device` 真实设备名代理。
+- `group-control/pc_group_control.html`：relay 配置加 token 输入框并持久化；新增 `fetchDeviceRealName` 拉取真实设备名（tolerant name/deviceName/model/version 字段）。
+
 ## [4.10] – 2026-07-16
 
 ### Fixed（英文/数字部分 App 无法输入 —— daemon 兜底统一走剪贴板）
