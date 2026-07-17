@@ -4784,10 +4784,12 @@ static UIInterfaceOrientation tvnc_currentInterfaceOrientation(void) {
     int sbRaw = -1; // -1 表示符号缺失、未真正调用
     if (gSBGetActiveInterfaceOrientation) {
         sbRaw = gSBGetActiveInterfaceOrientation();
-        r = sbRaw;
+        r = sbRaw & 0xFF;
     } else if (gSBGetInterfaceOrientation) {
         sbRaw = gSBGetInterfaceOrientation();
-        r = sbRaw;
+        // ★ iOS 13 的 SBGetInterfaceOrientation 返回值高位带标志(实测横屏=0x10000003)，
+        //   真实 UIInterfaceOrientation 在低字节；不 mask 会被 1..4 范围检查拒掉 -> 退化成竖屏。
+        r = sbRaw & 0xFF;
     }
     int uidRaw = (int)[UIDevice currentDevice].orientation;
     UIInterfaceOrientation finalOri = UIInterfaceOrientationUnknown;
