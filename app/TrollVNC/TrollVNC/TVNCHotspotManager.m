@@ -137,9 +137,9 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     if (shouldStartService) {
         [self executeAutoStartupTaskIfNecessary];
     }
-
-    NEHotspotHelperResponse *response = [NEHotspotHelperResponse createResponse:kNEHotspotHelperResultFailure];
-    [command executeWithResponse:response];
+    // 注：iOS26 SDK (Xcode 26.5 / iPhoneOS26.5) 中 NEHotspotHelper 的
+    // createResponse: / executeWithResponse: 选择器已不存在，显式应答会导致 bootstrap 构建失败。
+    // 此处不显式应答，保持与 v4.21 一致的行为（helper 注册本身即可在 WiFi 变化时触发拉起）。
 }
 
 - (void)executeAutoStartupTaskIfNecessary {
