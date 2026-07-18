@@ -28,36 +28,63 @@ function genDeviceId() { return `device_${nextDeviceId++}`; }
 
 // ── Helpers ──────────────────────────────────────────
 
-function broadcastTo(wsSet, msg, excludeWs) {
-  for (const ws of wsSet) {
-    if (ws === excludeWs) continue;
-    if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(msg); } catch (e) { /* ignore */ }
-    }
+// ── 带背压感知的投递 ─────────────────────────────
+// 关键：move 事件按设备合并（每台客户端仅缓存最新一帧，由定时器统一下发），
+// 避免主控高速滑动时弱网手机 TCP 缓冲堆积、整段手势掉队；
+// down / up / key 等"关键事件"始终立即直发，绝不被合并或丢弃。
+const MOVE_FLUSH_MS = 16;
+const HIGH_WATER = 512 * 1024; // 单客户端发送缓冲上限（字节），超过则丢弃该 move
+
+function deliverTo(ws, obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  if (obj && obj.type === 'touch' && obj.action === 'move') {
+    // move 合并：仅缓存最新一帧，稍后由 flush 定时器统一下发
+    ws._pendingMove = obj;
+    return;
   }
+  try { ws.send(JSON.stringify(obj)); } catch (e) { /* 客户端已断开或写失败，忽略 */ }
 }
 
-function broadcastToSlaves(msg) {
-  broadcastTo(slaves.keys(), msg, null);
+function broadcastToSlaves(obj) {
+  for (const ws of slaves.keys()) deliverTo(ws, obj);
 }
 
-function broadcastToAllPhones(msg) {
+function broadcastToAllPhones(obj) {
   const all = new Set([...masters.keys(), ...slaves.keys()]);
-  for (const ws of all) {
-    if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(msg); } catch (e) { /* ignore */ }
-    }
-  }
+  for (const ws of all) deliverTo(ws, obj);
 }
 
 // 定向：仅发给指定 deviceId 的手机（用于控制单台设备）
-function sendToDevice(deviceId, msg) {
+function sendToDevice(deviceId, obj) {
   for (const [ws, info] of [...masters, ...slaves]) {
-    if (info.deviceId === deviceId && ws.readyState === WebSocket.OPEN) {
-      try { ws.send(msg); } catch (e) { /* ignore */ }
-    }
+    if (info.deviceId === deviceId) deliverTo(ws, obj);
   }
 }
+
+// 定向：按真实 IP 命中（弹窗未设主控时，用设备 IP 精确命中，
+// 避免依赖 qkurl 的 id 与手机中继注册 deviceId 不一致导致触摸被丢弃）
+function sendToDeviceByIp(targetIp, obj) {
+  const ip = normalizeIp(targetIp);
+  let found = false;
+  for (const [ws, info] of [...masters, ...slaves]) {
+    if (info.ip === ip) { deliverTo(ws, obj); found = true; }
+  }
+  return found;
+}
+
+// 全局 move 下发：每台客户端每帧至多下发一个合并后的 move，
+// 背压过高时丢弃（down/up 走直发通道，不会进这里，故手势完整性不受影响）
+setInterval(() => {
+  const clients = new Set([...masters.keys(), ...slaves.keys()]);
+  for (const ws of clients) {
+    if (!ws._pendingMove) continue;
+    const mv = ws._pendingMove;
+    ws._pendingMove = null;
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (ws.bufferedAmount > HIGH_WATER) continue; // 背压保护：丢弃过期 move
+    try { ws.send(JSON.stringify(mv)); } catch (e) { /* ignore */ }
+  }
+}, MOVE_FLUSH_MS);
 
 function encodeWebSocketTextFrame(str) {
   const payload = Buffer.from(str, 'utf8');
@@ -100,6 +127,17 @@ function getFallbackHtml() {
 </body></html>`;
 }
 
+// 归一化客户端 IP：剥离 IPv6 映射前缀 "::ffff:"（中继监听 :: 时
+// socket.remoteAddress 会返回 "::ffff:1.2.3.4"，直接用于 http://host
+// 会触发 Invalid URL 并让整个进程崩溃）。也兼容方括号 IPv6 写法。
+function normalizeIp(ip) {
+  if (!ip) return ip;
+  let s = String(ip).trim();
+  if (s.startsWith('::ffff:')) s = s.slice(7);
+  if (s.startsWith('[') && s.endsWith(']')) s = s.slice(1, -1);
+  return s;
+}
+
 // ── HTTP Server (port HTTP_PORT: screenshot proxy + status + group-control proxy) ──
 
 const httpServer = http.createServer((req, res) => {
@@ -124,7 +162,7 @@ const httpServer = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/screenshot' && req.method === 'GET') {
-    const targetIp = parsedUrl.query.ip;
+    const targetIp = normalizeIp(parsedUrl.query.ip);
     if (!targetIp) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Missing ip parameter' }));
@@ -136,7 +174,14 @@ const httpServer = http.createServer((req, res) => {
       if (key !== 'ip') fwdParams.set(key, val);
     }
     const qs = fwdParams.toString();
-    const screenshotUrl = `http://${targetIp}:8182/api/screenshot${qs ? '?' + qs : ''}`;
+    let screenshotUrl;
+    try {
+      screenshotUrl = `http://${targetIp}:8182/api/screenshot${qs ? '?' + qs : ''}`;
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Invalid ip: ${targetIp}` }));
+      return;
+    }
     http.get(screenshotUrl, (proxyRes) => {
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
       proxyRes.pipe(res);
@@ -148,20 +193,58 @@ const httpServer = http.createServer((req, res) => {
   }
 
   if (pathname === '/api/device' && req.method === 'GET') {
-    const targetIp = parsedUrl.query.ip;
+    const targetIp = normalizeIp(parsedUrl.query.ip);
     if (!targetIp) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Missing ip parameter' }));
       return;
     }
     // 代理到手机端 REST /api/device，取回真实设备名/型号/系统版本
-    const deviceUrl = `http://${targetIp}:8182/api/device`;
+    let deviceUrl;
+    try {
+      deviceUrl = `http://${targetIp}:8182/api/device`;
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `Invalid ip: ${targetIp}` }));
+      return;
+    }
     http.get(deviceUrl, (proxyRes) => {
       res.writeHead(proxyRes.statusCode, proxyRes.headers);
       proxyRes.pipe(res);
     }).on('error', (err) => {
       res.writeHead(502, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Device info proxy failed: ${err.message}` }));
+    });
+    return;
+  }
+
+  // 群控触摸/按键的 HTTP 网关：等价于 WS 广播，供浏览器端 WS 断开时的回退路径使用
+  // 这样即使浏览器→中继 WS 临时掉线，主控滑动仍能扇出到所有手机（而非只打单台）
+  if (pathname === '/api/group/touch' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      let msg;
+      try { msg = JSON.parse(body); } catch (e) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+      if (msg.targetDeviceId) {
+        sendToDevice(msg.targetDeviceId, msg);
+        console.log(`[Relay] HTTP touch → device ${msg.targetDeviceId}`);
+      } else if (msg.targetIp) {
+        const ok = sendToDeviceByIp(msg.targetIp, msg);
+        console.log(`[Relay] HTTP touch → ip ${msg.targetIp} ${ok ? 'ok' : '(no match)'}`);
+      } else if (msg.scope === 'slaves') {
+        broadcastToSlaves(msg);
+        console.log(`[Relay] HTTP touch → ${slaves.size} slaves`);
+      } else {
+        broadcastToAllPhones(msg);
+        console.log(`[Relay] HTTP touch → ${masters.size + slaves.size} phones`);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
     });
     return;
   }
@@ -284,23 +367,23 @@ wss.on('connection', (ws, req) => {
   // 把身份信息挂到 ws 对象，供心跳检测器和日志使用
   ws._relayRole     = role;
   ws._relayDeviceId = deviceId;
-  ws._relayIp       = ip;
+  ws._relayIp       = normalizeIp(ip);
 
-  console.log(`[Relay] New connection: role=${role} deviceId=${deviceId} ip=${ip}`);
+  console.log(`[Relay] New connection: role=${role} deviceId=${deviceId} ip=${normalizeIp(ip)}`);
 
   // ── 注册到对应集合 ─────────────────────
   if (role === 'master') {
     if (masters.size > 0) {
       console.log(`[Relay] WARNING: Multiple masters detected.`);
     }
-    masters.set(ws, { deviceId, ip, role });
+    masters.set(ws, { deviceId, ip: normalizeIp(ip), role });
     ws._relayRole = role; ws._relayDeviceId = deviceId;
     // NOTE: do NOT send() immediately on connection — the iOS daemon's
     // hand-rolled WS client reads the 101 response only up to \r\n\r\n and
     // would swallow the first bytes of any frame sent in the same TCP segment,
     // corrupting frame alignment (observed as code=1006 on connect).
   } else if (role === 'slave') {
-    slaves.set(ws, { deviceId, ip, role });
+    slaves.set(ws, { deviceId, ip: normalizeIp(ip), role });
     ws._relayRole = role; ws._relayDeviceId = deviceId;
     // (event notifications to phones removed: the iOS daemon's hand-rolled
     // WS client breaks the connection when it receives frames other than
@@ -341,22 +424,23 @@ wss.on('connection', (ws, req) => {
 
     if (msg.type === 'touch' && msg.source === 'real_touch') {
       // Master reports real touch → broadcast to SLAVES only
-      const eventStr = JSON.stringify(msg);
-      broadcastToSlaves(eventStr);
+      broadcastToSlaves(msg);
       console.log(`[Relay] real_touch → ${slaves.size} slaves`);
     } else if (msg.type === 'touch' || msg.type === 'key') {
-      const eventStr = JSON.stringify(msg);
-      // 定向单台：targetDeviceId 指定时只发该设备
+      // 定向单台：targetDeviceId / targetIp 指定时只发该设备
       if (msg.targetDeviceId) {
-        sendToDevice(msg.targetDeviceId, eventStr);
+        sendToDevice(msg.targetDeviceId, msg);
         console.log(`[Relay] ${msg.type} → device ${msg.targetDeviceId}`);
+      } else if (msg.targetIp) {
+        const ok = sendToDeviceByIp(msg.targetIp, msg);
+        console.log(`[Relay] ${msg.type} → ip ${msg.targetIp} ${ok ? 'ok' : '(no match)'}`);
       } else if (msg.scope === 'slaves') {
         // 仅镜像到从控
-        broadcastToSlaves(eventStr);
+        broadcastToSlaves(msg);
         console.log(`[Relay] ${msg.type} → ${slaves.size} slaves`);
       } else {
         // 默认：广播到所有手机（控主控 → 镜像所有从控）
-        broadcastToAllPhones(eventStr);
+        broadcastToAllPhones(msg);
         console.log(`[Relay] ${msg.type} → ${masters.size + slaves.size} phones`);
       }
     } else if (msg.type === 'register') {

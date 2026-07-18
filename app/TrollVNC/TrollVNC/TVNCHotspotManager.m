@@ -41,6 +41,12 @@
     self = [super init];
     if (self) {
         _lastNetworkState = NO;
+        // 用户把 App 切回前台时兜底确认守护进程在运行
+        // （后台期间 daemon 若挂掉、且未发生网络变化，这里补拉起）
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(applicationDidBecomeActive:)
+                                                     name:UIApplicationDidBecomeActiveNotification
+                                                   object:nil];
     }
     return self;
 }
@@ -106,20 +112,34 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
 }
 
 - (void)handleCommand:(NEHotspotHelperCommand *)command {
+    // v4.x 修复：NEHotspotHelper 命令必须应答，否则系统会因“helper 无响应”
+    // 而停用本扩展，导致“连 WiFi 自动启动”逐渐失灵（时灵时不灵的根因）。
+    // 应答 kNEHotspotHelperResultFailure = 不接管该 WiFi 的认证 UI（透传），
+    // 但仍借系统唤醒的时机拉起守护进程。
+    BOOL shouldStartService = NO;
+
     switch (command.commandType) {
-        case kNEHotspotHelperCommandTypeNone:
-            break;
-        case kNEHotspotHelperCommandTypeFilterScanList:
         case kNEHotspotHelperCommandTypeEvaluate:
         case kNEHotspotHelperCommandTypeAuthenticate:
-        case kNEHotspotHelperCommandTypePresentUI:
         case kNEHotspotHelperCommandTypeMaintain:
-        case kNEHotspotHelperCommandTypeLogoff:
-            [self executeAutoStartupTaskIfNecessary];
+            // 系统正在评估/认证/保活某个 WiFi 网络 → 网络子系统已活跃，拉起服务
+            shouldStartService = YES;
             break;
+        case kNEHotspotHelperCommandTypeFilterScanList:
+        case kNEHotspotHelperCommandTypePresentUI:
+        case kNEHotspotHelperCommandTypeLogoff:
+        case kNEHotspotHelperCommandTypeNone:
         default:
+            // 扫描列表/UI/注销等高频或无关事件：仅应答，不重复触发重活
             break;
     }
+
+    if (shouldStartService) {
+        [self executeAutoStartupTaskIfNecessary];
+    }
+
+    NEHotspotHelperResponse *response = [command createResponse:kNEHotspotHelperResultFailure];
+    [command respond:response];
 }
 
 - (void)executeAutoStartupTaskIfNecessary {
@@ -144,7 +164,13 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
     });
 }
 
+- (void)applicationDidBecomeActive:(NSNotification *)notification {
+    NSLog(@"[TVNC] App became active, ensuring service running");
+    [self executeAutoStartupTaskIfNecessary];
+}
+
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     if (self.reachability) {
         SCNetworkReachabilitySetCallback(self.reachability, NULL, NULL);
         SCNetworkReachabilitySetDispatchQueue(self.reachability, NULL);

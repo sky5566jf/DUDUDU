@@ -4782,6 +4782,58 @@ static UIInterfaceOrientation tvnc_currentInterfaceOrientation(void) {
     return finalOri;
 }
 
+#pragma mark - Companion app auto-launch (越狱版启动服务顺带拉起)
+
+// 越狱版：trollvncserver 服务启动后，顺带把 matisu 生态的常驻 App 也拉起来
+// （com.matisu.one.nxs 即 RootService 常驻进程所属 App）。
+// 仅当该 App 未运行时才启动，避免反复 resume 顶前台；未安装则静默跳过，不影响主服务。
+#define TVNC_COMPANION_BUNDLE_ID @"com.matisu.one.nxs"
+
+static BOOL tvnc_isProcessRunning(const char *substr) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t size = 0;
+    if (sysctl(mib, 4, NULL, &size, NULL, 0) != 0) return NO;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(size);
+    if (!procs) return NO;
+    BOOL found = NO;
+    if (sysctl(mib, 4, procs, &size, NULL, 0) == 0) {
+        int count = (int)(size / sizeof(struct kinfo_proc));
+        for (int i = 0; i < count; i++) {
+            if (strstr(procs[i].kp_proc.p_comm, substr)) { found = YES; break; }
+        }
+    }
+    free(procs);
+    return found;
+}
+
+static void tvnc_launchCompanionAppIfNeeded(void) {
+    if (tvnc_isProcessRunning("nxs")) {
+        TVLog(@"Companion: %@ already running, skip auto-launch", TVNC_COMPANION_BUNDLE_ID);
+        return;
+    }
+    // 通过 SpringBoardServices 私有 API 启动 GUI App。
+    // daemon 已链接 SpringBoardServices（Makefile: trollvncserver_PRIVATE_FRAMEWORKS += SpringBoardServices），
+    // 且 entitlements 含 com.apple.springboard.launchapplications / frontboard.launchapplications 授权，daemon 内可用。
+    static int (*sbsLaunch)(CFStringRef, int) = NULL;
+    static BOOL resolved = NO;
+    if (!resolved) {
+        resolved = YES;
+        sbsLaunch = (int (*)(CFStringRef, int))dlsym(RTLD_DEFAULT, "SBSLaunchApplicationWithIdentifier");
+        if (!sbsLaunch) {
+            void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+            if (!sbs) sbs = dlopen("SpringBoardServices", RTLD_LAZY);
+            if (sbs) sbsLaunch = (int (*)(CFStringRef, int))dlsym(sbs, "SBSLaunchApplicationWithIdentifier");
+        }
+        TVLog(@"Companion: SBSLaunchApplicationWithIdentifier=%s", sbsLaunch ? "resolved" : "-");
+    }
+    if (!sbsLaunch) {
+        TVLog(@"Companion: launch symbol unresolved, skip");
+        return;
+    }
+    int ret = sbsLaunch((__bridge CFStringRef)TVNC_COMPANION_BUNDLE_ID, 0);
+    TVLog(@"Companion: launch %@ -> ret=%d (0=ok)", TVNC_COMPANION_BUNDLE_ID, ret);
+}
+
 static void setupOrientationObserver(void) {
     if (!gOrientationSyncEnabled)
         return;
@@ -5830,6 +5882,16 @@ int main(int argc, const char *argv[]) {
 
         tvStartControlSocketIfNeeded();
 
+        // 越狱版：服务启动后顺带拉起 companion App (com.matisu.one.nxs)，延后 3s 异步执行，避免阻塞服务就绪
+        // 仅越狱版执行：巨魔版 .tipa 构建定义了 THEBOOTSTRAP 宏，此处跳过（nxs 是越狱生态常驻 App）。
+#ifndef THEBOOTSTRAP
+        if (gIsDaemonMode) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3.0 * NSEC_PER_SEC)),
+                           dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                tvnc_launchCompanionAppIfNeeded();
+            });
+        }
+#endif
 
         // Auto-unlock after boot: only in daemon mode, enabled by default
         if (gIsDaemonMode && gAutoUnlockEnabled) {
