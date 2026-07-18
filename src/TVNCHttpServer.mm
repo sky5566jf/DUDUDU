@@ -3786,7 +3786,7 @@ static void wsSendTextFrameMasked(int sock, NSString *text) {
     uint8_t mask[4];
     wsGenerateMaskKey(mask);
     [frame appendBytes:mask length:4];
-    const uint8_t *src = payload.bytes;
+    const uint8_t *src = (const uint8_t *)payload.bytes;
     uint8_t *out = (uint8_t *)malloc(len ? len : 1);
     for (NSUInteger i = 0; i < len; i++) out[i] = src[i] ^ mask[i % 4];
     [frame appendBytes:out length:len];
