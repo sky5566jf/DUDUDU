@@ -29,11 +29,10 @@ function genDeviceId() { return `device_${nextDeviceId++}`; }
 // ── Helpers ──────────────────────────────────────────
 
 function broadcastTo(wsSet, msg, excludeWs) {
-  const frame = encodeWebSocketTextFrame(msg);
   for (const ws of wsSet) {
     if (ws === excludeWs) continue;
     if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(frame); } catch (e) { /* ignore */ }
+      try { ws.send(msg); } catch (e) { /* ignore */ }
     }
   }
 }
@@ -46,7 +45,16 @@ function broadcastToAllPhones(msg) {
   const all = new Set([...masters.keys(), ...slaves.keys()]);
   for (const ws of all) {
     if (ws.readyState === WebSocket.OPEN) {
-      try { ws.send(encodeWebSocketTextFrame(msg)); } catch (e) { /* ignore */ }
+      try { ws.send(msg); } catch (e) { /* ignore */ }
+    }
+  }
+}
+
+// 定向：仅发给指定 deviceId 的手机（用于控制单台设备）
+function sendToDevice(deviceId, msg) {
+  for (const [ws, info] of [...masters, ...slaves]) {
+    if (info.deviceId === deviceId && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(msg); } catch (e) { /* ignore */ }
     }
   }
 }
@@ -286,33 +294,21 @@ wss.on('connection', (ws, req) => {
       console.log(`[Relay] WARNING: Multiple masters detected.`);
     }
     masters.set(ws, { deviceId, ip, role });
-    try {
-      ws.send(JSON.stringify({ type: 'welcome', role: 'master', slaves: slaves.size }), (err) => {
-        if (err) console.log(`[Relay] welcome send error (master):`, err.message);
-      });
-    } catch (e) {
-      console.log(`[Relay] welcome send exception (master):`, e.message);
-    }
+    ws._relayRole = role; ws._relayDeviceId = deviceId;
+    // NOTE: do NOT send() immediately on connection — the iOS daemon's
+    // hand-rolled WS client reads the 101 response only up to \r\n\r\n and
+    // would swallow the first bytes of any frame sent in the same TCP segment,
+    // corrupting frame alignment (observed as code=1006 on connect).
   } else if (role === 'slave') {
     slaves.set(ws, { deviceId, ip, role });
-    try {
-      ws.send(JSON.stringify({ type: 'welcome', role: 'slave', masterConnected: masters.size > 0 }), (err) => {
-        if (err) console.log(`[Relay] welcome send error (slave):`, err.message);
-      });
-    } catch (e) {
-      console.log(`[Relay] welcome send exception (slave):`, e.message);
-    }
-    // Notify master about new slave
-    broadcastTo(masters.keys(), JSON.stringify({ type: 'slave_join', deviceId, ip }), ws);
+    ws._relayRole = role; ws._relayDeviceId = deviceId;
+    // (event notifications to phones removed: the iOS daemon's hand-rolled
+    // WS client breaks the connection when it receives frames other than
+    // touch/key/ping; the browser console uses qkurl.txt for the device
+    // list and does not consume these events anyway.)
   } else if (role === 'browser') {
     browsers.add(ws);
-    try {
-      ws.send(JSON.stringify({ type: 'welcome', role: 'browser' }), (err) => {
-        if (err) console.log(`[Relay] welcome send error (browser):`, err.message);
-      });
-    } catch (e) {
-      console.log(`[Relay] welcome send exception (browser):`, e.message);
-    }
+    ws._relayRole = role; ws._relayDeviceId = deviceId;
   } else {
     try {
       ws.send(JSON.stringify({ error: 'Unknown role. Use /ws/master/xxx or /ws/slave/xxx' }), (err) => {
@@ -349,10 +345,20 @@ wss.on('connection', (ws, req) => {
       broadcastToSlaves(eventStr);
       console.log(`[Relay] real_touch → ${slaves.size} slaves`);
     } else if (msg.type === 'touch' || msg.type === 'key') {
-      // From browser (or any client): broadcast to ALL phones
       const eventStr = JSON.stringify(msg);
-      broadcastToAllPhones(eventStr);
-      console.log(`[Relay] ${msg.type} → ${masters.size + slaves.size} phones`);
+      // 定向单台：targetDeviceId 指定时只发该设备
+      if (msg.targetDeviceId) {
+        sendToDevice(msg.targetDeviceId, eventStr);
+        console.log(`[Relay] ${msg.type} → device ${msg.targetDeviceId}`);
+      } else if (msg.scope === 'slaves') {
+        // 仅镜像到从控
+        broadcastToSlaves(eventStr);
+        console.log(`[Relay] ${msg.type} → ${slaves.size} slaves`);
+      } else {
+        // 默认：广播到所有手机（控主控 → 镜像所有从控）
+        broadcastToAllPhones(eventStr);
+        console.log(`[Relay] ${msg.type} → ${masters.size + slaves.size} phones`);
+      }
     } else if (msg.type === 'register') {
       console.log(`[Relay] register: ${deviceId} role=${msg.role}`);
     } else {
@@ -368,10 +374,8 @@ wss.on('connection', (ws, req) => {
 
     if (role === 'master') {
       masters.delete(ws);
-      broadcastToSlaves(JSON.stringify({ type: 'master_disconnected' }));
     } else if (role === 'slave') {
       slaves.delete(ws);
-      broadcastTo(masters.keys(), JSON.stringify({ type: 'slave_leave', deviceId }), null);
     } else if (role === 'browser') {
       browsers.delete(ws);
     }

@@ -2,6 +2,16 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.21] – 2026-07-18
+
+### Fixed（群控中继模式 iOS 客户端 WebSocket 帧 MASK 合规）
+- **根因**：iOS 手写 WS 客户端（`connectToRelay` + `wsSendTextFrame` + pong）发出的帧未设 MASK 位，违反 RFC6455（客户端→服务器帧必须掩码），Node `ws` 库严格校验 → 拒收 `Invalid WebSocket frame: MASK must be set` → 1006 断连。手机一回 pong / 发 touch 即被踢，群控控制链路（电脑→中继→手机）无法建立。
+- **修复**：`src/TVNCHttpServer.mm` 新增 `wsGenerateMaskKey` + `wsSendTextFrameMasked`（置 MASK 位 0x80、生成 4 字节随机掩码键、payload 按 `byte ^ mask[i%4]` 掩码）。`reportRealTouchToRelay` 与 `sendRelayMessage:` 两处 relay 上行改用掩码变体；客户端 pong 回复亦走掩码帧。`wsReadFrame` 已支持读取对端 MASK 帧。P2P 直连模式（手机作 WS 服务端下发）仍用未掩码 `wsSendTextFrame`，方向正确。
+- **配套（中继端，已先行部署）**：`group-control/relay-server.js` 修复双层帧（`ws.send(msg)` 而非 `ws.send(encodeWebSocketTextFrame(msg))`），并定稿定向/镜像路由——`targetDeviceId` 定向单台、`scope==='slaves'` 仅从控、默认全广播。`group-control/pc_group_control.html` 跨屏弹窗 `outOpts` 对齐（主控→scope=all 镜像所有手机，从控→targetDeviceId=本机）；`discoverDevicesFromRelay` 轮询 `/api/status` 自动建设备列表，甩掉手填 `qkurl.txt`。路由测试 `test_relay_routing.js` 全绿。
+
+### 质量护栏（防护升级）
+- 群控控制链路（电脑中继 + 卡片墙 + 双击跨屏 + 主控镜像从控）端到端就绪，支持上百台设备规模。
+
 ## [4.20] – 2026-07-18
 
 ### Fixed（巨魔版 TrollStore 自动安装 —— 真因修复）

@@ -3718,6 +3718,15 @@ static NSString *wsCalculateAccept(NSString *key) {
     return base64;
 }
 
+// 生成 4 字节随机掩码键（RFC6455：客户端→服务器帧必须掩码）
+static void wsGenerateMaskKey(uint8_t *key) {
+    uint32_t r = arc4random();
+    key[0] = (uint8_t)(r & 0xFF);
+    key[1] = (uint8_t)((r >> 8) & 0xFF);
+    key[2] = (uint8_t)((r >> 16) & 0xFF);
+    key[3] = (uint8_t)((r >> 24) & 0xFF);
+}
+
 // 发送 WebSocket 文本帧
 static void wsSendTextFrame(int sock, NSString *text) {
     if (sock < 0 || !text) return;
@@ -3745,6 +3754,43 @@ static void wsSendTextFrame(int sock, NSString *text) {
     }
     
     [frame appendData:payload];
+    send(sock, frame.bytes, frame.length, 0);
+}
+
+// 发送已掩码的 WebSocket 文本帧（客户端→服务器合规：RFC6455 强制掩码）
+static void wsSendTextFrameMasked(int sock, NSString *text) {
+    if (sock < 0 || !text) return;
+
+    NSData *payload = [text dataUsingEncoding:NSUTF8StringEncoding];
+    NSUInteger len = payload.length;
+    if (len > 1024 * 1024) return;
+
+    NSMutableData *frame = [NSMutableData data];
+    uint8_t b0 = 0x81; // FIN + text
+    uint8_t b1 = 0x80; // MASK bit
+    if (len <= 125) {
+        [frame appendBytes:&b0 length:1];
+        uint8_t hl = (uint8_t)len; b1 |= hl;
+        [frame appendBytes:&b1 length:1];
+    } else if (len <= 65535) {
+        [frame appendBytes:&b0 length:1];
+        b1 |= 126; [frame appendBytes:&b1 length:1];
+        uint16_t nlen = htons((uint16_t)len);
+        [frame appendBytes:&nlen length:2];
+    } else {
+        [frame appendBytes:&b0 length:1];
+        b1 |= 127; [frame appendBytes:&b1 length:1];
+        uint64_t nlen = ws_htonll(len);
+        [frame appendBytes:&nlen length:8];
+    }
+    uint8_t mask[4];
+    wsGenerateMaskKey(mask);
+    [frame appendBytes:mask length:4];
+    const uint8_t *src = payload.bytes;
+    uint8_t *out = (uint8_t *)malloc(len ? len : 1);
+    for (NSUInteger i = 0; i < len; i++) out[i] = src[i] ^ mask[i % 4];
+    [frame appendBytes:out length:len];
+    free(out);
     send(sock, frame.bytes, frame.length, 0);
 }
 
@@ -3800,9 +3846,13 @@ static NSString *wsReadFrame(int sock) {
     
     // 处理 ping 帧
     if (opcode == 0x09) {
-        // 自动回复 pong
-        uint8_t pong[2] = {0x8A, 0x00};
-        send(sock, pong, 2, 0);
+        // 自动回复 pong（客户端→服务器必须掩码，RFC6455）
+        uint8_t pongFrame[6];
+        pongFrame[0] = 0x8A; // FIN + pong opcode
+        pongFrame[1] = 0x80; // MASK bit, payload length 0
+        uint8_t mk[4]; wsGenerateMaskKey(mk);
+        memcpy(pongFrame + 2, mk, 4);
+        send(sock, pongFrame, 6, 0);
         return @"__WS_PING__";
     }
     
@@ -4422,13 +4472,13 @@ static NSString *wsReadFrame(int sock) {
     if (!jsonData) return;
 
     NSString *jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
-    wsSendTextFrame(_relaySocket, jsonStr);
+    wsSendTextFrameMasked(_relaySocket, jsonStr);
 }
 
 // 通过中继 WebSocket 发送文本消息（供 trollvncserver.mm 调用）
 - (void)sendRelayMessage:(NSString *)text {
     if (!_relayConnected || _relaySocket < 0) return;
-    wsSendTextFrame(_relaySocket, text);
+    wsSendTextFrameMasked(_relaySocket, text);
 }
 
 // 从控模式：持续接收电脑中继服务器的 WebSocket 事件

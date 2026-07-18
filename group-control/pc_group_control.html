@@ -649,6 +649,52 @@ function parseQkurl(text) {
   // 不再这里启动截图，等中继 WS 连接成功后再启动（connectRelayWS 的 onopen 里会调用）
 }
 
+// ==================== 中继自动发现设备（上百台规模免维护 qkurl.txt）====================
+var relayDiscoverTimer = null;
+
+function discoverDevicesFromRelay() {
+  if (!relayIp) return;
+  fetch('http://' + relayIp + ':9527/api/status', { signal: AbortSignal.timeout(5000) })
+    .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(function(st) {
+      var list = [];
+      (st.masters || []).forEach(function(m) { list.push({ deviceId: m.deviceId, ip: m.ip, role: 'master' }); });
+      (st.slaves || []).forEach(function(s) { list.push({ deviceId: s.deviceId, ip: s.ip, role: 'slave' }); });
+      mergeRelayDevices(list);
+    })
+    .catch(function(e) { log('中继设备发现失败: ' + e.message, 'err'); });
+}
+
+function mergeRelayDevices(list) {
+  if (!list.length) return;
+  list.forEach(function(rd) {
+    if (!rd.deviceId) return;
+    var existing = devices.find(function(d) { return d.deviceId === rd.deviceId; });
+    if (existing) {
+      existing.ip = rd.ip;
+      existing.role = rd.role;
+      existing.relayConnected = true;
+      existing.online = true;
+    } else {
+      devices.push({
+        id: rd.deviceId,
+        name: rd.deviceId.slice(0, 8),
+        ip: rd.ip,
+        platform: 'iOS',
+        deviceId: rd.deviceId,
+        systemVersion: '',
+        alias: '',
+        role: rd.role,
+        online: true,
+        relayConnected: true
+      });
+    }
+  });
+  renderScreens();
+  updateTopInfo();
+  refreshAllDeviceNames();
+}
+
 // ==================== Toast 提示 ====================
 var toastTimer;
 function toast(msg, type) {
@@ -824,6 +870,10 @@ function connectRelayWS() {
 
     // 启动截图（走中继代理）
     startScreensOnly();
+    // 从中继自动发现设备（上百台规模免维护 qkurl.txt）
+    discoverDevicesFromRelay();
+    if (relayDiscoverTimer) clearInterval(relayDiscoverTimer);
+    relayDiscoverTimer = setInterval(discoverDevicesFromRelay, 10000);
     // 拉取各设备真实名称（替换扫码时的占位名）
     refreshAllDeviceNames();
   };
@@ -1488,6 +1538,8 @@ function generatePopOutHtml(dev) {
   h.push('var masterBtn=document.getElementById("masterBtn");');
   h.push('var relayBtn=document.getElementById("relayBtn");');
   h.push('var curQuality=' + pq.quality + ',curScale=' + pq.scale + ';');
+  // 出参定向：主控→镜像所有手机(scope=all)，从控→仅本机(targetDeviceId)
+  h.push('function outOpts(base){if(isMaster){base.scope="all";}else{base.targetDeviceId=DEVICE_ID;}return base;}');
 
   // 截图 URL — 走中继
   h.push('function getScreenshotUrl(){');
@@ -1536,7 +1588,8 @@ function generatePopOutHtml(dev) {
   // WS 连接中继
   h.push('function connectRelayWS(){');
   h.push('  if(!RELAY_IP)return;');
-  h.push('  var url="ws://"+RELAY_IP+":8183?role=browser";');
+  h.push('  var rtk=(window.opener&&window.opener.localStorage)?window.opener.localStorage.getItem("tvnc_relay_token"):"";');
+  h.push('  var url="ws://"+RELAY_IP+":8183?role=browser"+(rtk?("&token="+encodeURIComponent(rtk)):"");');
   h.push('  try{ws=new WebSocket(url);}catch(e){return;}');
   h.push('  ws.onopen=function(){console.log("[PopOut] WS connected to relay "+RELAY_IP);};');
   h.push('  ws.onmessage=function(){};');
@@ -1611,13 +1664,13 @@ function generatePopOutHtml(dev) {
   h.push('  lastNX=nx;lastNY=ny;var rx=1-ny,ry=nx;var now=Date.now();');
   h.push('  if(action==="move"){if(now-lastMoveTime<MOVE_THROTTLE){pendingMove={x:rx,y:ry};return;}lastMoveTime=now;pendingMove=null;}');
   h.push('  if(ws&&ws.readyState===1){');
-  h.push('    ws.send(JSON.stringify({type:"touch",action:action,x:+rx.toFixed(4),y:+ry.toFixed(4)}));');
+  h.push('    ws.send(JSON.stringify(outOpts({type:"touch",action:action,x:+rx.toFixed(4),y:+ry.toFixed(4)})));');
   h.push('  }else{');
   h.push('    fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"touch",action:action,x:+rx.toFixed(4),y:+ry.toFixed(4)}),signal:AbortSignal.timeout(2000)}).catch(function(){});');
   h.push('  }');
   h.push('}');
   h.push('function flushMove(){');
-  h.push('  if(pendingMove){if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)}));}else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)}),signal:AbortSignal.timeout(2000)}).catch(function(){});}pendingMove=null;}');
+  h.push('  if(pendingMove){if(ws&&ws.readyState===1){ws.send(JSON.stringify(outOpts({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)})));}else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"touch",action:"move",x:+pendingMove.x.toFixed(4),y:+pendingMove.y.toFixed(4)}),signal:AbortSignal.timeout(2000)}).catch(function(){});}pendingMove=null;}');
   h.push('  if(moveFlushTimer){clearTimeout(moveFlushTimer);moveFlushTimer=null;}');
   h.push('}');
   h.push('function ensureFlush(){if(pendingMove&&!moveFlushTimer){moveFlushTimer=setTimeout(function(){moveFlushTimer=null;flushMove();},MOVE_THROTTLE);}}');
@@ -1634,11 +1687,11 @@ function generatePopOutHtml(dev) {
 
   // Home 键
   h.push('function sendHome(){');
-  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key","action":"home_up"}));},50);}');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(outOpts({type:"key",action:"home_up"})));},50);}');
   h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);}');
   h.push('}');
   h.push('function sendDoubleHome(){');
-  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_down"}));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);},100);}');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);},100);}');
   h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},100);},150);}');
   h.push('}');
 
