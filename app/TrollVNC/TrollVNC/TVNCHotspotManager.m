@@ -138,8 +138,8 @@ static void ReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkReach
         [self executeAutoStartupTaskIfNecessary];
     }
 
-    NEHotspotHelperResponse *response = [command createResponse:kNEHotspotHelperResultFailure];
-    [command respond:response];
+    NEHotspotHelperResponse *response = [NEHotspotHelperResponse createResponse:kNEHotspotHelperResultFailure];
+    [command executeWithResponse:response];
 }
 
 - (void)executeAutoStartupTaskIfNecessary {
