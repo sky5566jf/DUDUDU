@@ -81,6 +81,15 @@ static void mSignalAction(int signal, struct __siginfo *info, void *context) {
 static void mSignalHandler(int signal) {
     fprintf(stderr, "signal %d received\n", signal);
 
+#ifdef THEBOOTSTRAP
+    // Resident supervisor (TrollStore): ignore lifecycle signals so that the App closing
+    // (which delivers SIGTERM/SIGHUP to this process) does not terminate the supervisor.
+    // If the supervisor died, it would stop supervising the server and the service would
+    // go down. Binary deletion (vnode monitor) is the only thing that stops us.
+    fprintf(stderr, "[resident] ignoring signal %d (TrollStore resident mode)\n", signal);
+    return;
+#endif
+
     /* Terminate itself */
     if (signal == SIGHUP || signal == SIGINT) {
         CFRunLoopStop(CFRunLoopGetMain());
@@ -195,6 +204,14 @@ int main(int argc, const char *argv[]) {
         fprintf(stderr, "This program must be run from an absolute path\n");
         return EXIT_FAILURE;
     }
+
+#ifdef THEBOOTSTRAP
+    // Detach from the App's process group/session so that terminating the App (and any
+    // signals sent to its process group) does not affect this supervisor. The kernel
+    // reparents us to launchd; we keep supervising the server resident. See also
+    // mSignalHandler (resident mode) and the server's monitorParentProcess.
+    setsid(); // best-effort; ignores EPERM if already a session leader
+#endif
 
     /* Singleton */
     monitorSelfAndRestartIfVnodeDeleted(argv[0]);

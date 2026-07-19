@@ -5511,6 +5511,14 @@ static void handleSignal(int signum) {
     (void)signum;
     TVLog(@"Signal %d received", signum);
 
+#ifdef THEBOOTSTRAP
+    // Resident daemon (TrollStore): do NOT terminate on SIGINT/SIGTERM. The service must
+    // survive the App's lifecycle; only binary deletion (vnode monitor in ensureSingleton)
+    // stops it. Without this, a SIGTERM delivered when the App closes would still kill us.
+    TVLog(@"[resident] ignoring signal %d (TrollStore resident mode)", signum);
+    return;
+#endif
+
     // Best-effort: stop runloop to unwind main and allow cleanup.
     CFRunLoopStop(CFRunLoopGetMain());
 }
@@ -5703,23 +5711,20 @@ static void monitorParentProcess(void) {
         return;
     }
 
-    static dispatch_source_t source =
-        dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, ppid, DISPATCH_PROC_EXIT | DISPATCH_PROC_SIGNAL,
-                               dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0));
-
-    dispatch_source_set_event_handler(source, ^{
-        if (dispatch_source_get_data(source) & DISPATCH_PROC_EXIT) {
-            dispatch_source_cancel(source);
-            TVPrintError("Parent process %d exited", ppid);
-            exit(EXIT_SUCCESS);
-        } else if (kill(ppid, 0) == -1 && errno == ESRCH) {
-            dispatch_source_cancel(source);
-            TVPrintError("Parent process %d is gone", ppid);
-            exit(EXIT_SUCCESS);
-        }
-    });
-
-    dispatch_resume(source);
+    // Option A — resident daemon (TrollStore / bootstrap build):
+    // The VNC service must remain running regardless of the App's lifecycle. The previous
+    // implementation installed a DISPATCH_SOURCE_TYPE_PROC monitor and called
+    // exit(EXIT_SUCCESS) the instant the parent (App or manager) process exited. That
+    // terminated the entire service whenever the user closed the app — the "服务又崩了"
+    // symptom. We now DETACH instead of dying:
+    //   * setsid() moves us into our own session/process group, so we leave the parent's
+    //     process group and stop receiving its lifecycle signals (SIGTERM/SIGHUP/...).
+    //   * We never exit on parent death. The kernel reparents us to launchd automatically,
+    //     so 8182/5901 keep serving until the binary itself is deleted/updated.
+    // The manager (trollvncmanager) is similarly hardened to ignore lifecycle signals, so
+    // the supervisor also stays up and keeps restarting us on crash (KeepAlive).
+    setsid(); // best-effort; ignores EPERM if already a session leader
+    TVLog(@"[resident] detached from parent process %d; VNC service runs resident", ppid);
 }
 
 static void monitorSelfAndRestartIfVnodeDeleted(const char *executable) {
