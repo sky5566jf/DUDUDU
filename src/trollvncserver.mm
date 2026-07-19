@@ -2076,16 +2076,13 @@ static void performResizeFramebufferForRotation(void);
 // Track encode life-cycle to provide backpressure via inflight counter
 static void displayHook(rfbClientPtr cl) {
     (void)cl;
-    // Apply any pending framebuffer resize on the SEND thread (serialized with encodes),
-    // never on the capture thread, to avoid freeing a buffer mid-encode (heap corruption /
-    // v4.22 free-bomb crash). performResizeFramebufferForRotation() runs under gFbStateMutex
-    // so it cannot race the capture thread writing gBackBuffer either.
-    if (gPendingResize) {
-        pthread_mutex_lock(&gFbStateMutex);
-        performResizeFramebufferForRotation();
-        gPendingResize = NO;
-        pthread_mutex_unlock(&gFbStateMutex);
-    }
+    // The framebuffer resize (free+swap) is performed on a dedicated serial dispatch
+    // queue (see maybeResizeFramebufferForRotation), NOT on the send thread. Doing it
+    // here would take gFbStateMutex while already holding cl->sendMutex (displayHook runs
+    // inside rfbSendFramebufferUpdate), inverting the lock order against the capture thread
+    // (gFbStateMutex -> sendMutex) and deadlocking the daemon — frozen frames show as a
+    // black noVNC. The queue takes only gFbStateMutex (then rfbNewFramebuffer's internal
+    // sendMutex), preserving a single consistent lock order across all threads.
     gInflight.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -2148,6 +2145,19 @@ static inline void lockAllClientsBlocking(void);
 static inline void unlockAllClientsBlocking(void);
 static void performResizeFramebufferForRotation(void);
 
+// Dedicated serial queue for framebuffer resize (free+swap). Running it here (off both
+// the capture thread and the libvncserver send thread) is what makes the resize deadlock-
+// free: it never holds a client sendMutex when it needs gFbStateMutex, so the global lock
+// order stays gFbStateMutex -> sendMutex everywhere (no AB/BA with the capture/send threads).
+static dispatch_queue_t tvGetResizeQueue(void) {
+    static dispatch_queue_t q = NULL;
+    static dispatch_once_t once = 0;
+    dispatch_once(&once, ^{
+        q = dispatch_queue_create("com.matisu.vnc.resize", DISPATCH_QUEUE_SERIAL);
+    });
+    return q;
+}
+
 NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
     // Source capture size (portrait-orientated)
     int srcW = gSrcWidth;
@@ -2178,11 +2188,13 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
     // daemon crash (SIGABRT) seen on devices with a connected VNC client during a
     // rotation (e.g. .41).
     //   * With a client connected: the send thread is actively encoding, so we only record
-    //     the desired geometry (gPendingResize=YES) and let displayHook perform the free+swap
-    //     on the SEND thread (where no encode is in flight), eliminating the race.
+    //     the desired geometry (gPendingResize=YES) and dispatch the free+swap to the dedicated
+    //     resize queue (tvGetResizeQueue). The queue takes only gFbStateMutex (then rfbNew-
+    //     Framebuffer's internal sendMutex), so it never inverts the lock order against the
+    //     capture thread — eliminating BOTH the v4.22 UAF and the v4.24 deadlock.
     //   * With NO client connected: there is no concurrent encode, so resizing directly here
-    //     (under gFbStateMutex for consistency) is safe and keeps the framebuffer correctly
-    //     sized for the screenshot API even when nobody is viewing.
+    //     is safe and keeps the framebuffer correctly sized for the screenshot API even when
+    //     nobody is viewing.
     // The capture thread keeps rendering into the *current* (old-size) back buffer until the
     // resize lands; the render path scales the source to gWidth x gHeight, so there is no
     // overflow during the one deferred frame.
@@ -2190,26 +2202,53 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
     gPendingResizeH = outH;
 
     if (gClientCount > 0) {
-        gPendingResize = YES;
+        // A VNC client is connected and actively encoding, so we must NOT resize here on
+        // the capture thread. Defer the free+swap to the dedicated resize queue (which holds
+        // no client sendMutex), avoiding both the v4.22 UAF (rfbNewFramebuffer frees the old
+        // buffer under a client mid-encode) and the v4.24 deadlock (send-thread resize took
+        // gFbStateMutex under sendMutex). Only dispatch once per geometry change.
+        if (!gPendingResize) {
+            gPendingResize = YES;
+            dispatch_async(tvGetResizeQueue(), ^{
+                performResizeFramebufferForRotation();
+            });
+        }
     } else {
-        pthread_mutex_lock(&gFbStateMutex);
+        // No client connected => no concurrent encode => safe to resize directly here.
         performResizeFramebufferForRotation();
-        pthread_mutex_unlock(&gFbStateMutex);
         gPendingResize = NO;
     }
 }
 
-// Performed ONLY on the libvncserver SEND thread (from displayHook), under gFbStateMutex,
-// so it can never run concurrently with rfbSendFramebufferUpdate (which reads frameBuffer)
-// nor with the capture thread writing gBackBuffer. This is the actual free+swap that the
-// capture thread used to do unsafely. See maybeResizeFramebufferForRotation() above.
+// Performed on the dedicated resize queue (tvGetResizeQueue) when a client is connected,
+// or directly on the capture thread when no client is connected. Runs under gFbStateMutex
+// (see TvResizeLockGuard below) so it can never race the capture thread writing gBackBuffer.
+// rfbNewFramebuffer() internally locks each client's sendMutex before freeing the old front
+// buffer, so no client is mid-encode during the free (prevents the v4.22 UAF). Because the
+// queue holds no client sendMutex when it takes gFbStateMutex, the global lock order stays
+// gFbStateMutex -> sendMutex on every thread, so there is no AB/BA deadlock (the v4.24
+// regression). See maybeResizeFramebufferForRotation() above.
 static void performResizeFramebufferForRotation(void) {
     int outW = gPendingResizeW;
     int outH = gPendingResizeH;
     if (outW <= 0 || outH <= 0)
         return;
-    if (outW == gWidth && outH == gHeight)
+    if (outW == gWidth && outH == gHeight) {
+        gPendingResize = NO; // geometry already current; clear the deferred flag
         return;
+    }
+
+    // Serialize the free+swap against the capture thread's render-into-back-buffer
+    // (handleFramebuffer, which holds gFbStateMutex across its work). This is the ONLY
+    // lock we take here. rfbNewFramebuffer() below internally locks each client's
+    // sendMutex (under this lock) so no client is mid-encode while the old front buffer
+    // is freed — that is what prevents the v4.22 UAF heap corruption. The global lock
+    // order stays gFbStateMutex -> sendMutex on every thread, so there is no AB/BA
+    // deadlock (the v4.24 regression that froze noVNC black).
+    struct TvResizeLockGuard {
+        TvResizeLockGuard() { pthread_mutex_lock(&gFbStateMutex); }
+        ~TvResizeLockGuard() { pthread_mutex_unlock(&gFbStateMutex); }
+    } _tvResizeLock;
 
     size_t newFBSize = (size_t)outW * (size_t)outH * (size_t)gBytesPerPixel;
     void *newFront = calloc(1, newFBSize);
@@ -2223,9 +2262,8 @@ static void performResizeFramebufferForRotation(void) {
     void *oldBack = gBackBuffer;
 
     if (gScreen) {
-        // Update server with new framebuffer (this frees the old front buffer). Safe here
-        // because displayHook runs on the send thread BEFORE rfbSendFramebufferUpdate, so no
-        // encode is in progress on this buffer.
+        // Update server with new framebuffer (this frees the old front buffer under the
+        // client sendMutex locks taken inside rfbNewFramebuffer, so no client is mid-encode).
         rfbNewFramebuffer(gScreen, (char *)newFront, outW, outH, 8, 3, gBytesPerPixel);
         // Restore BGRA little-endian channel layout (R shift=16, G=8, B=0)
         gScreen->serverFormat.redShift = 16;
@@ -2263,7 +2301,8 @@ static void performResizeFramebufferForRotation(void) {
     if (gScreen == NULL && oldFront)
         free(oldFront);
 
-    TVLog(@"Resize (deferred to send thread): framebuffer now %dx%d", gWidth, gHeight);
+    gPendingResize = NO; // resize applied; allow a future geometry change to dispatch again
+    TVLog(@"Resize: framebuffer now %dx%d", gWidth, gHeight);
 }
 
 // Ensure scratch buffer for rotation is available and large enough
