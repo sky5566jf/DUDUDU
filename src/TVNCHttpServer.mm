@@ -1192,7 +1192,22 @@ static NSUserDefaults *TVNCGetDefaults(void) {
             imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
         }
     }
-    
+
+    // 群控兜底：UIKit 截图失败（App 后台/锁屏/无前台窗口）时，回退到 VNC 帧缓冲。
+    // 帧缓冲由 daemon 的 VNC 服务持续维护，与 App 前台态解耦，后台也能拿到上一帧，
+    // 避免群控卡片因 500 空响应而长期黑/空。成功路径不变，仅失败时走兜底，零回归。
+    if (!imageData && [[TVNCApiManager sharedManager] isFramebufferAvailable]) {
+        imageData = [[TVNCApiManager sharedManager]
+            captureScreenshotFromFramebufferWithFormat:format
+                                               quality:quality
+                                                 scale:scale
+                                                  maxW:0
+                                                  maxH:0];
+        if (imageData) {
+            TVLog(@"[screenshot] UIKit 失败，已回退 VNC 帧缓冲兜底");
+        }
+    }
+
     if (imageData) {
         response.statusCode = 200;
         response.contentType = [format isEqualToString:@"png"] ? @"image/png" : @"image/jpeg";
