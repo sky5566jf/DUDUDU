@@ -2122,6 +2122,41 @@ static BOOL tvncIsAllASCII(NSString *text) {
     }
 }
 
+// 关闭设备（关机/断电）
+- (BOOL)shutdownDevice {
+    @try {
+        TVLog(@"Attempting to shut down device...");
+
+#ifdef HAS_ROOT_SUPPORT
+        // 方法1（首选）：用 spawnRoot 以 root persona 执行 /usr/bin/powerctl shutdown
+        // 这是真正断电关机的最可靠方式（参考 reboot 的 spawnRoot 实现）
+        TVLog(@"Trying spawnRoot(\"/usr/bin/powerctl\", shutdown)...");
+        int exitCode = spawnRoot(@"/usr/bin/powerctl", @[@"shutdown"]);
+        TVLog(@"spawnRoot(powerctl shutdown) exitCode: %d", exitCode);
+        if (exitCode == 0) {
+            return YES;
+        }
+
+        // 方法2（备选）：/sbin/poweroff
+        TVLog(@"Trying spawnRoot(\"/sbin/poweroff\")...");
+        exitCode = spawnRoot(@"/sbin/poweroff", nil);
+        TVLog(@"spawnRoot(/sbin/poweroff) exitCode: %d", exitCode);
+        if (exitCode == 0) {
+            return YES;
+        }
+#endif
+
+        // 方法3（fallback）：notify_post 请求关机
+        int ret = notify_post("com.apple.shutdown.poweroff");
+        TVLog(@"notify_post(com.apple.shutdown.poweroff) returned: %d", ret);
+        notify_post("com.apple.system.powermanagement.shutdownRequested");
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Shutdown failed: %@", exception.reason);
+        return NO;
+    }
+}
+
 // 使用 sysctl 枚举进程并发送信号
 - (void)killall:(NSString *)processName {
     int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};

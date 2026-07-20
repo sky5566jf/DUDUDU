@@ -39,6 +39,18 @@
 			<true/>
 		</dict>
 
+		<!-- Shutdown Device -->
+		<dict>
+			<key>cell</key>
+			<string>PSButtonCell</string>
+			<key>label</key>
+			<string>设备关机</string>
+			<key>action</key>
+			<string>shutdownDevice:</string>
+			<key>isDestructive</key>
+			<true/>
+		</dict>
+
 		<!-- Device Info -->
 		<dict>
 			<key>cell</key>

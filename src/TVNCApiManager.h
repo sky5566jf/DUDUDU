@@ -236,6 +236,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)rebootDevice;
 
 /**
+ * 关闭设备（关机/断电）
+ * @return 是否成功发起关机（注意：关机后无法返回结果）
+ */
+- (BOOL)shutdownDevice;
+
+/**
  * 注销当前用户（Respring）
  * @return 是否成功发起注销
  */

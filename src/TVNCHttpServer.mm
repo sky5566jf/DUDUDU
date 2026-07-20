@@ -587,134 +587,77 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         return [self handleWebDAV:method path:path query:query body:body headers:headers];
     }
     
-    // API 路由处理
-    if ([path isEqualToString:@"/api/screenshot"]) {
-        return [self handleScreenshot:query];
-    } else if ([path isEqualToString:@"/api/screenshot/fast"]) {
-        return [self handleScreenshotFast:query];
-    } else if ([path isEqualToString:@"/api/stream.mjpeg"]) {
-        return [self handleStreamMjpeg:query];
-    } else if ([path isEqualToString:@"/api/writefile_text"]) {
-        return [self handleWriteFileText:query body:body];
-    } else if ([path isEqualToString:@"/api/clipboard"]) {
-        if ([method isEqualToString:@"GET"]) {
-            return [self handleClipboardGet:query];
-        } else {
-            return [self handleClipboard:query body:body];
+    // API 路由处理（数据驱动路由表）
+    // 维护提示：新增/删除 API 时，务必同步 (1) 下方路由表 (2) tvncRouteRegistry（决定 /api/endpoints 文档）
+    // 路由表每次请求重建，避免 block 捕获首调用的 query/body 导致后续请求拿到过期参数
+    NSArray<NSDictionary *> *routes = @[
+        @{@"path": @"/api/screenshot", @"block": ^TVNCHttpResponse *{ return [self handleScreenshot:query]; }},
+        @{@"path": @"/api/screenshot/fast", @"block": ^TVNCHttpResponse *{ return [self handleScreenshotFast:query]; }},
+        @{@"path": @"/api/stream.mjpeg", @"block": ^TVNCHttpResponse *{ return [self handleStreamMjpeg:query]; }},
+        @{@"path": @"/api/writefile_text", @"block": ^TVNCHttpResponse *{ return [self handleWriteFileText:query body:body]; }},
+        @{@"path": @"/api/clipboard", @"block": ^TVNCHttpResponse *{ if ([method isEqualToString:@"GET"]) return [self handleClipboardGet:query]; return [self handleClipboard:query body:body]; }},
+        @{@"path": @"/api/clipboard_text", @"block": ^TVNCHttpResponse *{ if ([method isEqualToString:@"GET"]) return [self handleClipboardTextGet:query]; return [self handleClipboardText:query body:body]; }},
+        @{@"path": @"/api/input", @"block": ^TVNCHttpResponse *{ return [self handleInput:query body:body]; }},
+        @{@"path": @"/api/key", @"block": ^TVNCHttpResponse *{ return [self handleKey:query]; }},
+        @{@"path": @"/api/clients", @"block": ^TVNCHttpResponse *{ return [self handleClients]; }},
+        @{@"path": @"/api/status", @"block": ^TVNCHttpResponse *{ return [self handleStatus]; }},
+        @{@"path": @"/api/device", @"block": ^TVNCHttpResponse *{ return [self handleDeviceInfo:query clientAddr:clientAddr]; }},
+        @{@"path": @"/api/checkfile", @"block": ^TVNCHttpResponse *{ return [self handleCheckFile]; }},
+        @{@"path": @"/api/upload", @"block": ^TVNCHttpResponse *{ return [self handleUploadFile:query body:body]; }},
+        @{@"path": @"/api/volume", @"block": ^TVNCHttpResponse *{ return [self handleVolume:query body:body]; }},
+        @{@"path": @"/api/brightness", @"block": ^TVNCHttpResponse *{ return [self handleBrightness:query body:body]; }},
+        @{@"path": @"/api/reboot", @"block": ^TVNCHttpResponse *{ return [self handleReboot]; }},
+        @{@"path": @"/api/shutdown", @"block": ^TVNCHttpResponse *{ return [self handleShutdown]; }},
+        @{@"path": @"/api/respring", @"block": ^TVNCHttpResponse *{ return [self handleRespring]; }},
+        @{@"path": @"/api/screen/lock", @"block": ^TVNCHttpResponse *{ return [self handleScreenLock]; }},
+        @{@"path": @"/api/screen/unlock", @"block": ^TVNCHttpResponse *{ return [self handleScreenUnlock]; }},
+        @{@"path": @"/api/home", @"block": ^TVNCHttpResponse *{ return [self handleHome]; }},
+        @{@"path": @"/api/taskmanager", @"block": ^TVNCHttpResponse *{ return [self handleTaskManager]; }},
+        @{@"path": @"/api/clearapps/smart", @"block": ^TVNCHttpResponse *{ return [self handleClearAppsSmart]; }},
+        @{@"path": @"/api/clearapps/force", @"block": ^TVNCHttpResponse *{ return [self handleClearAppsForce]; }},
+        @{@"path": @"/api/frontmost", @"block": ^TVNCHttpResponse *{ return [self handleFrontmost]; }},
+        @{@"path": @"/api/assistivetouch", @"block": ^TVNCHttpResponse *{ return [self handleAssistiveTouch:query method:method]; }},
+        @{@"path": @"/api/install", @"block": ^TVNCHttpResponse *{ return [self handleInstallApp:query]; }},
+        @{@"path": @"/api/uninstall", @"block": ^TVNCHttpResponse *{ return [self handleUninstallApp:query]; }},
+        @{@"path": @"/api/trollstore/diagnostics", @"block": ^TVNCHttpResponse *{ return [self handleTrollStoreDiagnostics]; }},
+        @{@"path": @"/test", @"block": ^TVNCHttpResponse *{ return [self handleTestInterface]; }},
+        @{@"path": @"/api/filelist", @"block": ^TVNCHttpResponse *{ return [self handleFileList:query]; }},
+        @{@"path": @"/api/readfile", @"block": ^TVNCHttpResponse *{ return [self handleReadFile:query]; }},
+        @{@"path": @"/api/deletefile", @"block": ^TVNCHttpResponse *{ return [self handleDeleteFile:query]; }},
+        @{@"path": @"/api/createfolder", @"block": ^TVNCHttpResponse *{ return [self handleCreateFolder:query]; }},
+        @{@"path": @"/api/webdav/start", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStart:query]; }},
+        @{@"path": @"/api/webdav/stop", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStop]; }},
+        @{@"path": @"/api/webdav/status", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStatus]; }},
+        @{@"path": @"/api/install/tipa", @"block": ^TVNCHttpResponse *{ return [self handleInstallTipa:query]; }},
+        @{@"path": @"/api/install/url", @"block": ^TVNCHttpResponse *{ return [self handleInstallUrl:query]; }},
+        @{@"path": @"/api/install/deb", @"block": ^TVNCHttpResponse *{ return [self handleInstallDeb:query body:body]; }},
+        @{@"path": @"/api/ping", @"block": ^TVNCHttpResponse *{ return [self handlePing]; }},
+        @{@"path": @"/api/plist", @"block": ^TVNCHttpResponse *{ return [self handlePlist:method query:query body:body]; }},
+        @{@"path": @"/api/network/debug", @"block": ^TVNCHttpResponse *{ return [self handleNetworkDebug]; }},
+        @{@"path": @"/api/network/test_helper", @"block": ^TVNCHttpResponse *{ return [self handleNetworkTestHelper]; }},
+        @{@"path": @"/api/network/ip_methods", @"block": ^TVNCHttpResponse *{ return [self handleNetworkIpMethods:query]; }},
+        @{@"path": @"/api/group/start", @"block": ^TVNCHttpResponse *{ return [self handleGroupStart:query]; }},
+        @{@"path": @"/api/group/stop", @"block": ^TVNCHttpResponse *{ return [self handleGroupStop]; }},
+        @{@"path": @"/api/group/status", @"block": ^TVNCHttpResponse *{ return [self handleGroupStatus]; }},
+        @{@"path": @"/api/group/touch", @"block": ^TVNCHttpResponse *{ return [self handleGroupTouch:body]; }},
+        @{@"path": @"/api/group/connect", @"block": ^TVNCHttpResponse *{ return [self handleGroupConnect:query]; }},
+        @{@"path": @"/api/group/disconnect", @"block": ^TVNCHttpResponse *{ return [self handleGroupDisconnect]; }},
+        @{@"path": @"/api/group/relay/start", @"block": ^TVNCHttpResponse *{ return [self handleRelayStart:query]; }},
+        @{@"path": @"/api/group/relay/stop", @"block": ^TVNCHttpResponse *{ return [self handleRelayStop]; }},
+        @{@"path": @"/api/group/slaves", @"block": ^TVNCHttpResponse *{ return [self handleGroupSlaves]; }},
+        @{@"path": @"/api/group/proxy-screenshot", @"block": ^TVNCHttpResponse *{ return [self handleGroupProxyScreenshot:query]; }},
+        @{@"path": @"/api/alert", @"block": ^TVNCHttpResponse *{ return [self handleAlert:query]; }},
+        @{@"path": @"/group-test", @"block": ^TVNCHttpResponse *{ return [self handleGroupTestPage]; }},
+        @{@"path": @"/group-control", @"block": ^TVNCHttpResponse *{ return [self handleGroupControlPage]; }},
+        @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleRoot]; }},
+        @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }}
+    ];
+
+    for (NSDictionary *route in routes) {
+        if ([path isEqualToString:route[@"path"]]) {
+            TVNCHttpResponse *(^block)(void) = (TVNCHttpResponse *(^)(void))route[@"block"];
+            return block();
         }
-    } else if ([path isEqualToString:@"/api/clipboard_text"]) {
-        if ([method isEqualToString:@"GET"]) {
-            return [self handleClipboardTextGet:query];
-        } else {
-            return [self handleClipboardText:query body:body];
-        }
-    } else if ([path isEqualToString:@"/api/input"]) {
-        return [self handleInput:query body:body];
-    } else if ([path isEqualToString:@"/api/key"]) {
-        return [self handleKey:query];
-    } else if ([path isEqualToString:@"/api/clients"]) {
-        return [self handleClients];
-    } else if ([path isEqualToString:@"/api/status"]) {
-        return [self handleStatus];
-    } else if ([path isEqualToString:@"/api/device"]) {
-        return [self handleDeviceInfo:query clientAddr:clientAddr];
-    } else if ([path isEqualToString:@"/api/checkfile"]) {
-        return [self handleCheckFile];
-    } else if ([path isEqualToString:@"/api/upload"]) {
-        return [self handleUploadFile:query body:body];
-    } else if ([path isEqualToString:@"/api/volume"]) {
-        return [self handleVolume:query body:body];
-    } else if ([path isEqualToString:@"/api/brightness"]) {
-        return [self handleBrightness:query body:body];
-    } else if ([path isEqualToString:@"/api/reboot"]) {
-        return [self handleReboot];
-    } else if ([path isEqualToString:@"/api/respring"]) {
-        return [self handleRespring];
-    } else if ([path isEqualToString:@"/api/screen/lock"]) {
-        return [self handleScreenLock];
-    } else if ([path isEqualToString:@"/api/screen/unlock"]) {
-        return [self handleScreenUnlock];
-    } else if ([path isEqualToString:@"/api/home"]) {
-        return [self handleHome];
-    } else if ([path isEqualToString:@"/api/taskmanager"]) {
-        return [self handleTaskManager];
-    } else if ([path isEqualToString:@"/api/clearapps/smart"]) {
-        return [self handleClearAppsSmart];
-    } else if ([path isEqualToString:@"/api/clearapps/force"]) {
-        return [self handleClearAppsForce];
-    } else if ([path isEqualToString:@"/api/frontmost"]) {
-        return [self handleFrontmost];
-    } else if ([path isEqualToString:@"/api/assistivetouch"]) {
-        return [self handleAssistiveTouch:query method:method];
-    } else if ([path isEqualToString:@"/api/install"]) {
-        return [self handleInstallApp:query];
-    } else if ([path isEqualToString:@"/api/uninstall"]) {
-        return [self handleUninstallApp:query];
-    } else if ([path isEqualToString:@"/api/trollstore/diagnostics"]) {
-        return [self handleTrollStoreDiagnostics];
-    } else if ([path isEqualToString:@"/test"]) {
-        return [self handleTestInterface];
-    } else if ([path isEqualToString:@"/api/filelist"]) {
-        return [self handleFileList:query];
-    } else if ([path isEqualToString:@"/api/readfile"]) {
-        return [self handleReadFile:query];
-    } else if ([path isEqualToString:@"/api/deletefile"]) {
-        return [self handleDeleteFile:query];
-    } else if ([path isEqualToString:@"/api/createfolder"]) {
-        return [self handleCreateFolder:query];
-    } else if ([path isEqualToString:@"/api/webdav/start"]) {
-        return [self handleWebDAVStart:query];
-    } else if ([path isEqualToString:@"/api/webdav/stop"]) {
-        return [self handleWebDAVStop];
-    } else if ([path isEqualToString:@"/api/webdav/status"]) {
-        return [self handleWebDAVStatus];
-    } else if ([path isEqualToString:@"/api/install/tipa"]) {
-        return [self handleInstallTipa:query];
-    } else if ([path isEqualToString:@"/api/install/url"]) {
-        return [self handleInstallUrl:query];
-    } else if ([path isEqualToString:@"/api/install/deb"]) {
-        return [self handleInstallDeb:query body:body];
-    } else if ([path isEqualToString:@"/api/ping"]) {
-        return [self handlePing];
-    } else if ([path isEqualToString:@"/api/plist"]) {
-        return [self handlePlist:method query:query body:body];
-    } else if ([path isEqualToString:@"/api/network/debug"]) {
-        return [self handleNetworkDebug];
-    } else if ([path isEqualToString:@"/api/network/test_helper"]) {
-        return [self handleNetworkTestHelper];
-    } else if ([path isEqualToString:@"/api/network/ip_methods"]) {
-        return [self handleNetworkIpMethods:query];
-    } else if ([path isEqualToString:@"/api/group/start"]) {
-        return [self handleGroupStart:query];
-    } else if ([path isEqualToString:@"/api/group/stop"]) {
-        return [self handleGroupStop];
-    } else if ([path isEqualToString:@"/api/group/status"]) {
-        return [self handleGroupStatus];
-    } else if ([path isEqualToString:@"/api/group/touch"]) {
-        return [self handleGroupTouch:body];
-    } else if ([path isEqualToString:@"/api/group/connect"]) {
-        return [self handleGroupConnect:query];
-    } else if ([path isEqualToString:@"/api/group/disconnect"]) {
-        return [self handleGroupDisconnect];
-    } else if ([path isEqualToString:@"/api/group/relay/start"]) {
-        return [self handleRelayStart:query];
-    } else if ([path isEqualToString:@"/api/group/relay/stop"]) {
-        return [self handleRelayStop];
-    } else if ([path isEqualToString:@"/api/group/slaves"]) {
-        return [self handleGroupSlaves];
-    } else if ([path isEqualToString:@"/api/group/proxy-screenshot"]) {
-        return [self handleGroupProxyScreenshot:query];
-    } else if ([path isEqualToString:@"/api/alert"]) {
-        return [self handleAlert:query];
-    } else if ([path isEqualToString:@"/group-test"]) {
-        return [self handleGroupTestPage];
-    } else if ([path isEqualToString:@"/group-control"]) {
-        return [self handleGroupControlPage];
-    } else if ([path isEqualToString:@"/"]) {
-        // 根路径只显示极简状态，完整 API 文档需访问 /api/endpoints?key=xxx
-        return [self handleRoot];
-    } else if ([path isEqualToString:@"/api/endpoints"]) {
-        return [self handleEndpoints:query];
     }
     
     // 404 Not Found
@@ -2992,6 +2935,18 @@ static NSString *tvncGetRealDeviceName(void) {
 - (TVNCHttpResponse *)handleReboot {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     
+#ifndef THEBOOTSTRAP
+    // 越狱版：禁用重启 API（App 内重启按钮走直接系统调用，不暴露远程接口）
+    TVLog(@"HTTP Server: Reboot API disabled in jailbreak build");
+    response.statusCode = 403;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:@{
+        @"success": @NO,
+        @"error": @"Reboot API is disabled in jailbreak build"
+    } options:0 error:nil];
+    return response;
+#endif
+    
     TVLog(@"HTTP Server: Reboot request received");
     
     BOOL success = [[TVNCApiManager sharedManager] rebootDevice];
@@ -3010,6 +2965,45 @@ static NSString *tvncGetRealDeviceName(void) {
             @"error": @"Failed to initiate reboot"
         };
     
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
+// POST /api/shutdown
+// 关闭设备（关机/断电）
+- (TVNCHttpResponse *)handleShutdown {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+#ifndef THEBOOTSTRAP
+    // 越狱版：禁用关机 API
+    TVLog(@"HTTP Server: Shutdown API disabled in jailbreak build");
+    response.statusCode = 403;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:@{
+        @"success": @NO,
+        @"error": @"Shutdown API is disabled in jailbreak build"
+    } options:0 error:nil];
+    return response;
+#endif
+
+    TVLog(@"HTTP Server: Shutdown request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] shutdownDevice];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"message": @"Shutdown initiated",
+            @"warning": @"Device will power off immediately"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to initiate shutdown"
+        };
+
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     return response;
 }
@@ -3636,6 +3630,87 @@ static NSString *tvncGetRealDeviceName(void) {
 // 密钥如需修改，改下方 kTVNCEndpointsKey 即可
 static NSString * const kTVNCEndpointsKey = @"matisu";
 
++ (NSArray<NSDictionary *> *)tvncRouteRegistry {
+    // 单一事实源：新增/删除 API 时只需改这里，/api/endpoints 文档会自动同步
+    static NSArray<NSDictionary *> *registry = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        registry = @[
+            // 截图 / 流媒体
+            @{@"category": @"截图 / 流媒体", @"path": @"GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0&scale=1.0", @"doc": @"获取截图（rotation: 0=Home下, 90=Home右, 180=Home上, 270=Home左; scale: 0.1~1.0 缩放比例）"},
+            @{@"category": @"截图 / 流媒体", @"path": @"GET /api/screenshot/fast", @"doc": @"快速截图（低延迟，质量略低，用于高频轮询）"},
+            @{@"category": @"截图 / 流媒体", @"path": @"GET /api/stream.mjpeg", @"doc": @"MJPEG 实时视频流（CPU 占用较高，建议作为降级方案）"},
+            // 文件
+            @{@"category": @"文件", @"path": @"POST /api/writefile_text?path=/xxx&append=true|false", @"doc": @"写入文本文件（body: 纯文本）"},
+            @{@"category": @"文件", @"path": @"GET /api/checkfile", @"doc": @"检查文件是否存在"},
+            @{@"category": @"文件", @"path": @"POST /api/upload?path=/xxx/xxx", @"doc": @"上传任意文件（自动创建目录）"},
+            @{@"category": @"文件", @"path": @"GET /api/filelist?path=/var/mobile/Media/xxx", @"doc": @"列出目录（默认：懒人精灵目录）"},
+            @{@"category": @"文件", @"path": @"GET /api/readfile?path=/var/mobile/Media/xxx/file.txt", @"doc": @"读取文件内容"},
+            @{@"category": @"文件", @"path": @"POST /api/deletefile?path=/var/mobile/Media/xxx/file.txt", @"doc": @"删除文件或目录"},
+            @{@"category": @"文件", @"path": @"POST /api/createfolder?path=/var/mobile/Media/xxx/newfolder", @"doc": @"创建目录"},
+            @{@"category": @"文件", @"path": @"POST /api/webdav/start", @"doc": @"启动 WebDAV 服务"},
+            @{@"category": @"文件", @"path": @"POST /api/webdav/stop", @"doc": @"停止 WebDAV 服务"},
+            @{@"category": @"文件", @"path": @"GET /api/webdav/status", @"doc": @"WebDAV 服务状态"},
+            // 剪贴板
+            @{@"category": @"剪贴板", @"path": @"POST /api/clipboard", @"doc": @"设置剪贴板（body: base64）；GET 读取"},
+            @{@"category": @"剪贴板", @"path": @"POST /api/clipboard_text", @"doc": @"设置剪贴板（body: 纯文本）；GET 读取"},
+            // 输入
+            @{@"category": @"输入", @"path": @"POST /api/input", @"doc": @"输入文本（自动选择最佳方式：第一响应者→HID→UIKeyboardImpl→AX，支持任何 App，body: 纯文本 或 ?text=）"},
+            @{@"category": @"输入", @"path": @"POST /api/key?code=13", @"doc": @"发送按键（13=回车, 8=退格）"},
+            @{@"category": @"输入", @"path": @"GET /api/frontmost", @"doc": @"诊断：当前前台 App 的 bundleID 及命中的检测通道"},
+            // 状态 / 设备
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/clients", @"doc": @"获取客户端列表"},
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/status", @"doc": @"获取服务器状态"},
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/device", @"doc": @"获取设备信息（名称、ID、型号、版本、电量）"},
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/ping", @"doc": @"心跳检测"},
+            @{@"category": @"状态 / 设备", @"path": @"GET/POST /api/plist", @"doc": @"读取/写入 plist 配置"},
+            // 系统控制
+            @{@"category": @"系统控制", @"path": @"GET/POST /api/volume?value=0.5", @"doc": @"获取/设置音量"},
+            @{@"category": @"系统控制", @"path": @"GET/POST /api/brightness?value=0.5", @"doc": @"获取/设置亮度"},
+            @{@"category": @"系统控制", @"path": @"POST /api/reboot", @"doc": @"重启设备（越狱版已禁用）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/shutdown", @"doc": @"关机（越狱版已禁用）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/respring", @"doc": @"注销设备（Respring），15 秒后自动解锁屏幕"},
+            @{@"category": @"系统控制", @"path": @"POST /api/screen/lock", @"doc": @"锁定屏幕（电源键）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/screen/unlock", @"doc": @"解锁屏幕（唤醒+Home 键）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/home", @"doc": @"返回桌面（按一次 Home 键）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/taskmanager", @"doc": @"打开任务管理器（双击 Home 键）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/clearapps/smart", @"doc": @"智能清理后台（不在桌面则关闭前台应用）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/clearapps/force", @"doc": @"强制清理后台（即使在桌面也执行：多任务+上滑杀进程）"},
+            @{@"category": @"系统控制", @"path": @"GET/POST /api/assistivetouch?action=enable|disable", @"doc": @"辅助触控（小白点）状态获取/启用/禁用"},
+            @{@"category": @"系统控制", @"path": @"POST /api/alert", @"doc": @"弹窗提示"},
+            // 安装 / 卸载
+            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install?path=/xxx/app.ipa", @"doc": @"通过 TrollStore 安装 IPA"},
+            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/tipa", @"doc": @"安装 .tipa（巨魔商店）"},
+            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/url", @"doc": @"从 URL 安装应用"},
+            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/deb", @"doc": @"安装 .deb（越狱）"},
+            @{@"category": @"安装 / 卸载", @"path": @"POST /api/uninstall?bundleId=com.xxx.app", @"doc": @"通过 TrollStore 卸载应用"},
+            @{@"category": @"安装 / 卸载", @"path": @"GET /api/trollstore/diagnostics", @"doc": @"获取 TrollStore 诊断信息"},
+            // 网络调试
+            @{@"category": @"网络调试", @"path": @"GET /api/network/debug", @"doc": @"网络配置调试（读取配置文件结构与目录列表）"},
+            @{@"category": @"网络调试", @"path": @"GET /api/network/test_helper", @"doc": @"测试 root helper（spawn 自身以 root 身份执行 test 操作）"},
+            @{@"category": @"网络调试", @"path": @"GET /api/network/ip_methods", @"doc": @"诊断多种 IP 修改方案可行性"},
+            // 群控
+            @{@"category": @"群控", @"path": @"POST /api/group/start?master=1&port=8183", @"doc": @"启动群控 WebSocket 服务"},
+            @{@"category": @"群控", @"path": @"POST /api/group/stop", @"doc": @"停止群控"},
+            @{@"category": @"群控", @"path": @"GET /api/group/status", @"doc": @"获取群控状态"},
+            @{@"category": @"群控", @"path": @"POST /api/group/touch", @"doc": @"接收群控触摸事件（JSON body）"},
+            @{@"category": @"群控", @"path": @"POST /api/group/connect?ip=192.168.x.x&port=8183", @"doc": @"从控连接到主控"},
+            @{@"category": @"群控", @"path": @"POST /api/group/disconnect", @"doc": @"从控断开与主控的连接"},
+            @{@"category": @"群控", @"path": @"GET /api/group/slaves", @"doc": @"获取从控设备 IP 列表"},
+            @{@"category": @"群控", @"path": @"GET /api/group/proxy-screenshot?ip=x.x.x.x&format=jpeg&quality=0.5&scale=0.3", @"doc": @"代理获取从控截图"},
+            @{@"category": @"群控", @"path": @"POST /api/group/relay/start?relayIp=192.168.x.x&relayPort=8183&role=master|slave", @"doc": @"连接到电脑中继服务器（电脑中继模式）"},
+            @{@"category": @"群控", @"path": @"POST /api/group/relay/stop", @"doc": @"断开电脑中继服务器连接"},
+            // 页面
+            @{@"category": @"页面", @"path": @"GET /", @"doc": @"根状态页"},
+            @{@"category": @"页面", @"path": @"GET /test", @"doc": @"测试接口页"},
+            @{@"category": @"页面", @"path": @"GET /group-test", @"doc": @"群控测试页面"},
+            @{@"category": @"页面", @"path": @"GET /group-control", @"doc": @"投屏群控页面（可视化多设备控制）"},
+            @{@"category": @"页面", @"path": @"GET /api/endpoints?key=xxx", @"doc": @"本 API 文档页"},
+        ];
+    });
+    return registry;
+}
+
 - (TVNCHttpResponse *)handleEndpoints:(NSDictionary *)query {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
     NSString *key = query[@"key"];
@@ -3646,60 +3721,48 @@ static NSString * const kTVNCEndpointsKey = @"matisu";
         response.body = [NSJSONSerialization dataWithJSONObject:err options:0 error:nil];
         return response;
     }
-    NSString *html = @"<!DOCTYPE html>"
-        "<html><head><meta charset='UTF-8'><title>TrollVNC API</title></head>"
-        "<body><h1>TrollVNC HTTP API</h1>"
-        "<h2>Endpoints:</h2><ul>"
-        "<li><b>GET /api/screenshot?format=png|jpeg&quality=0.9&rotation=0&scale=1.0</b> - 获取截图（rotation: 0=Home下, 90=Home右, 180=Home上, 270=Home左; scale: 0.1~1.0 缩放比例）</li>"
-        "<li><b>POST /api/writefile_text?path=/xxx&append=true|false</b> - 写入文件（body: 纯文本）</li>"
-        "<li><b>POST /api/clipboard</b> - 设置剪贴板（body: base64）</li>"
-        "<li><b>POST /api/clipboard_text</b> - 设置剪贴板（body: 纯文本）</li>"
-        "<li><b>POST /api/input</b> - 输入文本（自动选择最佳方式：第一响应者→HID→UIKeyboardImpl→AX，支持任何App，body: 纯文本 或 ?text=）</li>\n"
-        "<li><b>POST /api/key?code=13</b> - 发送按键（13=回车, 8=退格）</li>"
-        "<li><b>GET /api/clients</b> - 获取客户端列表</li>"
-        "<li><b>GET /api/status</b> - 获取服务器状态</li>"
-        "<li><b>GET /api/device</b> - 获取设备信息（名称、ID、型号、版本、电量）</li>"
-        "<li><b>GET /api/checkfile</b> - 检查文件是否存在</li>"
-        "<li><b>POST /api/upload?path=/xxx/xxx</b> - 上传任意文件（自动创建目录）</li>"
-        "<li><b>GET/POST /api/volume?value=0.5</b> - 获取/设置音量</li>"
-        "<li><b>GET/POST /api/brightness?value=0.5</b> - 获取/设置亮度</li>"
-        "<li><b>POST /api/install?path=/xxx/app.ipa</b> - 通过 TrollStore 安装 IPA</li>"
-        "<li><b>POST /api/uninstall?bundleId=com.xxx.app</b> - 通过 TrollStore 卸载应用</li>"
-        "<li><b>GET /api/trollstore/diagnostics</b> - 获取 TrollStore 诊断信息</li>"
-        "<li><b>POST /api/reboot</b> - 重启设备</li>"
-        "<li><b>POST /api/respring</b> - 注销设备（Respring），15秒后自动解锁屏幕</li>"
-        "<li><b>POST /api/screen/lock</b> - 锁定屏幕（电源键）</li>"
-        "<li><b>POST /api/screen/unlock</b> - 解锁屏幕（唤醒+Home键）</li>"
-        "<li><b>POST /api/home</b> - 返回桌面（按一次 Home 键）</li>"
-        "<li><b>POST /api/taskmanager</b> - 打开任务管理器（双击 Home 键）</li>"
-        "<li><b>POST /api/clearapps/smart</b> - 清理后台应用（不在桌面则关闭前台应用）</li>"
-        "<li><b>POST /api/clearapps/force</b> - 强制清理后台应用（即使在桌面也执行：多任务+上滑杀进程）</li>"
-        "<li><b>GET /api/frontmost</b> - 诊断：当前前台 App 的 bundleID 及命中的检测通道</li>"
-        "<li><b>GET /api/assistivetouch</b> - 获取 AssistiveTouch 状态</li>"
-        "<li><b>POST /api/assistivetouch?action=enable</b> - 启用 AssistiveTouch（小白点）</li>"
-        "<li><b>POST /api/assistivetouch?action=disable</b> - 禁用 AssistiveTouch（小白点）</li>"
-        "<li><b>GET /api/filelist?path=/var/mobile/Media/xxx</b> - 列出目录（默认：懒人精灵目录）</li>"
-        "<li><b>GET /api/readfile?path=/var/mobile/Media/xxx/file.txt</b> - 读取文件内容</li>"
-        "<li><b>POST /api/deletefile?path=/var/mobile/Media/xxx/file.txt</b> - 删除文件或目录</li>"
-        "<li><b>POST /api/createfolder?path=/var/mobile/Media/xxx/newfolder</b> - 创建目录</li>"
-        "<li><b>POST /api/group/start?master=1&port=8183</b> - 启动群控 WebSocket 服务</li>"
-        "<li><b>POST /api/group/stop</b> - 停止群控</li>"
-        "<li><b>GET /api/group/status</b> - 获取群控状态</li>"
-        "<li><b>POST /api/group/touch</b> - 接收群控触摸事件（JSON body）</li>"
-        "<li><b>POST /api/group/connect?ip=192.168.x.x&port=8183</b> - 从控连接到主控</li>"
-        "<li><b>POST /api/group/disconnect</b> - 从控断开与主控的连接</li>"
-        "<li><b>GET /api/group/slaves</b> - 获取从控设备 IP 列表</li>"
-        "<li><b>GET /api/group/proxy-screenshot?ip=x.x.x.x&format=jpeg&quality=0.5&scale=0.3</b> - 代理获取从控截图</li>"
-        "<li><b>POST /api/group/relay/start?relayIp=192.168.x.x&relayPort=8183&role=master|slave</b> - 连接到电脑中继服务器（电脑中继模式）</li>"
-        "<li><b>POST /api/group/relay/stop</b> - 断开电脑中继服务器连接</li>"
-        "<li><b>GET /group-test</b> - 群控测试页面</li>"
-        "<li><b>GET /group-control</b> - 投屏群控页面（可视化多设备控制）</li>"
-        "</ul></body></html>";
-    
+
+    // 按分类顺序自动生成文档（分类顺序以此数组为准）
+    NSArray<NSString *> *categoryOrder = @[@"截图 / 流媒体", @"文件", @"剪贴板", @"输入", @"状态 / 设备",
+                                           @"系统控制", @"安装 / 卸载", @"网络调试", @"群控", @"页面"];
+    NSArray<NSDictionary *> *routes = [[self class] tvncRouteRegistry];
+
+    NSMutableString *html = [NSMutableString stringWithString:
+        @"<!DOCTYPE html><html><head><meta charset='UTF-8'><title>TrollVNC API</title>"
+        "<style>body{font-family:-apple-system,system-ui,sans-serif;margin:24px;background:#0f1115;color:#e6e6e6}"
+        "h1{color:#4fd1ff}h2{color:#9aa0a6;margin-top:28px;border-bottom:1px solid #2a2f36;padding-bottom:6px}"
+        "li{margin:6px 0;line-height:1.5}code{color:#7ee787}</style></head><body>"
+        "<h1>TrollVNC HTTP API</h1>"];
+
+    NSString *lastCategory = nil;
+    for (NSString *cat in categoryOrder) {
+        BOOL printedHeader = NO;
+        for (NSDictionary *r in routes) {
+            if (![r[@"category"] isEqualToString:cat]) continue;
+            if (!printedHeader) {
+                [html appendFormat:@"<h2>%@</h2><ul>", cat];
+                printedHeader = YES;
+                lastCategory = cat;
+            }
+            [html appendFormat:@"<li><code><b>%@</b></code> - %@</li>", r[@"path"], r[@"doc"]];
+        }
+        if (printedHeader) [html appendString:@"</ul>"];
+    }
+    // 兜底：注册表中存在但不在 categoryOrder 里的分类
+    for (NSDictionary *r in routes) {
+        if ([categoryOrder containsObject:r[@"category"]]) continue;
+        if (![lastCategory isEqualToString:r[@"category"]]) {
+            [html appendFormat:@"<h2>%@</h2><ul>", r[@"category"]];
+            lastCategory = r[@"category"];
+        }
+        [html appendFormat:@"<li><code><b>%@</b></code> - %@</li>", r[@"path"], r[@"doc"]];
+    }
+    [html appendString:@"</body></html>"];
+
     response.statusCode = 200;
     response.contentType = @"text/html; charset=utf-8";
     response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
-    
+
     return response;
 }
 
