@@ -19,6 +19,23 @@
 #import <sys/wait.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 
+// 补充主文件顶部全部系统头，使各 category 独立编译单元拥有与主文件一致的可见性
+#import <CoreFoundation/CoreFoundation.h>
+#import <netinet/in.h>
+#import <arpa/inet.h>
+#import <sys/socket.h>
+#import <sys/stat.h>
+#import <unistd.h>
+#import <errno.h>
+#import <stdio.h>
+#import <spawn.h>
+#import <fcntl.h>
+#import <mach-o/dyld.h>
+
+// 主文件内定义的跨文件共享常量（原 static，拆分后提升为全局供 category 引用）
+extern NSString * const kWebDAVHTMLBase64;
+extern NSString * const kTVNCEndpointsKey;
+
 // 类扩展 @property（仅私有 ivar）：使各 category (.mm) 可通过 self.xxx 访问。
 // 已在 TVNCHttpServer.h 声明的 @property 不在此重复（避免重定义）。
 @interface TVNCHttpServer ()
