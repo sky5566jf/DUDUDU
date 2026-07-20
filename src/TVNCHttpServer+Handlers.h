@@ -4,6 +4,8 @@
 //  Shared declarations for TVNCHttpServer.mm and its handler categories.
 //
 #import "TVNCHttpServer.h"
+#import <UIKit/UIKit.h>           // UIInterfaceOrientation / CGFloat 等类型（原为单一 .mm 内部可见，拆分后需在此显式引入）
+#import "TVNCHttpResponse.h"       // 提取自主文件的轻量 HTTP 响应结构，供各 category 完整可见
 
 // 类扩展 @property（仅私有 ivar）：使各 category (.mm) 可通过 self.xxx 访问。
 // 已在 TVNCHttpServer.h 声明的 @property 不在此重复（避免重定义）。
