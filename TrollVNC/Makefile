@@ -72,6 +72,10 @@ trollvncserver_FILES += src/STHIDEventGenerator.mm
 trollvncserver_FILES += src/OhMyJetsam.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 trollvncserver_FILES += src/TVNCHttpServer.mm
+trollvncserver_FILES += src/TVNCHttpServer+Screenshot.mm
+trollvncserver_FILES += src/TVNCHttpServer+File.mm
+trollvncserver_FILES += src/TVNCHttpServer+Group.mm
+trollvncserver_FILES += src/TVNCHttpServer+System.mm
 
 # 只在 roothide/rootless 方案下添加 root 权限支持（使用 roothide SDK）
 ifneq ($(THEOS_PACKAGE_SCHEME),rootless)

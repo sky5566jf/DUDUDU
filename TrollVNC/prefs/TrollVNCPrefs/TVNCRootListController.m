@@ -905,6 +905,56 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     });
 }
 
+#pragma mark - Shutdown Device Action
+
+- (void)shutdownDevice:(PSSpecifier *)specifier {
+#ifdef THEBOOTSTRAP
+    // 巨魔版：弹确认框后真正关机
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"确认关机"
+                                                                   message:@"确定要关闭设备吗？设备将立即断电。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    UIAlertAction *cancel  = [UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil];
+    UIAlertAction *confirm = [UIAlertAction actionWithTitle:@"确认关机"
+                                                     style:UIAlertActionStyleDestructive
+                                                   handler:^(UIAlertAction *a) {
+        [self _reallyShutdownDevice];
+    }];
+    [alert addAction:cancel];
+    [alert addAction:confirm];
+    [self presentViewController:alert animated:YES completion:nil];
+#else
+    // 越狱版：点击无效（不执行关机，仅提示）
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"不可用"
+                                                                   message:@"设备关机功能在越狱版本中不可用。"
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"知道了" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+#endif
+}
+
+- (void)_reallyShutdownDevice {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        NSLog(@"[MatisuXCS] Shutting down device...");
+        @try {
+            Class FBSSystemServiceClass = NSClassFromString(@"FBSSystemService");
+            if (FBSSystemServiceClass) {
+                id fbsService = [FBSSystemServiceClass performSelector:@selector(sharedService)];
+                if (fbsService && [fbsService respondsToSelector:@selector(shutdown)]) {
+                    NSLog(@"[MatisuXCS] Trying FBSSystemService shutdown...");
+                    [fbsService performSelector:@selector(shutdown)];
+                    [NSThread sleepForTimeInterval:3.0];
+                    NSLog(@"[MatisuXCS] FBSSystemService shutdown did not terminate in 3s, trying fallbacks...");
+                }
+            }
+        } @catch (NSException *e) {
+            NSLog(@"[MatisuXCS] FBSSystemService exception: %@", e);
+        }
+        notify_post("com.apple.system.powermanagement.shutdownRequested");
+        notify_post("com.apple.shutdown.poweroff");
+        NSLog(@"[MatisuXCS] All shutdown methods attempted");
+    });
+}
+
 #pragma mark - Killall Helper
 
 - (void)_killall:(NSString *)processName {

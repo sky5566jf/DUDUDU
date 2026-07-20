@@ -987,7 +987,7 @@
 			<key>label</key>
 			<string>注销设备</string>
 		<key>action</key>
-			<string>logoutDevice:</string>
+		<string>respringDevice:</string>
 		<key>isDestructive</key>
 			<true/>
 		</dict>
