@@ -22,6 +22,9 @@
 // 类扩展 @property（仅私有 ivar）：使各 category (.mm) 可通过 self.xxx 访问。
 // 已在 TVNCHttpServer.h 声明的 @property 不在此重复（避免重定义）。
 @interface TVNCHttpServer ()
+    // .h 中 running 为 readonly (getter=isRunning)；主文件直接写 _running，
+    // 故在类扩展重声明为 readwrite 以合成可写 ivar _running。
+    @property (nonatomic, readwrite, getter=isRunning) BOOL running;
     @property (nonatomic, assign) int serverSocket;
     @property (nonatomic, assign) dispatch_queue_t serverQueue;
     @property (nonatomic, assign) int wsServerSocket;
