@@ -7,29 +7,42 @@
 #import <UIKit/UIKit.h>           // UIInterfaceOrientation / CGFloat 等类型（原为单一 .mm 内部可见，拆分后需在此显式引入）
 #import "TVNCHttpResponse.h"       // 提取自主文件的轻量 HTTP 响应结构，供各 category 完整可见
 
+// 共享项目依赖（category 作为独立编译单元需各自可见，原集中在主文件顶部）
+#import "TVNCApiManager.h"
+#import "Logging.h"
+#import "STHIDEventGenerator.h"
+#import "TSUtil.h"
+#import <CommonCrypto/CommonDigest.h>
+#import <dlfcn.h>
+#import <notify.h>
+#import <sys/sysctl.h>
+#import <sys/utsname.h>
+#import <sys/wait.h>
+#import <SystemConfiguration/SystemConfiguration.h>
+
 // 类扩展 @property（仅私有 ivar）：使各 category (.mm) 可通过 self.xxx 访问。
 // 已在 TVNCHttpServer.h 声明的 @property 不在此重复（避免重定义）。
 @interface TVNCHttpServer ()
-    @property (nonatomic, assign) int _serverSocket;
-    @property (nonatomic, assign) dispatch_queue_t _serverQueue;
-    @property (nonatomic, assign) int _wsServerSocket;
-    @property (nonatomic, assign) BOOL _wsRunning;
-    @property (nonatomic, strong) NSMutableArray<NSNumber *> * _wsClientSockets;
-    @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> * _wsClientIPs;
-    @property (nonatomic, assign) dispatch_queue_t _wsServerQueue;
-    @property (nonatomic, assign) int _masterSocket;
-    @property (nonatomic, assign) BOOL _masterConnected;
-    @property (nonatomic, strong) NSString * _masterIP;
-    @property (nonatomic, assign) NSUInteger _masterPort;
-    @property (nonatomic, assign) dispatch_queue_t _masterQueue;
-    @property (nonatomic, assign) BOOL _relayConnected;
-    @property (nonatomic, strong) NSString * _relayIP;
-    @property (nonatomic, assign) NSUInteger _relayPort;
-    @property (nonatomic, strong) NSString * _relayRole;
-    @property (nonatomic, assign) dispatch_queue_t _relayQueue;
-    @property (nonatomic, assign) CGFloat _cachedScreenWidth;
-    @property (nonatomic, assign) CGFloat _cachedScreenHeight;
-    @property (nonatomic, assign) UIInterfaceOrientation _cachedOrientation;
+    @property (nonatomic, assign) int serverSocket;
+    @property (nonatomic, assign) dispatch_queue_t serverQueue;
+    @property (nonatomic, assign) int wsServerSocket;
+    @property (nonatomic, assign) BOOL wsRunning;
+    @property (nonatomic, strong) NSMutableArray<NSNumber *> * wsClientSockets;
+    @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> * wsClientIPs;
+    @property (nonatomic, assign) dispatch_queue_t wsServerQueue;
+    @property (nonatomic, assign) int masterSocket;
+    @property (nonatomic, assign) BOOL masterConnected;
+    @property (nonatomic, strong) NSString * masterIP;
+    @property (nonatomic, assign) NSUInteger masterPort;
+    @property (nonatomic, assign) dispatch_queue_t masterQueue;
+    @property (nonatomic, assign) BOOL relayConnected;
+    @property (nonatomic, strong) NSString * relayIP;
+    @property (nonatomic, assign) NSUInteger relayPort;
+    @property (nonatomic, strong) NSString * relayRole;
+    @property (nonatomic, assign) dispatch_queue_t relayQueue;
+    @property (nonatomic, assign) CGFloat cachedScreenWidth;
+    @property (nonatomic, assign) CGFloat cachedScreenHeight;
+    @property (nonatomic, assign) UIInterfaceOrientation cachedOrientation;
 @end
 
 // 所有实例/类方法前向声明，供主文件与各 category 共享。
@@ -135,3 +148,9 @@
 - (TVNCHttpResponse *)handleNetworkDebug;
 - (void)handle;
 @end
+
+// 主文件内的共享工具函数（原 static，拆分后需跨翻译单元可见）
+NSString *tvncGetRealDeviceName(void);
+BOOL TVNCReadBool(CFStringRef key);
+void TVNCWriteBool(CFStringRef key, BOOL value);
+int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **output);

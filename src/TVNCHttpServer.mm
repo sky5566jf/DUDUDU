@@ -86,7 +86,7 @@ static int spawnAsRoot(NSString *path, NSArray *args) {
 }
 
 // 以 root 身份执行命令并捕获 stdout（用于诊断 persona API 是否生效）
-static int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **output) {
+int spawnAsRootWithOutput(NSString *path, NSArray *args, NSString **output) {
     if (!path) return -1;
     
     NSMutableArray *fullArgv = [NSMutableArray arrayWithObject:path];
@@ -239,7 +239,7 @@ static NSString *TVNCPreferencesAppId(void) {
     return bundleId;
 }
 
-static BOOL TVNCReadBool(CFStringRef key) {
+BOOL TVNCReadBool(CFStringRef key) {
     // 方法1：直接读 plist 文件（最可靠）
     NSString *plistPath = TVNCPreferencesPlistPath();
     NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:plistPath];
@@ -266,7 +266,7 @@ static BOOL TVNCReadBool(CFStringRef key) {
 }
 
 // 辅助函数：同时写 plist 文件和 CFPreferences，确保立即生效
-static void TVNCWriteBool(CFStringRef key, BOOL value) {
+void TVNCWriteBool(CFStringRef key, BOOL value) {
     NSString *plistPath = TVNCPreferencesPlistPath();
     NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithContentsOfFile:plistPath];
     if (!dict) {
@@ -783,7 +783,7 @@ static NSUserDefaults *TVNCGetDefaults(void) {
 // v3.43: 获取真实设备名（增强版）
 // iOS 16+ daemon 上下文中 UIDevice name 返回泛化的 "iPhone"（隐私保护），
 // 依次尝试: UIDevice name → MGCopyAnswer → MobileGestalt cache plist → preferences.plist → sysctl hostname → "iPhone"
-static NSString *tvncGetRealDeviceName(void) {
+NSString *tvncGetRealDeviceName(void) {
     NSString *uidName = [[UIDevice currentDevice] name];
 
     // 1. 如果 UIDevice 返回的不是泛化的 "iPhone"，直接用
