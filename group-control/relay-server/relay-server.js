@@ -9,6 +9,8 @@ const WebSocket = require('ws');
 const http       = require('http');
 const https      = require('https');
 const url        = require('url');
+const fs         = require('fs');
+const path       = require('path');
 
 const WS_PORT   = 8183;
 const HTTP_PORT = 9527;
@@ -124,7 +126,21 @@ function getFallbackHtml() {
   <p>Make sure at least one phone is configured as <b>Master</b>.</p>
   <hr>
   <a href="/api/status">View Device Status (JSON)</a>
-</body></html>`;
+  </body></html>`;
+}
+
+// 直接托管本地 PC 群控页（pc_group_control.html），不依赖手机连接状态
+function serveControlPage(res) {
+  const p = path.join(__dirname, '..', 'pc_group_control.html');
+  fs.readFile(p, (err, data) => {
+    if (err) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(getFallbackHtml());
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(data);
+  });
 }
 
 // 归一化客户端 IP：剥离 IPv6 映射前缀 "::ffff:"（中继监听 :: 时
@@ -145,6 +161,16 @@ const httpServer = http.createServer((req, res) => {
   const pathname  = parsedUrl.pathname;
 
   res.setHeader('Access-Control-Allow-Origin', '*');
+
+  if (pathname === '/api/relay/info') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      httpPort: HTTP_PORT,
+      wsPort: WS_PORT,
+      ip: getLocalIp()
+    }));
+    return;
+  }
 
   if (pathname === '/api/status') {
     const masterList = [];
@@ -249,26 +275,24 @@ const httpServer = http.createServer((req, res) => {
     return;
   }
 
-  // Serve group-control HTML (proxy from master phone or serve static)
+  // Serve qkurl.txt device list (group-control page fetches it relative to 9527/)
+  if (pathname === '/qkurl.txt') {
+    const p = path.join(__dirname, '..', 'qkurl.txt');
+    fs.readFile(p, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('qkurl.txt not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+
+  // Serve group-control HTML — always the local PC control page (pc_group_control.html)
   if (pathname === '/' || pathname === '/group-control') {
-    const masterInfo = masters.values().next().value;
-    if (masterInfo && masterInfo.ip) {
-      const controlUrl = `http://${masterInfo.ip}:8182/group-control`;
-      http.get(controlUrl, (proxyRes) => {
-        let body = '';
-        proxyRes.on('data', chunk => body += chunk);
-        proxyRes.on('end', () => {
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(body);
-        });
-      }).on('error', () => {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(getFallbackHtml());
-      });
-    } else {
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(getFallbackHtml());
-    }
+    serveControlPage(res);
     return;
   }
 
@@ -483,6 +507,158 @@ setInterval(() => {
     try { ws.ping(); } catch (e) { /* ignore */ }
   }
 }, 30000);
+
+// ── [可选] WS 推帧（替代浏览器 HTTP 轮询）──────────────
+// 默认关闭。启用：RELAY_WS_FRAMES=1。中继为每个已连浏览器 WS 周期性拉取所有设备截图，
+// 并经该 WS 推送 {type:'frame', ip, data:<base64 jpeg>}，浏览器据此绘制并停止 HTTP 轮询。
+const ENABLE_WS_FRAMES = process.env.RELAY_WS_FRAMES === '1';
+const WS_FRAME_INTERVAL = parseInt(process.env.RELAY_WS_FRAME_INTERVAL || '1000', 10);
+
+async function pushFramesToBrowser(ws) {
+  if (ws.readyState !== WebSocket.OPEN) return;
+  const devs = [];
+  for (const [, info] of masters) devs.push(info);
+  for (const [, info] of slaves) devs.push(info);
+  for (const d of devs) {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const u = `http://${d.ip}:8182/api/screenshot?format=jpeg&quality=0.3&scale=0.15&rotation=90`;
+    try {
+      const buf = await new Promise((resolve, reject) => {
+        const r = http.get(u, (res) => {
+          if (res.statusCode !== 200) return reject(new Error('status ' + res.statusCode));
+          const ch = [];
+          res.on('data', (c) => ch.push(c));
+          res.on('end', () => resolve(Buffer.concat(ch)));
+        });
+        r.on('error', reject);
+      });
+      if (buf.length < 200) continue; // 空帧跳过
+      ws.send(JSON.stringify({ type: 'frame', ip: d.ip, data: buf.toString('base64'), w: 0, h: 0 }));
+    } catch (e) { /* 单台失败忽略，不阻断其他设备 */ }
+  }
+}
+if (ENABLE_WS_FRAMES) {
+  setInterval(() => { for (const ws of browsers) pushFramesToBrowser(ws); }, WS_FRAME_INTERVAL);
+  console.log('[Relay] WS 推帧已启用 (interval=' + WS_FRAME_INTERVAL + 'ms)');
+}
+
+// ── [默认开启] RFB 增量帧桥（对接手机 :5901 VNC，替代整图轮询）──────────────
+// 默认开启（RELAY_RFB=0 可关闭）。中继为每台已连设备建 RFB 会话，只拉「变化矩形」(Raw 编码)，
+// 经浏览器 WS 推送 {type:'rfb_frame', ip, x, y, w, h, fbw, fbh, data:<base64 RGBA>} 局部刷新。
+// scrcpy/noVNC 同款，百台规模带宽/延迟远优于整图轮询。需 daemon VNC(:5901) 可达。仅支持 None 鉴权 + Raw 编码。
+// 会话断开时向浏览器广播 {type:'rfb_stop', ip} 让前端回退 HTTP 轮询（自愈）。
+const ENABLE_RFB = process.env.RELAY_RFB !== '0';
+const RFB_PORT = parseInt(process.env.RFB_PORT || '5901', 10);
+const net = require('net');
+
+class RfbSession {
+  constructor(ip, onFrame, onClose) {
+    this.ip = ip; this.onFrame = onFrame; this.onClose = onClose;
+    this.buf = Buffer.alloc(0);
+    this.state = 'handshake-version';
+    this.fbW = 0; this.fbH = 0; this.connected = false; this.closed = false;
+    this.curRect = null; this.curRectNeed = 0; this.curRectData = Buffer.alloc(0);
+    this.sock = net.connect(RFB_PORT, ip, () => { this._send(Buffer.from('RFB 003.008\n')); });
+    this.sock.on('data', (d) => { this.buf = Buffer.concat([this.buf, d]); try { this._pump(); } catch (e) { console.log('[RFB] ' + this.ip + ' parse error: ' + e.message); this._close(); } });
+    this.sock.on('error', (e) => { console.log('[RFB] ' + this.ip + ' error: ' + e.message); this._close(); });
+    this.sock.on('close', () => this._close());
+    this.sock.setTimeout(8000, () => { if (!this.connected) this._close(); });
+  }
+  _send(b) { try { this.sock.write(b); } catch (e) {} }
+  _close() { if (this.closed) return; this.closed = true; try { this.sock.destroy(); } catch (e) {} if (this.onClose) this.onClose(this.ip); }
+  _need(n) { return this.buf.length >= n; }
+  _take(n) { const b = this.buf.slice(0, n); this.buf = this.buf.slice(n); return b; }
+  _pump() {
+    while (true) {
+      if (this.state === 'handshake-version') {
+        if (!this._need(12)) return;
+        this._take(12); this._send(Buffer.from('RFB 003.008\n')); this.state = 'security-types';
+      } else if (this.state === 'security-types') {
+        if (!this._need(1)) return;
+        const n = this._take(1)[0];
+        if (n === 0) { this._close(); return; }
+        if (!this._need(1 + n)) return;
+        const types = this._take(n);
+        if (!types.includes(1)) { console.log('[RFB] ' + this.ip + ' 仅支持 None(1) 鉴权'); this._close(); return; }
+        this._send(Buffer.from([1])); this.state = 'security-result';
+      } else if (this.state === 'security-result') {
+        if (!this._need(4)) return;
+        if (this._take(4).readUInt32BE(0) !== 0) { this._close(); return; }
+        this._send(Buffer.from([1])); this.state = 'server-init';
+      } else if (this.state === 'server-init') {
+        if (!this._need(24)) return;
+        const si = this._take(24);
+        this.fbW = si.readUInt16BE(0); this.fbH = si.readUInt16BE(2);
+        if (!this._need(4)) return;
+        const nameLen = this._take(4).readUInt32BE(0);
+        if (!this._need(nameLen)) return;
+        this._take(nameLen);
+        // 协商像素格式：32bpp, big-endian, true-color, 内存序 [R,G,B,0]
+        const pf = Buffer.alloc(20);
+        pf.writeUInt8(0, 0); pf.writeUInt8(32, 1); pf.writeUInt8(24, 2); pf.writeUInt8(1, 3); pf.writeUInt8(1, 4);
+        pf.writeUInt16BE(255, 5); pf.writeUInt16BE(255, 7); pf.writeUInt16BE(255, 9);
+        pf.writeUInt8(16, 11); pf.writeUInt8(8, 12); pf.writeUInt8(0, 13);
+        this._send(pf);
+        this.connected = true; this._requestUpdate(false); this.state = 'frame-update';
+      } else if (this.state === 'frame-update') {
+        if (!this._need(4)) return;
+        const hdr = this._take(4);
+        const numRects = hdr.readUInt16BE(2);
+        if (numRects === 0) { this._requestUpdate(true); return; }
+        this.state = 'rect-header';
+      } else if (this.state === 'rect-header') {
+        if (!this._need(12)) return;
+        const r = this._take(12);
+        const x = r.readUInt16BE(0), y = r.readUInt16BE(2), w = r.readUInt16BE(4), h = r.readUInt16BE(6);
+        const enc = r.readInt32BE(8);
+        if (enc !== 0) { console.log('[RFB] ' + this.ip + ' 不支持编码 ' + enc + ' (仅 Raw=0)'); this._close(); return; }
+        this.curRect = { x, y, w, h }; this.curRectData = Buffer.alloc(0); this.curRectNeed = w * h * 4; this.state = 'rect-data';
+      } else if (this.state === 'rect-data') {
+        const need = this.curRectNeed - this.curRectData.length;
+        if (!this._need(need)) return;
+        this.curRectData = Buffer.concat([this.curRectData, this._take(need)]);
+        const c = this.curRect;
+        this.onFrame(this.ip, c.x, c.y, c.w, c.h, this.curRectData, this.fbW, this.fbH);
+        this._requestUpdate(true); this.state = 'frame-update';
+      } else { this._close(); return; }
+    }
+  }
+  _requestUpdate(incremental) {
+    const req = Buffer.alloc(10);
+    req.writeUInt8(3, 0); req.writeUInt8(incremental ? 1 : 0, 1);
+    req.writeUInt16BE(0, 2); req.writeUInt16BE(0, 4);
+    req.writeUInt16BE(this.fbW, 6); req.writeUInt16BE(this.fbH, 8);
+    this._send(req);
+  }
+}
+
+const rfbSessions = new Map();
+function startRfbFor(ip) {
+  if (rfbSessions.has(ip)) return;
+  try {
+    const s = new RfbSession(ip,
+      (ip2, x, y, w, h, data, fbw, fbh) => {
+        const msg = JSON.stringify({ type: 'rfb_frame', ip: ip2, x, y, w, h, fbw, fbh, data: data.toString('base64') });
+        for (const ws of browsers) { if (ws.readyState === WebSocket.OPEN) ws.send(msg); }
+      },
+      (ip2) => {
+        rfbSessions.delete(ip2);
+        // 通知浏览器该设备 RFB 会话已结束，前端回退 HTTP 轮询（自愈）
+        const stop = JSON.stringify({ type: 'rfb_stop', ip: ip2 });
+        for (const ws of browsers) { if (ws.readyState === WebSocket.OPEN) ws.send(stop); }
+      });
+    rfbSessions.set(ip, s);
+  } catch (e) { console.log('[RFB] 启动失败 ' + ip + ': ' + e.message); }
+}
+if (ENABLE_RFB) {
+  setInterval(() => {
+    const ips = new Set();
+    for (const [, info] of masters) ips.add(info.ip);
+    for (const [, info] of slaves) ips.add(info.ip);
+    for (const ip of ips) startRfbFor(ip);
+  }, 5000);
+  console.log('[Relay] RFB 增量帧桥已启用 (port=' + RFB_PORT + ')');
+}
 
 // ── Startup banner ───────────────────────────────────
 console.log(`

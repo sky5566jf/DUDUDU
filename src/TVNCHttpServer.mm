@@ -459,7 +459,13 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     
     _running = YES;
     TVLog(@"HTTP Server: Started on port %lu", (unsigned long)_port);
-    
+
+    // P0-3: 注册内存压力监听（自动降级截图画质/帧率）
+    [self setupMemoryPressureMonitor];
+
+    // P1-2: 清理旧崩溃日志（7天前 / 总量超 50MB）
+    [self cleanupOldCrashLogs];
+
     // 在后台队列接受连接
     dispatch_async(_serverQueue, ^{
         [self acceptConnections];
@@ -484,6 +490,101 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     [self stopGroupWebSocketServer];
     
     TVLog(@"HTTP Server: Stopped");
+}
+
+// P0-3: 内存压力监听 — 系统内存压力时自动降级截图，避免 Jetsam
+- (void)setupMemoryPressureMonitor {
+    _memPressureSource = dispatch_source_create(
+        DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0,
+        DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL,
+        dispatch_get_main_queue());
+
+    __weak TVNCHttpServer *weakSelf = self;
+    dispatch_source_set_event_handler(_memPressureSource, ^{
+        TVNCHttpServer *strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        dispatch_source_memorypressure_flags_t flags =
+            (dispatch_source_memorypressure_flags_t)dispatch_source_get_data(strongSelf->_memPressureSource);
+
+        if (flags & DISPATCH_MEMORYPRESSURE_CRITICAL) {
+            strongSelf->_memoryPressureLevel = 2;
+            TVLog(@"Memory: CRITICAL — 截图降级到最低画质(2fps/scale0.2)");
+        } else if (flags & DISPATCH_MEMORYPRESSURE_WARN) {
+            strongSelf->_memoryPressureLevel = 1;
+            TVLog(@"Memory: WARN — 截图降级到中等画质(5fps/scale0.3)");
+        } else {
+            strongSelf->_memoryPressureLevel = 0;
+            TVLog(@"Memory: NORMAL — 恢复默认画质");
+        }
+    });
+
+    dispatch_resume(_memPressureSource);
+    TVLog(@"Memory: Pressure monitor started");
+}
+
+// P1-2: 崩溃日志自动轮转 — 清理 7 天前 / 总量超 50MB 的 .ips 文件
+- (void)cleanupOldCrashLogs {
+    NSString *crashDir = @"/var/mobile/Library/Logs/CrashReporter";
+    NSFileManager *fm = [NSFileManager defaultManager];
+
+    if (![fm fileExistsAtPath:crashDir]) return;
+
+    NSMutableArray *files = [NSMutableArray array];
+    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:crashDir];
+    NSString *relativePath;
+    NSUInteger totalSize = 0;
+
+    while ((relativePath = [enumerator nextObject])) {
+        if (![relativePath hasSuffix:@".ips"]) continue;
+
+        NSString *fullPath = [crashDir stringByAppendingPathComponent:relativePath];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:fullPath error:nil];
+        if (!attrs) continue;
+
+        NSUInteger fileSize = [attrs fileSize];
+        NSDate *modDate = [attrs fileModificationDate];
+        totalSize += fileSize;
+
+        [files addObject:@{
+            @"path": fullPath,
+            @"size": @(fileSize),
+            @"date": modDate ?: [NSDate distantPast]
+        }];
+    }
+
+    if (files.count == 0) return;
+
+    // 按修改时间排序（最旧在前）
+    [files sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [a[@"date"] compare:b[@"date"]];
+    }];
+
+    NSDate *cutoff = [NSDate dateWithTimeIntervalSinceNow:-7 * 24 * 3600];
+    NSUInteger deleted = 0;
+    NSUInteger freedBytes = 0;
+    NSUInteger maxTotal = 50 * 1024 * 1024;  // 50MB 上限
+
+    for (NSDictionary *fileInfo in files) {
+        NSDate *modDate = fileInfo[@"date"];
+        NSUInteger fileSize = [fileInfo[@"size"] unsignedIntegerValue];
+        NSString *path = fileInfo[@"path"];
+
+        // 超过 7 天 或 总量超 50MB → 删除
+        if ([modDate compare:cutoff] == NSOrderedAscending || totalSize > maxTotal) {
+            NSError *error = nil;
+            if ([fm removeItemAtPath:path error:&error]) {
+                deleted++;
+                freedBytes += fileSize;
+                totalSize -= fileSize;
+            }
+        }
+    }
+
+    if (deleted > 0) {
+        TVLog(@"CrashLog: Cleaned %lu files, freed %.1f MB",
+              (unsigned long)deleted, freedBytes / (1024.0 * 1024.0));
+    }
 }
 
 - (void)acceptConnections {
@@ -1972,6 +2073,7 @@ static NSString *wsReadFrame(int sock) {
 
     _relayConnected = NO;
     _relayModeEnabled = NO;
+    _relayReconnectAttempts = 0;  // P0-1: 重置重连计数
 
     if (_relaySocket >= 0) {
         close(_relaySocket);
@@ -2045,6 +2147,43 @@ static NSString *wsReadFrame(int sock) {
         _relaySocket = -1;
     }
     TVLog(@"Relay: Receive loop ended");
+
+    // P0-1: 连接断开后自动重连（仅当用户未手动断开时）
+    if (_relayModeEnabled && _relayIP) {
+        [self scheduleRelayReconnect];
+    }
+}
+
+// P0-1: 指数退避自动重连 — WiFi 切换/NAT 超时/relay 重启后自动恢复
+- (void)scheduleRelayReconnect {
+    if (!_relayModeEnabled || !_relayIP) return;
+
+    _relayReconnectAttempts++;
+    // 指数退避: 2/4/8/16/30s，封顶 30s
+    NSTimeInterval delays[] = {2.0, 4.0, 8.0, 16.0, 30.0};
+    int idx = MIN(_relayReconnectAttempts - 1, 4);
+    NSTimeInterval delay = delays[idx];
+
+    TVLog(@"Relay: Scheduling reconnect in %.0fs (attempt %d)", delay, _relayReconnectAttempts);
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   _relayQueue, ^{
+        // 用户可能在此期间手动断开
+        if (!self->_relayModeEnabled || !self->_relayIP) {
+            TVLog(@"Relay: Reconnect cancelled (mode disabled)");
+            self->_relayReconnectAttempts = 0;
+            return;
+        }
+
+        TVLog(@"Relay: Reconnecting (attempt %d)...", self->_relayReconnectAttempts);
+        if ([self connectToRelay:self->_relayIP port:self->_relayPort role:self->_relayRole]) {
+            self->_relayReconnectAttempts = 0;
+            TVLog(@"Relay: Reconnected successfully");
+        } else {
+            TVLog(@"Relay: Reconnect failed, scheduling next attempt");
+            [self scheduleRelayReconnect];
+        }
+    });
 }
 
 // 从控模式：持续接收主控的 WebSocket 事件
@@ -2491,20 +2630,73 @@ static NSString *wsReadFrame(int sock) {
             TVLog(@"[MJPEG] Stream started: q=%.2f scale=%.2f fps=%d maxW=%d maxH=%d",
                   mjpegQuality, mjpegScale, mjpegFps, mjpegMaxW, mjpegMaxH);
 
+            // P1-3: 注册活跃 MJPEG 流（用于多客户端自适应降帧）
+            _server.activeMjpegStreams++;
+
             // 持续推送 JPEG 帧
-            NSTimeInterval frameInterval = 1.0 / mjpegFps;
             int frameCount = 0;
+            uint32_t lastFrameHash = 0;   // P1-1: 上一帧哈希
+            int sameHashCount = 0;         // P1-1: 连续相同帧计数
             BOOL useFramebuffer = [[TVNCApiManager sharedManager] isFramebufferAvailable];
 
             while (_server.isRunning) {
                 @autoreleasepool {
-                    // 获取当前帧
+                    // P0-3: 内存压力降级 — 根据系统内存压力动态调整画质/帧率/缩放
+                    CGFloat effectiveQuality = mjpegQuality;
+                    CGFloat effectiveScale = mjpegScale;
+                    int effectiveFps = mjpegFps;
+
+                    int memLevel = _server.memoryPressureLevel;
+                    if (memLevel >= 2) {
+                        // CRITICAL: 大幅降级，避免 Jetsam 杀进程
+                        effectiveQuality = MIN(mjpegQuality, 0.2);
+                        effectiveScale = MIN(mjpegScale, 0.25);
+                        effectiveFps = MIN(mjpegFps, 3);
+                    } else if (memLevel >= 1) {
+                        // WARN: 中度降级
+                        effectiveQuality = MIN(mjpegQuality, 0.4);
+                        effectiveScale = MIN(mjpegScale, 0.4);
+                        effectiveFps = MIN(mjpegFps, 6);
+                    }
+
+                    // P1-3: 多客户端并发时降帧率（每多一个流 fps 减半，下限 2fps）
+                    int activeStreams = _server.activeMjpegStreams;
+                    if (activeStreams > 1) {
+                        effectiveFps = MAX(2, effectiveFps / activeStreams);
+                    }
+
+                    NSTimeInterval effectiveInterval = 1.0 / effectiveFps;
+
+                    // P1-1: 帧哈希去重 — 采样计算当前帧哈希，与上一帧比对
+                    uint32_t currentHash = [[TVNCApiManager sharedManager] quickFrameHash];
+                    if (currentHash != 0 && currentHash == lastFrameHash) {
+                        sameHashCount++;
+                        // 连续 2 帧以上完全相同 → 跳过编码，发空 boundary 保活
+                        if (sameHashCount >= 2) {
+                            const char *keepalive = "--frameboundary\r\n\r\n";
+                            send(_clientSocket, keepalive, (int)strlen(keepalive), 0);
+                            [NSThread sleepForTimeInterval:effectiveInterval];
+                            // 检查连接
+                            char peekBuf[1];
+                            ssize_t peekResult = recv(_clientSocket, peekBuf, 1, MSG_PEEK | MSG_DONTWAIT);
+                            if (peekResult == 0 || (peekResult < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
+                                TVLog(@"[MJPEG] Client disconnected after %d frames (hash-dedup)", frameCount);
+                                break;
+                            }
+                            continue;
+                        }
+                    } else {
+                        sameHashCount = 0;
+                    }
+                    lastFrameHash = currentHash;
+
+                    // 获取当前帧（使用降级后的参数）
                     NSData *jpegData = nil;
                     if (useFramebuffer) {
                         jpegData = [[TVNCApiManager sharedManager]
                             captureScreenshotFromFramebufferWithFormat:@"jpeg"
-                                                               quality:mjpegQuality
-                                                                 scale:mjpegScale
+                                                               quality:effectiveQuality
+                                                                 scale:effectiveScale
                                                                   maxW:mjpegMaxW
                                                                   maxH:mjpegMaxH];
                         // 如果帧缓存突然不可用，降级
@@ -2514,15 +2706,15 @@ static NSString *wsReadFrame(int sock) {
                     }
                     if (!jpegData) {
                         // 降级到普通截图
-                        if (mjpegScale < 1.0) {
+                        if (effectiveScale < 1.0) {
                             jpegData = [[TVNCApiManager sharedManager]
                                 captureScreenshotWithFormat:@"jpeg"
-                                                   quality:mjpegQuality
+                                                   quality:effectiveQuality
                                                   rotation:0
-                                                     scale:mjpegScale];
+                                                     scale:effectiveScale];
                         } else {
                             jpegData = [[TVNCApiManager sharedManager]
-                                captureScreenshotAsJPEGWithQuality:mjpegQuality];
+                                captureScreenshotAsJPEGWithQuality:effectiveQuality];
                         }
                     }
 
@@ -2541,7 +2733,7 @@ static NSString *wsReadFrame(int sock) {
                     }
 
                     // 等待下一帧
-                    [NSThread sleepForTimeInterval:frameInterval];
+                    [NSThread sleepForTimeInterval:effectiveInterval];
 
                     // 检查连接是否还活着（非阻塞 recv 检测）
                     char peekBuf[1];
@@ -2553,6 +2745,9 @@ static NSString *wsReadFrame(int sock) {
                     }
                 }
             }
+
+            // P1-3: 注销活跃 MJPEG 流
+            _server.activeMjpegStreams--;
 
             close(_clientSocket);
             return;

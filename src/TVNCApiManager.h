@@ -105,6 +105,12 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)isFramebufferAvailable;
 
+/**
+ P1-1: 快速帧哈希 — 采样 framebuffer 中 64 个点计算 hash，用于 MJPEG 帧去重
+ @return 32位哈希值，0 表示 framebuffer 不可用
+ */
+- (uint32_t)quickFrameHash;
+
 #pragma mark - 文件操作 API
 
 /**

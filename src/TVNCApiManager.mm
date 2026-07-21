@@ -668,6 +668,19 @@ static void tvncDataProviderReleaseCallback(void *info, const void *data, size_t
     free((void *)data);
 }
 
+// P0-2: 帧缓存池 — 静态复用缓冲区，消除每帧 malloc/free 抖动
+// 非缩放路径复用 sSrcFrameBuffer，缩放路径额外复用 sDstFrameBuffer
+static void *sSrcFrameBuffer = NULL;
+static size_t sSrcFrameBufferSize = 0;
+static void *sDstFrameBuffer = NULL;
+static size_t sDstFrameBufferSize = 0;
+static NSObject *sFrameBufferLock = nil;  // 保护并发访问
+
+// 不释放缓冲区的回调（用于静态复用模式）
+static void tvncDataProviderNoOpCallback(void *info, const void *data, size_t size) {
+    // 静态缓冲区不释放，由下次调用复用
+}
+
 extern "C" {
 void *tvncGetFrontBuffer(void);
 int tvncGetFBWidth(void);
@@ -678,6 +691,31 @@ int tvncGetFBBytesPerPixel(void);
 - (BOOL)isFramebufferAvailable {
     void *fb = tvncGetFrontBuffer();
     return (fb != NULL && tvncGetFBWidth() > 0 && tvncGetFBHeight() > 0);
+}
+
+// P1-1: 快速帧哈希 — 采样 64 个点计算 djb2 hash，用于 MJPEG 帧去重
+// 相同 hash = 画面极大概率未变化，可跳过编码
+- (uint32_t)quickFrameHash {
+    void *fb = tvncGetFrontBuffer();
+    int w = tvncGetFBWidth();
+    int h = tvncGetFBHeight();
+    int bpp = tvncGetFBBytesPerPixel();
+
+    if (!fb || w <= 0 || h <= 0 || bpp <= 0) return 0;
+
+    uint32_t *p = (uint32_t *)fb;
+    size_t totalPixels = (size_t)w * (size_t)h;
+    size_t step = totalPixels / 64;  // 采样间隔（取 64 个点）
+    if (step == 0) step = 1;
+
+    uint32_t hash = 5381;
+    for (int i = 0; i < 64; i++) {
+        size_t idx = i * step;
+        if (idx < totalPixels) {
+            hash = ((hash << 5) + hash) + p[idx];
+        }
+    }
+    return hash;
 }
 
 - (nullable NSData *)captureScreenshotFromFramebufferWithFormat:(NSString *)format
@@ -728,36 +766,139 @@ int tvncGetFBBytesPerPixel(void);
         dstW = MAX(1, (int)(dstW * ratio));
     }
 
+    // P0-2: 延迟初始化帧缓存池锁
+    static dispatch_once_t lockOnce;
+    dispatch_once(&lockOnce, ^{
+        sFrameBufferLock = [[NSObject alloc] init];
+    });
+
     // 如果不需要缩放，直接从帧缓存创建 CGImage 编码
     if (dstW == srcW && dstH == srcH) {
         // 直接从 gFrontBuffer 创建 CGImage
         // 注意：gFrontBuffer 使用 BGRA 格式（redShift=16, greenShift=8, blueShift=0）
         CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
 
-        // 创建数据拷贝（避免编码时帧缓存被 swap 修改）
+        // P0-2: 静态复用缓冲区，消除每帧 malloc/free 抖动
         size_t bufSize = (size_t)srcW * (size_t)srcH * (size_t)gBytesPerPixel;
-        void *bufCopy = malloc(bufSize);
-        if (!bufCopy) {
+
+        @synchronized(sFrameBufferLock) {
+            // 仅在尺寸变化时重新分配
+            if (sSrcFrameBufferSize < bufSize) {
+                free(sSrcFrameBuffer);
+                sSrcFrameBuffer = malloc(bufSize);
+                sSrcFrameBufferSize = bufSize;
+                if (!sSrcFrameBuffer) {
+                    sSrcFrameBufferSize = 0;
+                    CGColorSpaceRelease(colorSpace);
+                    return nil;
+                }
+            }
+            memcpy(sSrcFrameBuffer, gFrontBuffer, bufSize);
+
+            CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, sSrcFrameBuffer, bufSize, tvncDataProviderNoOpCallback);
+            CGImageRef cgImage = CGImageCreate(srcW, srcH, 8, 32, srcBPR, colorSpace,
+                                               kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                               provider, NULL, false, kCGRenderingIntentDefault);
+            CGDataProviderRelease(provider);
             CGColorSpaceRelease(colorSpace);
+
+            if (!cgImage) {
+                return nil;
+            }
+
+            NSMutableData *imageData = [NSMutableData data];
+            CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData, formatRef, 1, NULL);
+            if (!dest) {
+                CGImageRelease(cgImage);
+                return nil;
+            }
+
+            NSDictionary *props = nil;
+            if (isJPEG) {
+                props = @{ (__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @(quality) };
+            }
+            CGImageDestinationAddImage(dest, cgImage, (__bridge CFDictionaryRef)props);
+            BOOL success = CGImageDestinationFinalize(dest);
+
+            CFRelease(dest);
+            CGImageRelease(cgImage);
+
+            return success ? imageData : nil;
+        }
+    }
+
+    // 需要缩放：使用 vImageScale_ARGB8888
+    // P0-2: 静态复用源/目标缓冲区，消除每帧 malloc/free
+    @synchronized(sFrameBufferLock) {
+        size_t srcBufSize = (size_t)srcW * (size_t)srcH * (size_t)gBytesPerPixel;
+
+        // 复用源缓冲区
+        if (sSrcFrameBufferSize < srcBufSize) {
+            free(sSrcFrameBuffer);
+            sSrcFrameBuffer = malloc(srcBufSize);
+            sSrcFrameBufferSize = srcBufSize;
+            if (!sSrcFrameBuffer) {
+                sSrcFrameBufferSize = 0;
+                return nil;
+            }
+        }
+        memcpy(sSrcFrameBuffer, gFrontBuffer, srcBufSize);
+
+        // 复用目标缓冲区
+        int dstBPR = dstW * gBytesPerPixel;
+        size_t dstBufSize = (size_t)dstBPR * (size_t)dstH;
+        if (sDstFrameBufferSize < dstBufSize) {
+            free(sDstFrameBuffer);
+            sDstFrameBuffer = malloc(dstBufSize);
+            sDstFrameBufferSize = dstBufSize;
+            if (!sDstFrameBuffer) {
+                sDstFrameBufferSize = 0;
+                return nil;
+            }
+        }
+
+        vImage_Buffer src = {
+            .data = sSrcFrameBuffer,
+            .height = (vImagePixelCount)srcH,
+            .width = (vImagePixelCount)srcW,
+            .rowBytes = (size_t)srcBPR
+        };
+        vImage_Buffer dst = {
+            .data = sDstFrameBuffer,
+            .height = (vImagePixelCount)dstH,
+            .width = (vImagePixelCount)dstW,
+            .rowBytes = (size_t)dstBPR
+        };
+
+        // 获取临时缓冲区（vImage 内部使用，仍 malloc）
+        vImage_Error tempSize = vImageScale_ARGB8888(&src, &dst, NULL, kvImageHighQualityResampling | kvImageGetTempBufferSize);
+        void *tempBuf = (tempSize > 0) ? malloc((size_t)tempSize) : NULL;
+
+        vImage_Error err = vImageScale_ARGB8888(&src, &dst, tempBuf, kvImageHighQualityResampling);
+        if (tempBuf) free(tempBuf);
+
+        if (err != kvImageNoError) {
+            TVLog(@"[FastShot] vImageScale_ARGB8888 failed: %ld", (long)err);
             return nil;
         }
-        memcpy(bufCopy, gFrontBuffer, bufSize);
 
-        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, bufCopy, bufSize, tvncDataProviderReleaseCallback);
-        CGImageRef cgImage = CGImageCreate(srcW, srcH, 8, 32, srcBPR, colorSpace,
-                                           kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
-                                           provider, NULL, false, kCGRenderingIntentDefault);
-        CGDataProviderRelease(provider);
+        // 从缩放后数据创建 CGImage（使用静态缓冲区，不释放）
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+        CGDataProviderRef dstProvider = CGDataProviderCreateWithData(NULL, sDstFrameBuffer, dstBufSize, tvncDataProviderNoOpCallback);
+        CGImageRef finalImage = CGImageCreate(dstW, dstH, 8, 32, dstBPR, colorSpace,
+                                              kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
+                                              dstProvider, NULL, false, kCGRenderingIntentDefault);
+        CGDataProviderRelease(dstProvider);
         CGColorSpaceRelease(colorSpace);
 
-        if (!cgImage) {
+        if (!finalImage) {
             return nil;
         }
 
         NSMutableData *imageData = [NSMutableData data];
         CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData, formatRef, 1, NULL);
         if (!dest) {
-            CGImageRelease(cgImage);
+            CGImageRelease(finalImage);
             return nil;
         }
 
@@ -765,90 +906,15 @@ int tvncGetFBBytesPerPixel(void);
         if (isJPEG) {
             props = @{ (__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @(quality) };
         }
-        CGImageDestinationAddImage(dest, cgImage, (__bridge CFDictionaryRef)props);
+        CGImageDestinationAddImage(dest, finalImage, (__bridge CFDictionaryRef)props);
         BOOL success = CGImageDestinationFinalize(dest);
 
         CFRelease(dest);
-        CGImageRelease(cgImage);
+        CGImageRelease(finalImage);
 
+        TVLog(@"[FastShot] FB %dx%d -> %dx%d (scale=%.2f, maxW=%d, maxH=%d)", srcW, srcH, dstW, dstH, scale, maxW, maxH);
         return success ? imageData : nil;
     }
-
-    // 需要缩放：使用 vImageScale_ARGB8888
-    // 先拷贝源数据
-    size_t srcBufSize = (size_t)srcW * (size_t)srcH * (size_t)gBytesPerPixel;
-    void *srcCopy = malloc(srcBufSize);
-    if (!srcCopy) return nil;
-    memcpy(srcCopy, gFrontBuffer, srcBufSize);
-
-    // 分配目标缓冲区
-    int dstBPR = dstW * gBytesPerPixel;
-    size_t dstBufSize = (size_t)dstBPR * (size_t)dstH;
-    void *dstBuf = malloc(dstBufSize);
-    if (!dstBuf) {
-        free(srcCopy);
-        return nil;
-    }
-
-    vImage_Buffer src = {
-        .data = srcCopy,
-        .height = (vImagePixelCount)srcH,
-        .width = (vImagePixelCount)srcW,
-        .rowBytes = (size_t)srcBPR
-    };
-    vImage_Buffer dst = {
-        .data = dstBuf,
-        .height = (vImagePixelCount)dstH,
-        .width = (vImagePixelCount)dstW,
-        .rowBytes = (size_t)dstBPR
-    };
-
-    // 获取临时缓冲区
-    vImage_Error tempSize = vImageScale_ARGB8888(&src, &dst, NULL, kvImageHighQualityResampling | kvImageGetTempBufferSize);
-    void *tempBuf = (tempSize > 0) ? malloc((size_t)tempSize) : NULL;
-
-    vImage_Error err = vImageScale_ARGB8888(&src, &dst, tempBuf, kvImageHighQualityResampling);
-    if (tempBuf) free(tempBuf);
-    free(srcCopy);
-
-    if (err != kvImageNoError) {
-        TVLog(@"[FastShot] vImageScale_ARGB8888 failed: %ld", (long)err);
-        free(dstBuf);
-        return nil;
-    }
-
-    // 从缩放后数据创建 CGImage
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGDataProviderRef dstProvider = CGDataProviderCreateWithData(NULL, dstBuf, dstBufSize, tvncDataProviderReleaseCallback);
-    CGImageRef finalImage = CGImageCreate(dstW, dstH, 8, 32, dstBPR, colorSpace,
-                                          kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host,
-                                          dstProvider, NULL, false, kCGRenderingIntentDefault);
-    CGDataProviderRelease(dstProvider);
-    CGColorSpaceRelease(colorSpace);
-
-    if (!finalImage) {
-        return nil;
-    }
-
-    NSMutableData *imageData = [NSMutableData data];
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData((__bridge CFMutableDataRef)imageData, formatRef, 1, NULL);
-    if (!dest) {
-        CGImageRelease(finalImage);
-        return nil;
-    }
-
-    NSDictionary *props = nil;
-    if (isJPEG) {
-        props = @{ (__bridge NSString *)kCGImageDestinationLossyCompressionQuality: @(quality) };
-    }
-    CGImageDestinationAddImage(dest, finalImage, (__bridge CFDictionaryRef)props);
-    BOOL success = CGImageDestinationFinalize(dest);
-
-    CFRelease(dest);
-    CGImageRelease(finalImage);
-
-    TVLog(@"[FastShot] FB %dx%d -> %dx%d (scale=%.2f, maxW=%d, maxH=%d)", srcW, srcH, dstW, dstH, scale, maxW, maxH);
-    return success ? imageData : nil;
 }
 
 #pragma mark - 文件操作 API

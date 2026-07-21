@@ -59,6 +59,10 @@ extern NSString * const kTVNCEndpointsKey;
     @property (nonatomic, assign) NSUInteger relayPort;
     @property (nonatomic, strong) NSString * relayRole;
     @property (nonatomic, strong) dispatch_queue_t relayQueue;
+    @property (nonatomic, assign) int relayReconnectAttempts;  // P0-1: 指数退避重连计数
+    @property (nonatomic, assign) int memoryPressureLevel;     // P0-3: 0=normal 1=warn 2=critical
+    @property (nonatomic, strong) dispatch_source_t memPressureSource;  // P0-3: 内存压力监听源
+    @property (nonatomic, assign) int activeMjpegStreams;      // P1-3: 活跃 MJPEG 流计数
     @property (nonatomic, assign) CGFloat cachedScreenWidth;
     @property (nonatomic, assign) CGFloat cachedScreenHeight;
     @property (nonatomic, assign) UIInterfaceOrientation cachedOrientation;
@@ -146,6 +150,9 @@ extern NSString * const kTVNCEndpointsKey;
 - (void)reportRealTouchToRelay:(NSString *)action nx:(double)nx ny:(double)ny;
 - (void)sendRelayMessage:(NSString *)text;
 - (void)receiveRelayEvents;
+- (void)scheduleRelayReconnect;  // P0-1: 指数退避自动重连
+- (void)setupMemoryPressureMonitor;  // P0-3: 内存压力检测
+- (void)cleanupOldCrashLogs;  // P1-2: 崩溃日志轮转
 - (void)receiveMasterEvents;
 - (TVNCHttpResponse *)handleGroupStart:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleGroupStop;

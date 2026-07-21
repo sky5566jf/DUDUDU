@@ -172,6 +172,13 @@
     -webkit-user-select: none; pointer-events: none;
     will-change: transform;
   }
+  .screen-view canvas {
+    width: 100%; height: 100%; display: block;
+    object-fit: cover; background: #000;
+    touch-action: none; user-select: none;
+    -webkit-user-select: none; pointer-events: none;
+    will-change: transform;
+  }
   .screen-view .offline-overlay {
     position: absolute; top: 0; left: 0; right: 0; bottom: 0;
     background: rgba(0,0,0,0.75); display: flex; align-items: center;
@@ -179,6 +186,12 @@
     color: #666; font-size: 13px;
   }
   .screen-view .offline-overlay .ico { font-size: 32px; opacity: 0.5; }
+  .screen-view .blank-badge {
+    position: absolute; left: 6px; bottom: 6px; z-index: 5;
+    background: rgba(0,0,0,0.62); color: #ffd666; font-size: 10px;
+    padding: 2px 7px; border-radius: 4px; pointer-events: none;
+    display: none;
+  }
 
   /* === 状态提示 === */
   .toast {
@@ -300,6 +313,43 @@
     .relay-config { display: none; } /* 小屏幕隐藏中继配置 */
     .topbar { padding: 8px 12px; }
   }
+
+  /* === 子工具栏：状态 / 搜索 / 分组 / 全选 === */
+  .subtoolbar {
+    display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+    background: #16162a; border-bottom: 1px solid #262646; flex-wrap: wrap;
+  }
+  .subtoolbar .top-info { color: #9aa; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .subtoolbar .dev-search {
+    flex: 1; min-width: 160px; max-width: 280px; padding: 6px 10px; border-radius: 6px;
+    border: 1px solid #2c2c4e; background: #0e0e1c; color: #eee; font-size: 12px; outline: none;
+  }
+  .subtoolbar .dev-search:focus { border-color: #667eea; }
+  .subtoolbar .group-filter {
+    padding: 6px 8px; border-radius: 6px; border: 1px solid #2c2c4e; background: #0e0e1c; color: #eee; font-size: 12px;
+  }
+  .subtoolbar .select-all { color: #bbb; font-size: 12px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 4px; }
+
+  /* === 批量操作栏 === */
+  .selection-bar {
+    display: none; align-items: center; gap: 8px; padding: 8px 14px;
+    background: #1d1d3a; border-bottom: 1px solid #33336a; flex-wrap: wrap;
+  }
+  .selection-bar #selectionInfo { color: #ffd666; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .selection-bar button {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid #667eea; background: #667eea; color: #fff;
+    font-size: 12px; cursor: pointer; font-weight: 600;
+  }
+  .selection-bar button:hover { background: #5566dd; }
+  .selection-bar button.sel-cancel { background: transparent; border-color: #ff6b6b; color: #ff6b6b; }
+
+  /* 卡片多选框：默认隐藏，hover 或选中时显示 */
+  .screen-card { position: relative; }
+  .screen-card .card-select {
+    position: absolute; top: 6px; left: 6px; z-index: 8; width: 16px; height: 16px;
+    cursor: pointer; opacity: 0; transition: opacity 0.15s; accent-color: #667eea;
+  }
+  .screen-card:hover .card-select, .screen-card .card-select:checked { opacity: 1; }
 </style>
 </head>
 <body>
@@ -317,6 +367,7 @@
         <span id="gridZoomVal">100%</span>
       </div>
       <div class="screens-header-right">
+        <button class="btn-groupcontrol" id="groupControlBtn" onclick="toggleGroupControl()">▶ 开启群控</button>
         <button class="btn btn-default btn-sm" onclick="toggleQualityPanel()" id="qualityPanelBtn">⚙️ 画质</button>
         <div class="quality-panel" id="qualityPanel">
           <h4>📷 截图画质参数</h4>
@@ -392,6 +443,27 @@
       </div>
     </div>
 
+    <!-- 状态汇总 + 搜索 + 分组筛选 + 全选（百台管理必需） -->
+    <div class="subtoolbar">
+      <span class="top-info" id="topInfo">0 台</span>
+      <input type="text" class="dev-search" id="devSearch" placeholder="🔍 搜索设备名 / IP" oninput="onSearchInput(this.value)">
+      <select class="group-filter" id="groupFilter" onchange="onGroupFilter(this.value)">
+        <option value="">全部分组</option>
+      </select>
+      <label class="select-all"><input type="checkbox" id="selectAllCb" onchange="toggleSelectAll(this.checked)"> 全选</label>
+    </div>
+
+    <!-- 批量操作栏（多选后出现） -->
+    <div class="selection-bar" id="selectionBar">
+      <span id="selectionInfo">已选 0 台</span>
+      <button onclick="batchHome()">🏠 广播 Home</button>
+      <button onclick="batchLock()">🔒 锁屏</button>
+      <button onclick="batchReboot()">♻️ 重启</button>
+      <button onclick="batchInstall()">📦 安装 IPA</button>
+      <button onclick="batchScreenshotAll()">📸 截全部</button>
+      <button class="sel-cancel" onclick="clearSelection()">取消选择</button>
+    </div>
+
     <div class="screens-grid" id="screensGrid">
       <div class="empty-state">
         <div class="ico">📱</div>
@@ -414,9 +486,42 @@
 <script>
 // ==================== 数据层 ====================
 var devices = [];           // [{id, name, ip, platform, deviceId, systemVersion, alias, role, online, relayConnected}]
+
+// ── 主控角色用户偏好（跨刷新持久化）─────────────────────────────────────
+// 主控是「服务器权威」：手机调 /api/group/relay/start?role=master 才进中继 masters，
+// 刷新时 mergeRelayDevices 会从 /api/status 把角色写回，导致 UI 关掉的主控被还原。
+// 这里把用户的角色选择存 localStorage，每次从服务器/清单合并角色后强制覆盖回来，
+// 保证「刷新页面」后用户的选择依然生效；同时关/开主控时把角色推给手机同步服务器。
+var ROLE_OVERRIDE_KEY = 'matisu_role_overrides_v1';
+var roleOverrides = {};
+try { roleOverrides = JSON.parse(localStorage.getItem(ROLE_OVERRIDE_KEY) || '{}') || {}; } catch (e) { roleOverrides = {}; }
+function saveRoleOverrides() {
+  try { localStorage.setItem(ROLE_OVERRIDE_KEY, JSON.stringify(roleOverrides)); } catch (e) {}
+}
+// 将用户持久化的角色偏好重新应用到所有设备（在服务器/清单角色合并之后调用）
+function applyRoleOverrides() {
+  devices.forEach(function(d) {
+    if (d.ip && roleOverrides[d.ip] && d.role !== roleOverrides[d.ip]) {
+      d.role = roleOverrides[d.ip];
+    }
+  });
+}
+// 把设备当前角色推给手机（经 /api/group/relay/start?role=），让中继 masters/slaves 与 UI 一致。
+// 中继不可达 / 未连时不推（避免无谓报错），此时仅靠 localStorage 保证显示正确。
+function pushDeviceRole(dev) {
+  if (!relayIp || !dev.relayConnected) return;
+  var roleParam = dev.role === 'master' ? 'master' : 'slave';
+  fetch('http://' + dev.ip + ':8182/api/group/relay/start?relayIp=' + encodeURIComponent(relayIp) + '&role=' + roleParam, {
+    method: 'POST', signal: AbortSignal.timeout(8000), headers: {'Content-Type': 'application/json'}
+  })
+    .then(function(r) { return r.json(); })
+    .then(function() { log('已向服务器同步 ' + dev.name + ' 角色=' + roleParam, 'ok'); })
+    .catch(function(e) { log('角色同步失败 ' + dev.name + ': ' + e.message, 'warn'); });
+}
 var activeTimers = {};       // 截图定时器
 var relayWs = null;          // 浏览器到中继服务器的 WS 连接
 var relayIp = '';            // 中继服务器 IP
+var groupControlOn = false;  // 全局群控开关：默认关闭，所有设备不自动连中继
 var wsStatus = 'disconnected'; // disconnected | connecting | connected
 var layoutMode = 'grid';
 var frameCounters = {};
@@ -425,6 +530,13 @@ var touchActive = false;
 var popWindows = {};         // 弹出窗口引用
 var popCheckIntervals = {};  // 监听弹出窗口关闭
 var qkurlRefreshTimer = null;
+var lastQkurlSig = '';   // 设备集合签名，用于跳过无变化的整页重建（避免 30s 轮询闪屏）
+// 搜索/分组/多选状态（百台管理）
+var devSearch = '';
+var devGroup = '';
+var selectedSet = {};     // dev.id -> true（多选）
+var adaptiveQualityOn = true; // 设备数 > 阈值时自动压低从控画质
+var selfHealTimer = null;
 
 // ==================== 日志系统（必须在 init 之前定义）====================
 var logTypes = { info: '🔵', ok: '✅', err: '❌', warn: '⚠️', touch: '👆' };
@@ -487,26 +599,51 @@ var qualityPresets = {
   perf: { master: {quality:0.8, scale:0.6, interval:200},  slave: {quality:0.6, scale:0.4, interval:800},  popout: {quality:0.95, scale:0.85,interval:45}   }
 };
 
-// ==================== 初始化：强制中继模式，IP=网页所在电脑 ====================
+// ==================== 初始化：强制中继模式，IP=网页所在电脑局域网IP ====================
 (function init() {
-  // 强制使用当前网页所在电脑的 IP 作为中继服务器（中继服务和网页在同一台电脑）
-  relayIp = window.location.hostname || 'localhost';
+  // 先问中继本机的局域网IP(页面从localhost打开时也不会错用手机无法连的localhost)
+  detectRelayIp(function(ip) {
+    relayIp = ip || (window.location.hostname || 'localhost');
+    log('使用中继服务器 IP: ' + relayIp, 'ok');
 
-  // 恢复缩放设置
-  var savedZoom = localStorage.getItem('tvnc_grid_zoom');
-  if (savedZoom) {
-    document.getElementById('gridZoom').value = savedZoom;
-    updateGridZoom(savedZoom);
-  }
+    // 恢复缩放设置
+    var savedZoom = localStorage.getItem('tvnc_grid_zoom');
+    if (savedZoom) {
+      document.getElementById('gridZoom').value = savedZoom;
+      updateGridZoom(savedZoom);
+    }
 
-  loadDevicesFromQkurl();
-  qkurlRefreshTimer = setInterval(loadDevicesFromQkurl, 30000);
+    // 设备一次性加载，会话期间不会增减 → 只加载一次，不做 30s 轮询（避免无谓重拉 qkurl.txt 与周期闪屏）
+    loadDevicesFromQkurl();
 
-  // 自动连接中继
-  setTimeout(function() { connectRelayWS(); }, 100);
+    // 方案A：默认不连中继 WS（群控关）。截图改为直连手机 :8182，由 parseQkurl 末尾启动。
+    setGroupControlBtn();
+    // 初始化离主线程解码 Worker（根治 100+ 设备 JPEG 解码卡顿）
+    decodeWorker = createDecodeWorker();
+    if (decodeWorker) log('已启用 Web Worker 离主线程解码', 'ok');
+    else log('当前浏览器不支持 Worker 解码，降级主线程', 'warn');
+    // 中继断线自愈（群控开启时每 10s 看护掉线设备）
+    startRelaySelfHeal();
+  });
 
   log('TrollVNC 电脑群控管理台 v3.7 (中继模式) 就绪', 'ok');
 })();
+
+// 探测中继所在电脑的真实局域网IP
+function detectRelayIp(cb) {
+  var host = window.location.hostname || 'localhost';
+  var url = 'http://' + host + ':9527/api/relay/info';
+  fetch(url, { signal: AbortSignal.timeout(5000) })
+    .then(function(r) { return r.json(); })
+    .then(function(j) {
+      if (j && j.ip) { cb(j.ip); return; }
+      cb(window.location.hostname || 'localhost');
+    })
+    .catch(function(e) {
+      console.warn('detectRelayIp failed', e);
+      cb(window.location.hostname || 'localhost');
+    });
+}
 
 // ==================== qkurl.txt 设备列表加载 ====================
 function loadDevicesFromQkurl() {
@@ -547,6 +684,7 @@ function parseQkurl(text) {
     var deviceId = (parts[3] || '').trim() || '';
     var systemVersion = (parts[4] || '').trim() || '';
     var alias = (parts[5] || '').trim() || '';
+    var group = (parts[6] || '').trim() || '';
 
     var existing = devices.find(function(d) { return d.ip === ip; });
     if (existing) {
@@ -555,6 +693,7 @@ function parseQkurl(text) {
       existing.deviceId = deviceId;
       existing.systemVersion = systemVersion;
       existing.alias = alias;
+      existing.group = group;
       newDevices.push(existing);
     } else {
       newDevices.push({
@@ -565,6 +704,7 @@ function parseQkurl(text) {
         deviceId: deviceId,
         systemVersion: systemVersion,
         alias: alias,
+        group: group,
         role: newDevices.length === 0 ? 'master' : 'slave',
         online: null,
         relayConnected: false
@@ -583,12 +723,20 @@ function parseQkurl(text) {
   }
 
   devices = newDevices;
+  applyRoleOverrides(); // 应用用户持久化的主控偏好（覆盖首台默认 master / 服务器角色）
+  applyAdaptiveQuality(); // 设备数 > 阈值时自动压低从控画质，保护百台规模性能
+  // 列表无变化时跳过整页 DOM 重建：30s 轮询本就用于「发现新增/改名设备」，
+  // 若设备集合/名称/角色都没变则不必重建，避免百台规模下每 30s 全网格闪动。
+  var qsig = newDevices.map(function(d){ return d.ip + '|' + d.name + '|' + d.role + '|' + (d.group || ''); }).join(';');
+  if (qsig === lastQkurlSig) { updateTopInfo(); return; }
+  lastQkurlSig = qsig;
   log('从 qkurl.txt 加载 ' + devices.length + ' 台设备', 'ok');
   renderScreens();
   updateTopInfo();
   // 拉取真实设备名（中继可达时覆盖占位名）
   refreshAllDeviceNames();
-  // 不再这里启动截图，等中继 WS 连接成功后再启动（connectRelayWS 的 onopen 里会调用）
+  // 启动截图（方案A：群控关时直连手机 :8182；群控开时自动切到中继代理，见 getScreenshotBaseUrl 每帧判定）
+  startScreensOnly();
 }
 
 // ==================== 中继自动发现设备（上百台规模免维护 qkurl.txt）====================
@@ -634,6 +782,7 @@ function mergeRelayDevices(list) {
       existing.name = rd.deviceId.slice(0, 8);
     }
   });
+  applyRoleOverrides(); // 服务器角色合并后，强制套用用户持久化偏好（防止刷新后主控被还原）
   renderScreens();
   updateTopInfo();
   refreshAllDeviceNames();
@@ -677,6 +826,151 @@ function updateTopInfo() {
   info.textContent = devices.length + '台 · 在线:' + onlineCount + ' · 中继:' + relayConnCount + ' · 主控:' + (masterDev ? masterDev.name : '-');
 }
 
+// ==================== 搜索 / 分组筛选（仅切换卡片显隐，不重建 canvas）====================
+function applyFilters() {
+  var kw = (devSearch || '').trim().toLowerCase();
+  var gf = devGroup || '';
+  devices.forEach(function(d) {
+    var card = document.getElementById('card_' + d.id);
+    if (!card) return;
+    var n = (d.name || d.alias || '').toLowerCase();
+    var ip = (d.ip || '').toLowerCase();
+    var matchKw = !kw || n.indexOf(kw) >= 0 || ip.indexOf(kw) >= 0;
+    var matchGrp = !gf || (d.group || '') === gf;
+    card.style.display = (matchKw && matchGrp) ? '' : 'none';
+    if (!(matchKw && matchGrp)) d._visible = false; // 隐藏即视为不可见，暂停解码
+  });
+}
+function onSearchInput(v) { devSearch = v; applyFilters(); }
+function onGroupFilter(v) { devGroup = v; applyFilters(); }
+function refreshGroupOptions() {
+  var sel = document.getElementById('groupFilter');
+  if (!sel) return;
+  var groups = {};
+  devices.forEach(function(d){ if (d.group) groups[d.group] = true; });
+  var cur = sel.value;
+  var html = '<option value="">全部分组</option>';
+  Object.keys(groups).sort().forEach(function(g){ html += '<option value="' + escHtml(g) + '">' + escHtml(g) + '</option>'; });
+  sel.innerHTML = html;
+  if (cur && groups[cur]) sel.value = cur;
+}
+
+// ==================== 多选 + 批量操作 ====================
+function toggleSelectAll(checked) {
+  devices.forEach(function(d) {
+    var card = document.getElementById('card_' + d.id);
+    if (card && card.style.display !== 'none') {
+      selectedSet[d.id] = checked;
+      var cb = document.getElementById('sel_' + d.id);
+      if (cb) cb.checked = checked;
+    }
+  });
+  updateSelectionBar();
+}
+function onCardSelect(id, checked) {
+  if (checked) selectedSet[id] = true; else delete selectedSet[id];
+  updateSelectionBar();
+}
+function updateSelectionBar() {
+  var bar = document.getElementById('selectionBar');
+  var info = document.getElementById('selectionInfo');
+  if (!bar || !info) return;
+  var n = Object.keys(selectedSet).length;
+  info.textContent = '已选 ' + n + ' 台';
+  bar.style.display = n > 0 ? 'flex' : 'none';
+}
+function clearSelection() {
+  selectedSet = {};
+  devices.forEach(function(d){ var cb = document.getElementById('sel_' + d.id); if (cb) cb.checked = false; });
+  var sa = document.getElementById('selectAllCb'); if (sa) sa.checked = false;
+  updateSelectionBar();
+}
+function getSelectedDevices() { return devices.filter(function(d){ return selectedSet[d.id]; }); }
+
+// 逐台 HTTP 动作（经手机 :8182 REST，CORS*；中继不可达时仍可用）
+function deviceRestAction(dev, path, opts) {
+  opts = opts || {};
+  var init = { method: opts.method || 'POST', signal: AbortSignal.timeout(opts.timeout || 6000) };
+  if (opts.body) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(opts.body); }
+  return fetch('http://' + dev.ip + ':8182' + path, init)
+    .then(function(r){ return { ok: r.ok, status: r.status }; })
+    .catch(function(e){ return { ok: false, error: String((e && e.message) || e) }; });
+}
+
+function batchHome() {
+  var sel = getSelectedDevices();
+  if (!sel.length) { toast('请先勾选设备', 'warn'); return; }
+  if (relayWs && relayWs.readyState === 1) {
+    sel.forEach(function(d){ relayWs.send(JSON.stringify({ type:'key', action:'home_down', targetIp: d.ip })); });
+    setTimeout(function(){ sel.forEach(function(d){ if (relayWs && relayWs.readyState === 1) relayWs.send(JSON.stringify({ type:'key', action:'home_up', targetIp: d.ip })); }); }, 60);
+    log('广播 Home → ' + sel.length + ' 台 (WS)', 'ok');
+  } else {
+    sel.forEach(function(d){ deviceRestAction(d, '/api/key?code=home'); });
+    log('广播 Home → ' + sel.length + ' 台 (HTTP)', 'ok');
+  }
+  toast('已广播 Home 到 ' + sel.length + ' 台', 'ok');
+}
+function batchLock() {
+  var sel = getSelectedDevices(); if (!sel.length) { toast('请先勾选设备', 'warn'); return; }
+  toast('正在锁屏 ' + sel.length + ' 台...', 'warn');
+  var done = 0, ok = 0;
+  sel.forEach(function(d){ deviceRestAction(d, '/api/screen/lock').then(function(r){ done++; if (r.ok) ok++; if (done === sel.length) toast('锁屏完成: ' + ok + '/' + sel.length, 'ok'); }); });
+}
+function batchReboot() {
+  var sel = getSelectedDevices(); if (!sel.length) { toast('请先勾选设备', 'warn'); return; }
+  toast('正在重启 ' + sel.length + ' 台...', 'warn');
+  var done = 0, ok = 0;
+  sel.forEach(function(d){ deviceRestAction(d, '/api/reboot').then(function(r){ done++; if (r.ok) ok++; if (done === sel.length) toast('重启指令已发: ' + ok + '/' + sel.length, 'ok'); }); });
+}
+function batchInstall() {
+  var sel = getSelectedDevices(); if (!sel.length) { toast('请先勾选设备', 'warn'); return; }
+  var url = prompt('输入 IPA 下载地址(URL)：'); if (!url) return;
+  toast('正在安装到 ' + sel.length + ' 台...', 'warn');
+  var done = 0, ok = 0;
+  sel.forEach(function(d){ deviceRestAction(d, '/api/install', { body: { url: url } }).then(function(r){ done++; if (r.ok) ok++; if (done === sel.length) toast('安装完成: ' + ok + '/' + sel.length, 'ok'); }); });
+}
+function batchScreenshotAll() {
+  var sel = getSelectedDevices(); if (!sel.length) { toast('请先勾选设备', 'warn'); return; }
+  sel.forEach(function(d){ if (activeTimers[d.id]) clearTimeout(activeTimers[d.id]); fetchFrame(d); });
+  toast('已刷新 ' + sel.length + ' 台画面', 'ok');
+}
+
+// ==================== 全局自适应画质（百台规模保护）====================
+function applyAdaptiveQuality() {
+  if (!adaptiveQualityOn) return;
+  var n = devices.filter(function(d){ return d.role !== 'none'; }).length;
+  if (n <= 20) return; // 小规模保持默认高清
+  var f = n > 80 ? 0.5 : (n > 40 ? 0.7 : 0.85);
+  screenParams.slave.quality = Math.round(0.3 * f * 100) / 100;
+  screenParams.slave.scale = n > 80 ? 0.1 : (n > 40 ? 0.12 : 0.15);
+  screenParams.slave.interval = n > 80 ? 4000 : (n > 40 ? 3000 : 2000);
+  screenParams.master.quality = Math.round(0.5 * f * 100) / 100;
+  screenParams.master.scale = n > 80 ? 0.25 : 0.3;
+  screenParams.master.interval = n > 80 ? 1500 : (n > 40 ? 1000 : 800);
+  log('自适应画质: ' + n + ' 台 → 从控 q=' + screenParams.slave.quality + ' s=' + screenParams.slave.scale + ' i=' + screenParams.slave.interval + 'ms', 'info');
+}
+
+// ==================== 中继断线自愈（仅群控开启时看护）====================
+function startRelaySelfHeal() {
+  if (selfHealTimer) return;
+  selfHealTimer = setInterval(function() {
+    if (!groupControlOn || !relayIp) return;
+    fetch('http://' + relayIp + ':9527/api/status', { signal: AbortSignal.timeout(4000) })
+      .then(function(r){ return r.json(); })
+      .then(function(st) {
+        var live = {};
+        (st.masters || []).concat(st.slaves || []).forEach(function(x){ live[normalizeIp(x.ip)] = true; });
+        devices.forEach(function(d) {
+          if (d.relayConnected && !live[normalizeIp(d.ip)]) {
+            fetch('http://' + d.ip + ':8182/api/group/relay/start?relayIp=' + encodeURIComponent(relayIp) + '&role=' + (d.role === 'master' ? 'master' : 'slave'), { method:'POST', signal: AbortSignal.timeout(6000) })
+              .then(function(){ log('自愈: 重连 ' + d.ip + ' 到中继', 'ok'); })
+              .catch(function(){});
+          }
+        });
+      }).catch(function(){});
+  }, 10000);
+}
+
 // ==================== 渲染设备卡片 ====================
 function renderScreens() {
   var grid = document.getElementById('screensGrid');
@@ -695,23 +989,22 @@ function renderScreens() {
     var displayName = dev.name || dev.alias || dev.ip;
     var hasScreen = !!dev._hasScreen;
     var initOverlay = hasScreen ? 'display:none' : 'display:flex';
-    var initImg = (hasScreen && dev._lastScreenSrc)
-      ? ' src="' + String(dev._lastScreenSrc).replace(/&/g, '&amp;').replace(/"/g, '&quot;') + '" style="display:block"'
-      : ' src="" style="display:none"';
     var initText = hasScreen ? '刷新中…' : (escHtml(dev.name) + ' 等待画面加载…');
 
-    html += '<div class="screen-card' + (isPopped ? ' popped-out' : '') + '" id="card_' + dev.id + '" ondblclick="popOutDevice(\'' + dev.id + '\')" title="双击弹出独立窗口">' +
+    html += '<div class="screen-card' + (isPopped ? ' popped-out' : '') + '" id="card_' + dev.id + '" onclick="popOutDevice(\'' + dev.id + '\')" onmouseenter="setCardHover(\'' + dev.id + '\',true)" onmouseleave="setCardHover(\'' + dev.id + '\',false)" title="单击弹出独立窗口">' +
+      '<input type="checkbox" class="card-select" id="sel_' + dev.id + '"' + (selectedSet[dev.id] ? ' checked' : '') + ' onchange="onCardSelect(\'' + dev.id + '\',this.checked)" onclick="event.stopPropagation()">' +
       '<div class="screen-title">' +
         '<span class="dot ' + (dev.online ? 'dot-green' : 'dot-gray') + '"></span>' +
         '<span class="name" title="' + escHtml(displayName) + '">' + escHtml(displayName) + '</span>' +
         '<span class="ip-label">' + escHtml(dev.ip) + '</span>' +
       '</div>' +
       '<div class="screen-view" id="view_' + dev.id + '">' +
-        '<img id="img_' + dev.id + '" alt="' + escHtml(dev.name) + '"' + initImg + '>' +
+        '<canvas id="cv_' + dev.id + '" style="display:none"></canvas>' +
         '<div class="offline-overlay" id="overlay_' + dev.id + '" style="' + initOverlay + '">' +
           '<div class="ico">📵</div>' +
           '<div>' + initText + '</div>' +
         '</div>' +
+        '<span class="blank-badge" id="blank_' + dev.id + '" style="display:none">屏幕未激活</span>' +
       '</div>' +
       '<div class="popped-overlay" id="popped_' + dev.id + '" style="' + (isPopped ? 'display:flex' : 'display:none') + '" onclick="bringBackDevice(\'' + dev.id + '\')">' +
         '<div class="ico">📺</div>' +
@@ -722,6 +1015,14 @@ function renderScreens() {
   });
 
   grid.innerHTML = html;
+  cardCtx = {}; // DOM 重建，旧 canvas context 失效，清空缓存
+
+  // 可见性观察：滚动出视口的卡片暂停解码，100+ 设备时大幅省主线程
+  setupCardVisibilityObserver();
+  activeDevices.forEach(function(dev) {
+    var el = document.getElementById('card_' + dev.id);
+    if (el && cardObserver) cardObserver.observe(el);
+  });
 
   // 确保每张设备卡都有活跃的截图循环（应对列表变化新增设备 / DOM 重建后补启）
   if (relayWs && relayWs.readyState === 1) {
@@ -732,6 +1033,8 @@ function renderScreens() {
 
   // 绑定全局触控事件（主控画面）
   bindGlobalTouchEvents();
+  refreshGroupOptions();
+  applyFilters(); // 应用当前搜索/分组筛选（仅切换卡片显隐，不重建 canvas，避免闪屏）
 }
 
 // ==================== 绑定全局触摸/鼠标事件（用于电脑端操控所有设备）====================
@@ -753,7 +1056,7 @@ function fetchDeviceRealName(dev) {
       if (info.systemVersion) dev.systemVersion = info.systemVersion;
       else if (info.version) dev.systemVersion = info.version;
       if (info.model) dev.model = info.model;
-      renderScreens();
+      updateCardName(dev);
       updateTopInfo();
       log('✓ 获取真实设备名: ' + dev.ip + ' → ' + dev.name, 'ok');
     } else if (name) {
@@ -772,8 +1075,10 @@ function refreshAllDeviceNames() {
 
 // ==================== 中继 WebSocket 管理（浏览器 → 中继服务器）====================
 function connectRelayWS() {
-  // 强制使用当前网页所在电脑的 IP 作为中继服务器
-  relayIp = window.location.hostname || 'localhost';
+  // relayIp 由 init()/detectRelayIp() 设定，不再覆盖
+  if (!relayIp) {
+    relayIp = window.location.hostname || 'localhost';
+  }
 
   if (relayWs) { try { relayWs.close(); } catch(e) {} relayWs = null; }
   wsStatus = 'connecting';
@@ -811,6 +1116,18 @@ function connectRelayWS() {
       var data = JSON.parse(e.data);
       if (data.type === 'welcome') {
         log('中继欢迎消息: role=' + data.role, 'ok');
+      } else if (data.type === 'frame' && data.data) {
+        // WS 推帧模式（中继 RELAY_WS_FRAMES=1）：base64 JPEG 直绘，停止 HTTP 轮询
+        var fdev = devices.find(function(d){ return normalizeIp(d.ip) === normalizeIp(data.ip); });
+        if (fdev) drawFrameFromB64(fdev, data.data);
+      } else if (data.type === 'rfb_frame' && data.data) {
+        // RFB 增量帧桥（中继 RELAY_RFB=1）：局部刷新 RGBA 矩形
+        var rdev = devices.find(function(d){ return normalizeIp(d.ip) === normalizeIp(data.ip); });
+        if (rdev) drawRfbFrame(rdev, data.x, data.y, data.w, data.h, data.data, data.fbw, data.fbh);
+      } else if (data.type === 'rfb_stop') {
+        // 中继 RFB 会话结束（手机 VNC 不可达/断开）→ 该设备回退 HTTP 轮询（自愈）
+        var sdev = devices.find(function(d){ return normalizeIp(d.ip) === normalizeIp(data.ip); });
+        if (sdev) sdev._rfbActive = false;
       }
       // 收到从控加入通知等可以在这里处理
     } catch(ex) {}
@@ -818,12 +1135,16 @@ function connectRelayWS() {
 
   relayWs.onerror = function() {
     log('中继 WS 错误（检查中继服务器是否运行）', 'err');
-    wsStatus = 'disconnected'; updateWsStatusUI();
+    wsStatus = 'disconnected'; wsFramePushActive = false;
+    devices.forEach(function(d){ d._rfbActive = false; }); // RFB 通道失效，回退 HTTP 轮询
+    updateWsStatusUI();
   };
 
   relayWs.onclose = function() {
     wsStatus = 'disconnected';
-    log('中继 WS 已断开', 'warn');
+    wsFramePushActive = false; // 推帧通道失效，fetchFrame 将在 2s 内心跳内恢复 HTTP 轮询
+    devices.forEach(function(d){ d._rfbActive = false; }); // RFB 通道失效，回退 HTTP 轮询
+    log('中继 WS 已断开（推帧模式退出，回退 HTTP 轮询）', 'warn');
     updateWsStatusUI();
   };
 }
@@ -840,94 +1161,423 @@ function updateWsStatusUI() {
   if (!el) return;
   el.textContent = wsStatus === 'connected' ? '已连接' : wsStatus === 'connecting' ? '连接中...' : '未连接';
   el.className = 'conn-status ' + (wsStatus === 'connected' ? 'connected' : wsStatus === 'connecting' ? '' : 'disconnected');
-  renderScreens(); // 更新信息栏显示
+}
+
+// ==================== 离主线程解码（Web Worker + ImageBitmap）====================
+// 100+ 设备时最大卡顿来源是浏览器在主线程解码 JPEG。把 fetch+decode 移入 Worker，
+// 回传 ImageBitmap，主线程只做廉价 drawImage，解码不再阻塞 UI。
+var decodeWorker = null;
+var cardCtx = {};            // dev.id -> canvas 2d context 缓存
+var frameDecodeBusy = {};    // dev.id -> 是否正在解码（单飞，防堆积）
+var cardObserver = null;     // IntersectionObserver 单例
+
+function createDecodeWorker() {
+  if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined'
+      || typeof URL === 'undefined' || !URL.createObjectURL) return null;
+  var code = [
+    'self.onmessage=function(e){',
+    ' var m=e.data; if(!m||m.type!=="decode")return;',
+    ' var id=m.id,url=m.url;',
+    ' fetch(url).then(function(r){if(!r.ok)throw new Error("http "+r.status);return r.blob();})',
+    '  .then(function(b){',
+    '    if(!b||b.size<500){self.postMessage({type:"blank",id:id});return;}',
+    '    return createImageBitmap(b);',
+    '  })',
+    '  .then(function(bmp){if(!bmp)return;self.postMessage({type:"bitmap",id:id,bmp:bmp,w:bmp.width,h:bmp.height},[bmp]);})',
+    '  .catch(function(err){self.postMessage({type:"error",id:id,message:String((err&&err.message)||err)});});',
+    '};'
+  ].join('\n');
+  try {
+    var blob = new Blob([code], { type: 'application/javascript' });
+    var w = new Worker(URL.createObjectURL(blob));
+    w.onmessage = onDecodeMessage;
+    w.onerror = function() { decodeWorker = null; };
+    return w;
+  } catch (e) { return null; }
+}
+
+function onDecodeMessage(e) {
+  var m = e.data;
+  if (!m || !m.id) return;
+  var dev = devices.find(function(d) { return d.id === m.id; });
+  if (!dev) return;
+  if (dev._wd) { clearTimeout(dev._wd); dev._wd = null; }
+  if (m.type === 'bitmap') {
+    dev._blank = false; updateBlankBadge(dev, false);
+    drawBitmapToCard(dev, m.bmp, m.w, m.h);
+    dev.online = true; dev._hasScreen = true; dev._screenErrLogged = false;
+    updateDeviceOnlineStatus(dev);
+    if (!dev._screenOkLogged) { log('✓ ' + dev.name + ' 截图正常 (Worker解码)', 'ok'); dev._screenOkLogged = true; }
+    frameDecodeBusy[dev.id] = false;
+    scheduleNextFrame(dev);
+  } else if (m.type === 'blank') {
+    frameDecodeBusy[dev.id] = false;
+    handleBlankFrame(dev);
+  } else if (m.type === 'error') {
+    frameDecodeBusy[dev.id] = false;
+    handleFrameError(dev);
+  }
+}
+
+// 空白/无信号帧检测：手机熄屏 / App 后台 / 中继偶发空帧 会返回纯色或极暗 JPEG，
+// 画上去就是"突然黑屏一下"。8x8 采样判定：(1) 单一纯色(最大最小差<12)=无信号屏；
+// (2) 平均极暗(<40/通道≈13)=暗屏闪烁。命中且已有正常画面 → 丢弃保留上一帧，杜绝闪黑。
+var _blackCheckCv = null;
+function isBlankOrDarkFrame(bmp) {
+  try {
+    if (!_blackCheckCv) _blackCheckCv = document.createElement('canvas');
+    _blackCheckCv.width = 8; _blackCheckCv.height = 8;
+    var c = _blackCheckCv.getContext('2d', { willReadFrequently: true });
+    c.clearRect(0, 0, 8, 8);
+    c.drawImage(bmp, 0, 0, 8, 8);
+    var d = c.getImageData(0, 0, 8, 8).data;
+    var sum = 0, minL = 765, maxL = 0;
+    for (var i = 0; i < d.length; i += 4) {
+      var L = d[i] + d[i + 1] + d[i + 2];
+      sum += L;
+      if (L < minL) minL = L;
+      if (L > maxL) maxL = L;
+    }
+    var isUniform = (maxL - minL) < 12;   // 全屏单一纯色 → 熄屏/无信号
+    var isDark = (sum / 64) < 40;         // 平均极暗 → 暗屏闪烁
+    return isUniform || isDark;
+  } catch (e) { return false; }
+}
+
+// 同款 8x8 采样空白检测，但入参是 canvas（用于 RFB 离屏整帧缓冲）：
+// RFB 增量帧桥下，离屏缓冲初始为黑、熄屏/后台时 VNC 帧缓冲也是黑，
+// 命中即说明「当前无有效画面」，不应把黑画到卡片，应保留上一帧并由 HTTP 接管。
+function isBlankOrDarkCanvas(cv) {
+  try {
+    if (!_blackCheckCv) _blackCheckCv = document.createElement('canvas');
+    _blackCheckCv.width = 8; _blackCheckCv.height = 8;
+    var c = _blackCheckCv.getContext('2d', { willReadFrequently: true });
+    c.clearRect(0, 0, 8, 8);
+    c.drawImage(cv, 0, 0, 8, 8);
+    var d = c.getImageData(0, 0, 8, 8).data;
+    var sum = 0, minL = 765, maxL = 0;
+    for (var i = 0; i < d.length; i += 4) {
+      var L = d[i] + d[i + 1] + d[i + 2];
+      sum += L;
+      if (L < minL) minL = L;
+      if (L > maxL) maxL = L;
+    }
+    var isUniform = (maxL - minL) < 12;
+    var isDark = (sum / 64) < 40;
+    return isUniform || isDark;
+  } catch (e) { return false; }
+}
+
+function drawBitmapToCard(dev, bmp, w, h) {
+  var cv = document.getElementById('cv_' + dev.id);
+  if (!cv) return;
+  // RFB 增量帧已接管该卡 → HTTP 轮询绘制让位，避免两通道互相 resize 清空画布导致闪黑
+  if (dev._rfbActive) return;
+  // 已有正常画面且本次为空白/暗帧 → 跳过绘制，保持上一帧，并标记"屏幕未激活"
+  if (dev._hasScreen && isBlankOrDarkFrame(bmp)) {
+    dev.online = true;
+    dev._blank = true; updateBlankBadge(dev, true);
+    updateDeviceOnlineStatus(dev);
+    return;
+  }
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; cardCtx[dev.id] = null; }
+  var ctx = cardCtx[dev.id];
+  if (!ctx) { ctx = cv.getContext('2d'); cardCtx[dev.id] = ctx; }
+  if (!ctx) return;
+  try { ctx.drawImage(bmp, 0, 0, w, h); } catch (e) { return; }
+  cv.style.display = 'block';
+  var overlay = document.getElementById('overlay_' + dev.id);
+  if (overlay) overlay.style.display = 'none';
+  dev._blank = false; updateBlankBadge(dev, false);
+}
+
+// ==================== 中继 WS 推帧 / RFB 增量帧消费 ====================
+// 当开启 RELAY_WS_FRAMES=1，中继直接把每台设备的截图 JPEG 经浏览器 WS 推下来，
+// 取代前端 HTTP 轮询（更省连接、更低延迟、同源零 CORS）。收到首帧即标记 wsFramePushActive，
+// 让 fetchFrame 退化为慢速心跳，由 WS 推帧独占驱动，杜绝双通道重复解码与冲突。
+// WS 断开时 onclose 复位该标志，fetchFrame 自动在 2s 内恢复 HTTP 轮询（自愈）。
+var wsFramePushActive = false;
+
+function drawFrameFromB64(dev, b64) {
+  if (!b64) return;
+  // RFB 增量帧优先级更高 → WS 整帧推帧让位，避免两通道争用同一画布
+  if (dev._rfbActive) return;
+  if (!wsFramePushActive) {
+    wsFramePushActive = true;
+    log('中继开启 WS 推帧模式：HTTP 轮询已让位给 WS 推帧', 'ok');
+  }
+  if (popWindows[dev.id] || dev._visible === false) return; // 弹窗/滚出视口暂停绘制
+  // base64 → Uint8Array → Blob → ImageBitmap（保留与主通道一致的离线程解码质量）
+  var bin = atob(b64);
+  var arr = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  var blob = new Blob([arr], { type: 'image/jpeg' });
+  var drawViaBmp = function(bmp) {
+    // 空白/暗帧检测：已有正常画面且本次为纯色/极暗 → 保留上一帧，标记"屏幕未激活"，与 HTTP 通道一致不闪黑
+    if (dev._hasScreen && isBlankOrDarkFrame(bmp)) {
+      dev.online = true; dev._blank = true; updateBlankBadge(dev, true);
+      updateDeviceOnlineStatus(dev);
+      return;
+    }
+    var cv = document.getElementById('cv_' + dev.id);
+    if (!cv) return;
+    if (cv.width !== bmp.width || cv.height !== bmp.height) { cv.width = bmp.width; cv.height = bmp.height; cardCtx[dev.id] = null; }
+    var ctx = cardCtx[dev.id];
+    if (!ctx) { ctx = cv.getContext('2d'); cardCtx[dev.id] = ctx; }
+    if (!ctx) return;
+    try { ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height); } catch (e) { return; }
+    cv.style.display = 'block';
+    var overlay = document.getElementById('overlay_' + dev.id);
+    if (overlay) overlay.style.display = 'none';
+    dev._hasScreen = true; dev._blank = false; dev.online = true;
+    updateBlankBadge(dev, false); updateDeviceOnlineStatus(dev);
+  };
+  if (typeof createImageBitmap !== 'undefined') {
+    createImageBitmap(blob).then(drawViaBmp).catch(function() { /* 单帧解码失败忽略，等待下一推帧 */ });
+  } else {
+    // 老浏览器兜底：Image 主线程解码（保证 WS 推帧可用）
+    var im = new Image();
+    im.onload = function() { drawViaBmp(im); };
+    im.src = 'data:image/jpeg;base64,' + b64;
+  }
+}
+
+// RFB 增量帧桥（RELAY_RFB=1）：中继直连手机 :5901 VNC，只拉「变化矩形」(Raw 编码)，
+// 把局部 RGBA 像素推给浏览器做精确局部刷新。前端为每张卡维护整帧离屏缓冲，
+// 累积增量矩形后缩放绘制到可见 canvas，避免整屏重绘闪黑，且 CPU 占用远低于全屏重采。
+function drawRfbFrame(dev, x, y, w, h, b64, fbw, fbh) {
+  if (!b64 || !fbw || !fbh) return;
+  if (popWindows[dev.id] || dev._visible === false) return;
+  // 离屏整帧缓冲按上限缩放（默认宽 ≤480，与 HTTP 截图同量级），百台规模内存可控
+  var DS = dev._rfbDS || (dev._rfbDS = Math.max(1, Math.ceil(fbw / 480)));
+  var ow = Math.ceil(fbw / DS), oh = Math.ceil(fbh / DS);
+  if (!dev._rfbCv || dev._rfbCv.width !== ow || dev._rfbCv.height !== oh) {
+    var off = document.createElement('canvas');
+    off.width = ow; off.height = oh;
+    dev._rfbCv = off; dev._rfbCtx = off.getContext('2d');
+  }
+  var bin = atob(b64);
+  var u8 = new Uint8Array(bin.length);
+  for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  if (u8.length !== w * h * 4) return; // 尺寸不符则丢弃该增量矩形，避免 ImageData 越界
+  // 增量矩形先放进临时画布（原始尺寸），再按 DS 缩放绘制到离屏缓冲（坐标同步缩放，整数对齐防缝隙）
+  if (!dev._rfbTmp || dev._rfbTmp.width !== w || dev._rfbTmp.height !== h) {
+    dev._rfbTmp = document.createElement('canvas'); dev._rfbTmp.width = w; dev._rfbTmp.height = h;
+  }
+  var tctx = dev._rfbTmp.getContext('2d');
+  try { tctx.putImageData(new ImageData(new Uint8ClampedArray(u8), w, h), 0, 0); } catch (e) { return; }
+  try { dev._rfbCtx.drawImage(dev._rfbTmp, 0, 0, w, h, Math.round(x / DS), Math.round(y / DS), Math.ceil(w / DS), Math.ceil(h / DS)); } catch (e) { return; }
+
+  // ★ 整缓冲空白检测：VNC 当前无有效画面（熄屏/后台/初始帧未到）→ 不把黑画到卡片，
+  //   保留上一帧并标记「屏幕未激活」，且让位回 HTTP（HTTP 也做空白检测），杜绝 RFB 永久黑屏
+  if (isBlankOrDarkCanvas(dev._rfbCv)) {
+    dev.online = true;
+    dev._blank = true; updateBlankBadge(dev, true);
+    updateDeviceOnlineStatus(dev);
+    dev._rfbActive = false; // 释放接管，HTTP 轮询可重新绘真实截图（黑屏时显示角标而非黑屏）
+    return;
+  }
+
+  // 非空白有效帧 → 接管该卡：HTTP 轮询绘制让位（见 drawBitmapToCard 守卫），避免双通道争用画布
+  // 整缓冲缩放绘制到可见卡片 canvas（卡片 canvas 也用缩放后尺寸，省内存）
+  var cv = document.getElementById('cv_' + dev.id);
+  if (!cv) return;
+  if (cv.width !== ow || cv.height !== oh) { cv.width = ow; cv.height = oh; cardCtx[dev.id] = null; }
+  var ctx = cardCtx[dev.id];
+  if (!ctx) { ctx = cv.getContext('2d'); cardCtx[dev.id] = ctx; }
+  if (!ctx) return;
+  try { ctx.drawImage(dev._rfbCv, 0, 0, ow, oh); } catch (e) { return; }
+  cv.style.display = 'block';
+  var overlay = document.getElementById('overlay_' + dev.id);
+  if (overlay) overlay.style.display = 'none';
+  dev._rfbActive = true; // 非空白有效帧 → 接管该卡
+  dev._hasScreen = true; dev._blank = false; dev.online = true;
+  updateBlankBadge(dev, false); updateDeviceOnlineStatus(dev);
+}
+
+function decodeOnMainThread(dev, url, onOk, onErr) {
+  fetch(url).then(function(r){ if(!r.ok) throw new Error('http '+r.status); return r.blob(); })
+    .then(function(b){ if(!b||b.size<500){ handleBlankFrame(dev); return; } return createImageBitmap(b); })
+    .then(function(bmp){ if(!bmp) return; if(isBlankOrDarkFrame(bmp)){ handleBlankFrame(dev); } else { onOk(bmp, bmp.width, bmp.height); } })
+    .catch(function(err){ onErr(String((err&&err.message)||err)); });
+}
+
+function requestFrameDecode(dev, url, onOk, onErr) {
+  if (decodeWorker) {
+    frameDecodeBusy[dev.id] = true;
+    dev._wd = setTimeout(function() {
+      // Worker 8s 无响应 → 标记失效并降级主线程，避免该卡永久卡死
+      decodeWorker = null; frameDecodeBusy[dev.id] = false;
+      if (typeof onErr === 'function') onErr('worker timeout');
+    }, 8000);
+    try { decodeWorker.postMessage({ type: 'decode', id: dev.id, url: url }); }
+    catch (e) {
+      frameDecodeBusy[dev.id] = false;
+      if (dev._wd) { clearTimeout(dev._wd); dev._wd = null; }
+      decodeWorker = null;
+      if (typeof onErr === 'function') onErr('post fail');
+    }
+    return;
+  }
+  if (typeof createImageBitmap !== 'undefined' && typeof fetch !== 'undefined') {
+    decodeOnMainThread(dev, url, onOk, onErr);
+    return;
+  }
+  // 最老浏览器兜底：Image 主线程解码（保证可用）
+  var im = new Image();
+  im.onload = function() { onOk(im, im.naturalWidth, im.naturalHeight); };
+  im.onerror = function() { onErr('img error'); };
+  im.src = url;
+}
+
+function currentFrameParams(dev) {
+  var base = dev.role === 'master' ? screenParams.master : screenParams.slave;
+  if (dev._hovered) {
+    // 悬停时拉高清 + 提速，便于肉眼确认
+    return { quality: Math.min(0.85, base.quality + 0.25), scale: Math.max(0.3, base.scale), interval: Math.min(base.interval, 400) };
+  }
+  return { quality: base.quality, scale: base.scale, interval: base.interval };
+}
+
+function scheduleNextFrame(dev) {
+  var params = currentFrameParams(dev);
+  var minMs = params.interval;
+  frameCounters[dev.id]++;
+  var fpsNow = Date.now();
+  if (fpsNow - (lastFpsTick[dev.id] || fpsNow) >= 1000) { frameCounters[dev.id] = 0; lastFpsTick[dev.id] = fpsNow; }
+  activeTimers[dev.id] = setTimeout(function() { fetchFrame(dev); }, Math.max(0, minMs - (Date.now() - (dev._lastFetchTime || 0))));
+}
+
+function handleFrameError(dev) {
+  if (dev._wd) { clearTimeout(dev._wd); dev._wd = null; }
+  frameDecodeBusy[dev.id] = false;
+  var cv = document.getElementById('cv_' + dev.id);
+  var overlay = document.getElementById('overlay_' + dev.id);
+  if (dev._hasScreen) {
+    if (cv) cv.style.display = 'block';
+    if (overlay) overlay.style.display = 'none';
+  } else {
+    if (cv) cv.style.display = 'none';
+    if (overlay) overlay.style.display = 'flex';
+  }
+  dev.online = false;
+  updateDeviceOnlineStatus(dev);
+  if (!dev._screenErrLogged) { log('✗ ' + dev.name + ' 截图失败 (中继/手机在线?)', 'err'); dev._screenErrLogged = true; }
+  activeTimers[dev.id] = setTimeout(function() { fetchFrame(dev); }, 2000);
+}
+
+// 空白/无信号帧：手机可达但返回空帧/熄屏（保留上一帧，显示"屏幕未激活"角标，不闪黑）
+function handleBlankFrame(dev) {
+  if (dev._wd) { clearTimeout(dev._wd); dev._wd = null; }
+  frameDecodeBusy[dev.id] = false;
+  dev.online = true;                 // 手机仍在线，只是屏未激活
+  dev._blank = true; updateBlankBadge(dev, true);
+  var cv = document.getElementById('cv_' + dev.id);
+  var overlay = document.getElementById('overlay_' + dev.id);
+  if (!dev._hasScreen) {
+    if (cv) cv.style.display = 'none';
+    if (overlay) overlay.style.display = 'flex';
+  } else {
+    if (cv) cv.style.display = 'block';
+    if (overlay) overlay.style.display = 'none';
+  }
+  updateDeviceOnlineStatus(dev);
+  if (!dev._screenErrLogged) { log('⚠ ' + dev.name + ' 屏幕未激活/空帧 (保留上一帧)', 'warn'); dev._screenErrLogged = true; }
+  scheduleNextFrame(dev);
+}
+
+function setCardHover(devId, on) {
+  var dev = devices.find(function(d) { return d.id === devId; });
+  if (!dev) return;
+  dev._hovered = on;
+  if (on && !frameDecodeBusy[dev.id] && popWindows[dev.id] == null) {
+    if (activeTimers[dev.id]) clearTimeout(activeTimers[dev.id]);
+    fetchFrame(dev); // 悬停立即拉一帧高清
+  }
+}
+
+function onCardIntersect(entries) {
+  entries.forEach(function(en) {
+    if (!en || !en.target || !en.target.id) return;
+    var id = en.target.id.replace('card_', '');
+    var dev = devices.find(function(d) { return d.id === id; });
+    if (!dev) return;
+    dev._visible = en.isIntersecting;
+  });
+}
+
+function setupCardVisibilityObserver() {
+  if (cardObserver) return;
+  if (typeof IntersectionObserver === 'undefined') return; // 不支持则全部视为可见
+  var root = document.getElementById('screensGrid');
+  cardObserver = new IntersectionObserver(onCardIntersect, { root: root, rootMargin: '120px', threshold: 0.01 });
 }
 
 // ==================== 截图轮询（经中继 HTTP 代理）====================
+function isRelayConnected() {
+  return !!(relayWs && relayWs.readyState === 1);
+}
 function getScreenshotBaseUrl(dev) {
-  // 走中继服务器代理：http://{relayIp}:9527/api/screenshot?ip={devIp}&...
-  var params = dev.role === 'master' ? screenParams.master : screenParams.slave;
-  return 'http://' + relayIp + ':9527/api/screenshot?ip=' + encodeURIComponent(dev.ip)
-    + '&format=jpeg&quality=' + params.quality + '&scale=' + params.scale + '&rotation=90&_t=';
+  var params = currentFrameParams(dev); // 悬停/可见性自适应画质
+  if (relayIp) {
+    // 始终走中继 HTTP 代理（与页面同源 localhost:9527：无 CORS、连接复用，比跨源直连手机快且稳）
+    // 注意：截图代理不依赖浏览器 WS 连接，中继 HTTP 服务常驻即可用
+    return 'http://' + relayIp + ':9527/api/screenshot?ip=' + encodeURIComponent(dev.ip)
+      + '&format=jpeg&quality=' + params.quality + '&scale=' + params.scale + '&rotation=90&_t=';
+  }
+  // 中继不可达时回退直连手机 :8182（仍可用，仅失去同源性能优势）
+  return 'http://' + dev.ip + ':8182/api/screenshot'
+    + '?format=jpeg&quality=' + params.quality + '&scale=' + params.scale + '&rotation=90&_t=';
 }
 
-function startScreenRefresh(dev, minInterval) {
+function startScreenRefresh(dev) {
   stopScreenRefresh(dev.id);
   frameCounters[dev.id] = 0;
   lastFpsTick[dev.id] = Date.now();
+  if (dev._visible === undefined) dev._visible = true;
+  dev._lastFetchTime = 0;
+  fetchFrame(dev);
+}
 
-  var baseUrl = getScreenshotBaseUrl(dev);
-  var params = dev.role === 'master' ? screenParams.master : screenParams.slave;
-  var minMs = (minInterval !== undefined) ? minInterval : params.interval;
-  var fetching = false;
-  var lastFetchTime = 0;
+function fetchFrame(dev) {
+  // WS 推帧模式（RELAY_WS_FRAMES=1）：HTTP 轮询已让位，仅挂慢速心跳，待推帧关闭时自动恢复
+  if (wsFramePushActive) {
+    activeTimers[dev.id] = setTimeout(function() { fetchFrame(dev); }, 2000);
+    return;
+  }
+  // 弹窗已接管该设备 / 卡片滚出视口 → 暂停解码，仅慢速轮询状态（省主线程）
+  if (popWindows[dev.id] || dev._visible === false) {
+    activeTimers[dev.id] = setTimeout(function() { fetchFrame(dev); }, 1200);
+    return;
+  }
+  if (frameDecodeBusy[dev.id]) return; // 上一次解码未完，跳过（单飞防堆积）
 
-  function fetchFrame() {
-    if (fetching) return;
-    var now = Date.now();
-    if (now - lastFetchTime < minMs) {
-      activeTimers[dev.id] = setTimeout(fetchFrame, minMs - (now - lastFetchTime));
-      return;
-    }
-    fetching = true;
-    lastFetchTime = now;
-    var t0 = now;
-    var tempImg = new Image();
-
-    tempImg.onload = function() {
-      var img = document.getElementById('img_' + dev.id);
-      var overlay = document.getElementById('overlay_' + dev.id);
-      if (!img) { fetching = false; return; }
-      img.src = tempImg.src;
-      dev._lastScreenSrc = img.src;
-      img.style.display = 'block';
-      if (overlay) overlay.style.display = 'none';
-      dev.online = true;
-      dev._hasScreen = true;
-      dev._screenErrLogged = false; // 重置错误标志
-      updateDeviceOnlineStatus(dev);
-
-      // 首次成功时记录日志
-      if (!dev._screenOkLogged) { log('✓ ' + dev.name + ' 截图正常 (' + (Date.now() - t0) + 'ms)', 'ok'); dev._screenOkLogged = true; }
-
-      var latency = Date.now() - t0;
-      var latEl = document.getElementById('lat_' + dev.id);
-      if (latEl) latEl.textContent = latency + 'ms';
-
-      frameCounters[dev.id]++;
-      var fpsNow = Date.now();
-      if (fpsNow - (lastFpsTick[dev.id] || fpsNow) >= 1000) {
-        frameCounters[dev.id] = 0;
-        lastFpsTick[dev.id] = fpsNow;
-      }
-
-      fetching = false;
-      activeTimers[dev.id] = setTimeout(fetchFrame, Math.max(0, minMs - (Date.now() - lastFetchTime)));
-    };
-
-    tempImg.onerror = function() {
-      var img = document.getElementById('img_' + dev.id);
-      var overlay = document.getElementById('overlay_' + dev.id);
-      if (dev._hasScreen) {
-        // 曾成功显示过：保留最后一张画面，不闪黑，仅标记刷新中
-        if (img) img.style.display = 'block';
-        if (overlay) overlay.style.display = 'none';
-      } else {
-        // 从未成功：显示等待提示
-        if (img) img.style.display = 'none';
-        if (overlay) overlay.style.display = 'flex';
-      }
-      dev.online = false;
-      // 只记录首次错误，避免刷屏
-      if (!dev._screenErrLogged) { log('✗ ' + dev.name + ' 截图失败 (检查中继服务器是否运行 / 手机是否在线)', 'err'); dev._screenErrLogged = true; }
-      fetching = false;
-      activeTimers[dev.id] = setTimeout(fetchFrame, 2000);
-    };
-
-    tempImg.src = baseUrl + Date.now();
+  var params = currentFrameParams(dev);
+  var minMs = params.interval;
+  var now = Date.now();
+  var last = dev._lastFetchTime || 0;
+  if (now - last < minMs) {
+    activeTimers[dev.id] = setTimeout(function() { fetchFrame(dev); }, minMs - (now - last));
+    return;
   }
 
-  fetchFrame();
+  dev._lastFetchTime = now;
+  var url = getScreenshotBaseUrl(dev) + Date.now();
+
+  requestFrameDecode(dev, url,
+    function onOk(bmp, w, h) {
+      drawBitmapToCard(dev, bmp, w, h);
+      dev.online = true; dev._hasScreen = true; dev._screenErrLogged = false;
+      if (dev._wd) { clearTimeout(dev._wd); dev._wd = null; }
+      updateDeviceOnlineStatus(dev);
+      if (!dev._screenOkLogged) { log('✓ ' + dev.name + ' 截图正常', 'ok'); dev._screenOkLogged = true; }
+      frameDecodeBusy[dev.id] = false;
+      scheduleNextFrame(dev);
+    },
+    function onErr(msg) {
+      handleFrameError(dev);
+    }
+  );
 }
 
 function stopScreenRefresh(devId) {
@@ -938,14 +1588,27 @@ function stopScreenRefresh(devId) {
 }
 
 function updateDeviceOnlineStatus(dev) {
+  if (dev._lastOnline === dev.online) return; // 状态未变则跳过 DOM 写入，避免每帧重排
+  dev._lastOnline = dev.online;
   var dot = document.querySelector('#card_' + dev.id + ' .dot');
   if (dot) dot.className = 'dot ' + (dev.online ? 'dot-green' : 'dot-gray');
   updateTopInfo();
 }
 
+function updateBlankBadge(dev, on) {
+  var el = document.getElementById('blank_' + dev.id);
+  if (el) el.style.display = on ? 'block' : 'none';
+}
+
+function updateCardName(dev) {
+  var el = document.querySelector('#card_' + dev.id + ' .name');
+  if (el) { el.textContent = dev.name || dev.alias || dev.ip; el.title = dev.name || dev.alias || dev.ip; }
+}
+
 function startScreensOnly() {
   // 对所有已加载设备启动截图（不再限制 role !== 'none'）
   devices.forEach(function(dev) {
+    if (activeTimers[dev.id]) return; // 已在刷新，避免 30s 轮询/中继重连时重复重启
     startScreenRefresh(dev);
   });
 }
@@ -1064,9 +1727,18 @@ function setRole(id, role) {
   var dev = devices.find(function(d) { return d.id === id; });
   if (!dev) return;
   if (role === 'master') {
-    devices.forEach(function(d) { if (d.id !== id && d.role === 'master') d.role = 'slave'; });
+    devices.forEach(function(d) {
+      if (d.id !== id && d.role === 'master') {
+        d.role = 'slave';
+        if (d.ip) roleOverrides[d.ip] = 'slave';
+        pushDeviceRole(d);
+      }
+    });
   }
   dev.role = role;
+  if (dev.ip) roleOverrides[dev.ip] = role;
+  saveRoleOverrides();
+  pushDeviceRole(dev);
   log('设备 ' + dev.name + ' 角色改为: ' + role, 'info');
   renderScreens();
   restartScreensForRoleChange();
@@ -1137,6 +1809,43 @@ function updateRelayBadge(dev) {
   updateTopInfo();
 }
 
+// ==================== 中继连接校验 ====================
+// 开启/关闭群控后，向中继查询真实接入情况，校正每张卡"已中继/未中继"状态。
+// 关键：connectAllRelay 在手机 relay/start 返回 200 即乐观置 relayConnected=true，
+//       但手机 WS 未必真连上中继 → 卡片显示已连实则 slaves 为空、广播落空且静默。
+//       这里以中继 /api/status 的权威名单校正，让"从控没反应"变得可见。
+function normalizeIpFront(ip) {
+  if (!ip) return ip;
+  var s = String(ip).trim();
+  if (s.indexOf('::ffff:') === 0) s = s.slice(7);
+  return s;
+}
+
+function verifyRelayConnections() {
+  if (!relayIp) return;
+  fetch('http://' + relayIp + ':9527/api/status', { signal: AbortSignal.timeout(5000) })
+    .then(function(r) { return r.json(); })
+    .then(function(st) {
+      var relayed = {};
+      (st.masters || []).forEach(function(m) { relayed[normalizeIpFront(m.ip)] = 'master'; });
+      (st.slaves || []).forEach(function(s) { relayed[normalizeIpFront(s.ip)] = 'slave'; });
+      var missing = [];
+      devices.forEach(function(d) {
+        var ok = !!relayed[normalizeIpFront(d.ip)];
+        d.relayConnected = ok;
+        updateRelayBadge(d);
+        if (!ok) missing.push(d);
+      });
+      if (missing.length === 0) {
+        toast('群控就绪：全部 ' + devices.length + ' 台已接入中继 ✓', 'ok');
+      } else {
+        toast(missing.length + ' 台未接入中继（群控可能无效）: ' + missing.map(function(d){return d.ip;}).join(' '), 'warn', 6000);
+        log('⚠ 未接入中继的设备（控制不会镜像到它们）: ' + missing.map(function(d){return d.name + '(' + d.ip + ')';}).join(', '), 'warn');
+      }
+    })
+    .catch(function() { /* 中继不可达则跳过校正 */ });
+}
+
 // ==================== 批量中继操作 ====================
 function connectAllRelay() {
   if (!relayIp) { toast('请先设置中继服务器 IP', 'err'); return; }
@@ -1164,7 +1873,7 @@ function connectAllRelay() {
         .finally(function() {
           if (done + fail === targetDevices.length) {
             hideBatchBar('完成! 成功 ' + done + ' 台, 失败 ' + fail + ' 台');
-            renderScreens();
+            verifyRelayConnections(); // 校正真实接入状态，让未连设备可见（逐卡 badge 原地更新，不重建网格）
           }
         });
     }, idx * 200); // 错开请求避免并发过大
@@ -1190,11 +1899,39 @@ function disconnectAllRelay() {
         .finally(function() {
           if (done + fail === targetDevices.length) {
             hideBatchBar('完成! 成功 ' + done + ' 台, 失败 ' + fail + ' 台');
-            renderScreens();
           }
         });
     }, idx * 100);
   });
+}
+
+// ==================== 全局群控开关 ====================
+// 默认关闭（groupControlOn=false），页面打开时所有设备都不会自动连中继。
+// 点「开启群控」→ 所有设备连中继；点「关闭群控」→ 所有设备断中继。
+function toggleGroupControl() {
+  if (!relayIp) { toast('请先设置中继服务器 IP', 'err'); return; }
+  if (!groupControlOn) {
+    groupControlOn = true;
+    setGroupControlBtn();
+    connectRelayWS();      // 浏览器先连中继 WS（控制通道）
+    connectAllRelay();     // 再让所有手机作为 slave 连入
+  } else {
+    groupControlOn = false;
+    setGroupControlBtn();
+    disconnectAllRelay();  // 手机断开中继
+    disconnectRelayWS();   // 浏览器断开中继 WS
+  }
+}
+function setGroupControlBtn() {
+  var btn = document.getElementById('groupControlBtn');
+  if (!btn) return;
+  if (groupControlOn) {
+    btn.textContent = '⏹ 关闭群控';
+    btn.classList.add('active');
+  } else {
+    btn.textContent = '▶ 开启群控';
+    btn.classList.remove('active');
+  }
 }
 
 function showBatchBar(msg) {
@@ -1270,18 +2007,19 @@ function popOutDevice(devId) {
   stopScreenRefresh(devId);
   var popHtml = generatePopOutHtml(dev);
 
-  popWindows[devId] = window.open('about:blank', 'TrollVNC_' + dev.ip.replace(/\./g,'_'),
+  // 用 Blob URL 打开弹窗：地址栏显示 blob: 而非 "about:blank"（Blob 同源继承，window.opener 回调/截图均正常）
+  var popBlob = new Blob([popHtml], { type: 'text/html;charset=utf-8' });
+  var popUrl = URL.createObjectURL(popBlob);
+  popWindows[devId] = window.open(popUrl, 'TrollVNC_' + dev.ip.replace(/\./g,'_'),
     'width=720,height=480,resizable=yes,scrollbars=no');
 
   if (!popWindows[devId]) {
+    try { URL.revokeObjectURL(popUrl); } catch(e){}
     toast('弹出窗口被浏览器拦截，请允许弹出窗口', 'err');
     startScreenRefresh(dev);
     return;
   }
-
-  popWindows[devId].document.open();
-  popWindows[devId].document.write(popHtml);
-  popWindows[devId].document.close();
+  popWindows[devId]._blobUrl = popUrl; // 关闭时释放
 
   var card = document.getElementById('card_' + devId);
   if (card) card.classList.add('popped-out');
@@ -1310,6 +2048,7 @@ function bringBackDevice(devId) {
   if (popWindows[devId] && !popWindows[devId].closed) {
     try { popWindows[devId].close(); } catch(e) {}
   }
+  try { if (popWindows[devId] && popWindows[devId]._blobUrl) URL.revokeObjectURL(popWindows[devId]._blobUrl); } catch(e){}
   delete popWindows[devId];
   if (popCheckIntervals[devId]) { clearInterval(popCheckIntervals[devId]); delete popCheckIntervals[devId]; }
 
@@ -1326,12 +2065,23 @@ function bringBackDevice(devId) {
 function onPopOutMasterChanged(devId, isMaster) {
   var dev = devices.find(function(d) { return d.id === devId; });
   if (!dev) return;
+  var affected = [];
   if (isMaster) {
-    devices.forEach(function(d) { if (d.id !== devId && d.role === 'master') d.role = 'slave'; });
+    // 互斥：其他主控降级为从控，并同步持久化 + 服务器
+    devices.forEach(function(d) {
+      if (d.id !== devId && d.role === 'master') {
+        d.role = 'slave';
+        if (d.ip) { roleOverrides[d.ip] = 'slave'; affected.push(d); }
+      }
+    });
     dev.role = 'master';
   } else {
     dev.role = 'slave';
   }
+  if (dev.ip) roleOverrides[dev.ip] = dev.role;
+  affected.push(dev);
+  saveRoleOverrides();
+  affected.forEach(function(d) { pushDeviceRole(d); }); // 推服务器，保持镜像源与 UI 一致
   renderScreens();
   startScreensOnly();
   log('弹窗 ' + dev.name + ' ' + (isMaster ? '启用' : '关闭') + '主控', isMaster ? 'ok' : 'warn');
@@ -1363,13 +2113,12 @@ function generatePopOutHtml(dev) {
   h.push('.toolbar button:disabled{opacity:0.4;cursor:not-allowed;}');
   h.push('.btn-master{border-color:#52c41a!important;color:#52c41a!important;}');
   h.push('.btn-master:hover,.btn-master.active{background:#52c41a!important;color:white!important;border-color:#52c41a!important;}');
-  h.push('.btn-close{border-color:#ff4d4f!important;color:#ff4d4f!important;}');
   h.push('.screen-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:8px;overflow:hidden;}');
   h.push('.screen-view{background:#000;position:relative;cursor:crosshair;contain:content;}');
   h.push('.screen-view img{width:100%;height:100%;display:block;object-fit:cover;touch-action:none;user-select:none;-webkit-user-select:none;will-change:transform;pointer-events:none;}');
   h.push('</style></head><body>');
 
-  // 工具栏（极简：只保留设备标识、主控、Home、关闭）
+  // 工具栏（极简：设备标识、主控、Home；中继 IP / 群控开关 / 关闭按钮已按需求移除）
   h.push('<div class="toolbar">');
   h.push('<span class="name">' + name + '</span>');
   h.push('<span class="ip">' + ip + '</span>');
@@ -1377,7 +2126,6 @@ function generatePopOutHtml(dev) {
   h.push('<button class="btn-master' + (isMaster ? ' active' : '') + '" id="masterBtn" onclick="toggleMaster()" title="开启/关闭主控 (M)">' + (isMaster ? '关闭主控' : '启用主控') + '</button>');
   h.push('<button onclick="sendHome()" title="单击 Home (H)">🏠 Home</button>');
   h.push('<button onclick="sendDoubleHome()" title="双击 Home (D)">🏠² ×2</button>');
-  h.push('<button class="btn-close" onclick="closeWindow()" title="关闭 (Esc)">✕ 关闭</button>');
   h.push('</div>');
 
   // 屏幕
@@ -1399,13 +2147,15 @@ function generatePopOutHtml(dev) {
   h.push('var screenView=document.getElementById("screenView");');
   h.push('var masterBtn=document.getElementById("masterBtn");');
   h.push('var relayBtn=document.getElementById("relayBtn");');
+  h.push('var relayConnected=false;');
   h.push('var curQuality=' + pq.quality + ',curScale=' + pq.scale + ';');
   // 出参定向：主控→镜像所有手机(scope=all)，未设主控→仅本机(按 IP 精确命中)
   h.push('function outOpts(base){if(isMaster){base.scope="all";}else{base.targetIp=DEVICE_IP;}return base;}');
 
-  // 截图 URL — 走中继
+  // 截图 URL：优先走中继 HTTP 代理（与弹窗同源 localhost:9527，无 CORS、连接复用，快且稳）；中继不可达才直连本机 :8182
   h.push('function getScreenshotUrl(){');
-  h.push('  return "http://"+RELAY_IP+":9527/api/screenshot?ip="+encodeURIComponent(DEVICE_IP)+"&format=jpeg&quality="+curQuality+"&scale="+curScale+"&rotation=90&_t="+Date.now();');
+  h.push('  if(RELAY_IP){return "http://"+RELAY_IP+":9527/api/screenshot?ip="+encodeURIComponent(DEVICE_IP)+"&format=jpeg&quality="+curQuality+"&scale="+curScale+"&rotation=90&_t="+Date.now();}');
+  h.push('  return "http://"+DEVICE_IP+":8182/api/screenshot?format=jpeg&quality="+curQuality+"&scale="+curScale+"&rotation=90&_t="+Date.now();');
   h.push('}');
 
   // 自适应 16:9
@@ -1444,6 +2194,44 @@ function generatePopOutHtml(dev) {
   h.push('  ws.onmessage=function(){};');
   h.push('  ws.onerror=function(){console.log("[PopOut] WS error");};');
   h.push('  ws.onclose=function(){setTimeout(connectRelayWS,3000);};');
+  h.push('}');
+
+  // 自动把本机接进中继(作为 slave)：双击弹窗后无需先在主页点"连接"即可直接操控；
+  // 也避免中继重启后手机被踢掉、弹窗点不动的问题
+  h.push('function syncRelayState(){');
+  h.push('  if(!RELAY_IP||RELAY_IP==="localhost"||RELAY_IP==="127.0.0.1"){relayConnected=false;setRelayBtn();return;}');
+  h.push('  fetch("http://"+RELAY_IP+":9527/api/status",{signal:AbortSignal.timeout(4000)})');
+  h.push('    .then(function(r){return r.json();})');
+  h.push('    .then(function(s){');
+  h.push('      var exists=false;');
+  h.push('      (s.masters||[]).forEach(function(m){if(m.ip===DEVICE_IP)exists=true;});');
+  h.push('      (s.slaves||[]).forEach(function(m){if(m.ip===DEVICE_IP)exists=true;});');
+  h.push('      relayConnected=exists;setRelayBtn();');
+  h.push('    })');
+  h.push('    .catch(function(){relayConnected=false;setRelayBtn();});');
+  h.push('}');
+
+  // 群控开关按钮：连/断本机与中继的连接
+  h.push('function setRelayBtn(){');
+  h.push('  if(!relayBtn)return;');
+  h.push('  if(relayConnected){relayBtn.textContent="关闭群控";relayBtn.className="btn-relay active";}');
+  h.push('  else{relayBtn.textContent="启动群控";relayBtn.className="btn-relay";}');
+  h.push('}');
+  h.push('function toggleRelay(){');
+  h.push('  if(relayBtn&&relayBtn.disabled)return;');
+  h.push('  if(relayConnected){');
+  h.push('    if(relayBtn){relayBtn.textContent="关闭中...";relayBtn.disabled=true;}');
+  h.push('    fetch("http://"+DEVICE_IP+":8182/api/group/relay/stop",{method:"POST",signal:AbortSignal.timeout(5000)})');
+  h.push('      .then(function(){relayConnected=false;setRelayBtn();})');
+  h.push('      .catch(function(){setRelayBtn();})');
+  h.push('      .finally(function(){if(relayBtn)relayBtn.disabled=false;});');
+  h.push('  }else{');
+  h.push('    if(relayBtn){relayBtn.textContent="启动中...";relayBtn.disabled=true;}');
+  h.push('    fetch("http://"+DEVICE_IP+":8182/api/group/relay/start?relayIp="+encodeURIComponent(RELAY_IP)+"&role=slave",{method:"POST",signal:AbortSignal.timeout(6000)})');
+  h.push('      .then(function(){relayConnected=true;setRelayBtn();connectRelayWS();})');
+  h.push('      .catch(function(){setRelayBtn();})');
+  h.push('      .finally(function(){if(relayBtn)relayBtn.disabled=false;});');
+  h.push('  }');
   h.push('}');
 
   // 主控开关
@@ -1520,12 +2308,14 @@ function generatePopOutHtml(dev) {
 
   // Home 键
   h.push('function sendHome(){');
-  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(outOpts({type:"key",action:"home_up"})));},50);}');
-  h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);}');
+  h.push('  var hm=outOpts({type:"key",action:"home_down"}),hu=outOpts({type:"key",action:"home_up"});');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(hm));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(hu));},50);}');
+  h.push('  else{fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(hm),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(hu),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);}');
   h.push('}');
   h.push('function sendDoubleHome(){');
-  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(outOpts({type:"key",action:"home_down"})));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify({type:"key",action:"home_up"}));},50);},100);}');
-  h.push('  else{fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_down"}),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+DEVICE_IP+":8182/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"key",action:"home_up"}),signal:AbortSignal.timeout(2000)}).catch(function(){});},100);},150);}');
+  h.push('  var d1=outOpts({type:"key",action:"home_down"}),u1=outOpts({type:"key",action:"home_up"});');
+  h.push('  if(ws&&ws.readyState===1){ws.send(JSON.stringify(d1));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(u1));},50);setTimeout(function(){if(ws&&ws.readyState===1){ws.send(JSON.stringify(d1));setTimeout(function(){if(ws&&ws.readyState===1)ws.send(JSON.stringify(u1));},50);}},100);}');
+  h.push('  else{fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d1),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(u1),signal:AbortSignal.timeout(2000)}).catch(function(){});},50);setTimeout(function(){fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(d1),signal:AbortSignal.timeout(2000)}).catch(function(){});setTimeout(function(){fetch("http://"+RELAY_IP+":9527/api/group/touch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(u1),signal:AbortSignal.timeout(2000)}).catch(function(){});},100);},150);}');
   h.push('}');
 
   // 键盘快捷键
@@ -1538,7 +2328,9 @@ function generatePopOutHtml(dev) {
 
   // 启动
   h.push('fetchFrame();');
-  h.push('if(RELAY_IP)connectRelayWS();');
+  h.push('connectRelayWS();');   // 浏览器→中继(role=browser)，用于发送触摸/按键
+  h.push('syncRelayState();');   // 先查询本机是否已在中继，避免重复连接
+  h.push('setTimeout(function(){ if(!relayConnected && RELAY_IP && RELAY_IP!=="localhost" && RELAY_IP!=="127.0.0.1"){ toggleRelay(); } }, 700);');  // 未连接则自动把本机接成 slave，使控制立即可用
   h.push('</scr' + 'ipt></body></html>');
   return h.join('\n');
 }
