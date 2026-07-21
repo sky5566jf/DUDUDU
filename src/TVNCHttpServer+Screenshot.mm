@@ -1,161 +1,135 @@
 //
 //  TVNCHttpServer+Screenshot.mm
 //  Auto-split from TVNCHttpServer.mm (P3 maintainability refactor, 2026-07-20)
+//  P2-1: 双路径统一为 handleScreenshotWithQuery:strategy: (2026-07-21)
 //
 #import "TVNCHttpServer+Handlers.h"
 
+// P2-1: 截图策略枚举 — 统一两条截图路径
+typedef NS_ENUM(NSInteger, TVNCScreenshotStrategy) {
+    TVNCScreenshotStrategyAuto,   // UIKit 优先 + framebuffer 兜底（原 handleScreenshot）
+    TVNCScreenshotStrategyFast,   // framebuffer 优先 + UIKit 兜底（原 handleScreenshotFast）
+};
+
 @interface TVNCHttpServer (Screenshot)
+- (TVNCHttpResponse *)handleScreenshotWithQuery:(NSDictionary *)query strategy:(TVNCScreenshotStrategy)strategy;
 @end
 
 @implementation TVNCHttpServer (Screenshot)
 
-- (TVNCHttpResponse *)handleScreenshot:(NSDictionary *)query {
+#pragma mark - P2-1: 统一截图入口
+
+// 统一截图方法 — 消除 handleScreenshot / handleScreenshotFast 的重复参数解析和响应构建。
+// strategy=Auto: UIKit 优先，framebuffer 兜底（原 /api/screenshot）
+// strategy=Fast: framebuffer 优先，UIKit 兜底（原 /api/screenshot/fast）
+- (TVNCHttpResponse *)handleScreenshotWithQuery:(NSDictionary *)query strategy:(TVNCScreenshotStrategy)strategy {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-    
-    NSString *format = query[@"format"] ?: @"png";
-    NSData *imageData = nil;
-    
-    // 解析旋转参数，默认0度
-    NSInteger rotation = 0;
-    NSString *rotationStr = query[@"rotation"];
-    if (rotationStr) {
-        rotation = [rotationStr integerValue];
-        // 规范化到 0, 90, 180, 270
-        rotation = ((rotation % 360) + 360) % 360;
-        rotation = (rotation / 90) * 90;
-    }
-    
-    // 解析质量参数，默认0.9
-    CGFloat quality = 0.9;
-    NSString *qualityStr = query[@"quality"];
-    if (qualityStr) {
-        quality = [qualityStr floatValue];
-        if (quality < 0.0) quality = 0.0;
-        if (quality > 1.0) quality = 1.0;
-    }
-    
-    // 解析缩放参数，默认1.0（不缩放）
+
+    // --- 统一参数解析（兼容两种参数风格）---
+    NSString *format;
+    CGFloat quality;
     CGFloat scale = 1.0;
-    NSString *scaleStr = query[@"scale"];
-    if (scaleStr) {
-        scale = [scaleStr floatValue];
-        if (scale < 0.1) scale = 0.1;
-        if (scale > 1.0) scale = 1.0;
-    }
-    
-    // 如果有缩放参数，使用带缩放+旋转的方法
-    if (scale < 1.0 || rotation != 0) {
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:rotation scale:scale];
-    } else {
-        // 无旋转无缩放时使用原始方法
-        if ([format isEqualToString:@"jpeg"] || [format isEqualToString:@"jpg"]) {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
-        } else {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
-        }
-    }
+    NSInteger rotation = 0;
+    int maxW = 0, maxH = 0;
 
-    // 群控兜底：UIKit 截图失败（App 后台/锁屏/无前台窗口）时，回退到 VNC 帧缓冲。
-    // 帧缓冲由 daemon 的 VNC 服务持续维护，与 App 前台态解耦，后台也能拿到上一帧，
-    // 避免群控卡片因 500 空响应而长期黑/空。成功路径不变，仅失败时走兜底，零回归。
-    if (!imageData && [[TVNCApiManager sharedManager] isFramebufferAvailable]) {
-        imageData = [[TVNCApiManager sharedManager]
-            captureScreenshotFromFramebufferWithFormat:format
-                                               quality:quality
-                                                 scale:scale
-                                                  maxW:0
-                                                  maxH:0];
-        if (imageData) {
-            TVLog(@"[screenshot] UIKit 失败，已回退 VNC 帧缓冲兜底");
-        }
-    }
-
-    if (imageData) {
-        response.statusCode = 200;
-        response.contentType = [format isEqualToString:@"png"] ? @"image/png" : @"image/jpeg";
-        response.body = imageData;
-    } else {
-        response.statusCode = 500;
-        response.contentType = @"application/json";
-        NSDictionary *error = @{@"error": @"Screenshot failed"};
-        response.body = [NSJSONSerialization dataWithJSONObject:error options:0 error:nil];
-    }
-    
-    return response;
-}
-
-- (TVNCHttpResponse *)handleScreenshotFast:(NSDictionary *)query {
-    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
-
-    // 检查 VNC 帧缓存是否可用
-    if ([[TVNCApiManager sharedManager] isFramebufferAvailable]) {
-        // 解析参数
-        NSString *format = query[@"fmt"] ?: query[@"format"] ?: @"jpeg";
-        CGFloat quality = 0.6;
+    if (strategy == TVNCScreenshotStrategyFast) {
+        // Fast 路径: 默认 jpeg/0.6，支持 q/quality 双别名 + maxw/maxh
+        format = query[@"fmt"] ?: query[@"format"] ?: @"jpeg";
+        quality = 0.6;
         NSString *qStr = query[@"q"] ?: query[@"quality"];
-        if (qStr) {
-            quality = [qStr floatValue];
-            if (quality < 0.0) quality = 0.0;
-            if (quality > 1.0) quality = 1.0;
+        if (qStr) { quality = [qStr floatValue]; quality = MAX(0.0, MIN(1.0, quality)); }
+    } else {
+        // Auto 路径: 默认 png/0.9，支持 rotation
+        format = query[@"format"] ?: @"png";
+        quality = 0.9;
+        NSString *qStr = query[@"quality"];
+        if (qStr) { quality = [qStr floatValue]; quality = MAX(0.0, MIN(1.0, quality)); }
+        // 旋转参数（仅 Auto 路径支持）
+        NSString *rotStr = query[@"rotation"];
+        if (rotStr) {
+            rotation = [rotStr integerValue];
+            rotation = ((rotation % 360) + 360) % 360;  // 规范化
+            rotation = (rotation / 90) * 90;             // 对齐到 0/90/180/270
         }
-        CGFloat scale = 1.0;
-        NSString *scaleStr = query[@"scale"];
-        if (scaleStr) {
-            scale = [scaleStr floatValue];
-            if (scale < 0.1) scale = 0.1;
-            if (scale > 1.0) scale = 1.0;
-        }
-        int maxW = 0, maxH = 0;
+    }
+
+    // 缩放参数（两条路径都支持）
+    NSString *scaleStr = query[@"scale"];
+    if (scaleStr) { scale = [scaleStr floatValue]; scale = MAX(0.1, MIN(1.0, scale)); }
+
+    // maxW/maxH（仅 Fast 路径支持）
+    if (strategy == TVNCScreenshotStrategyFast) {
         if (query[@"maxw"]) maxW = [query[@"maxw"] intValue];
         if (query[@"maxh"]) maxH = [query[@"maxh"] intValue];
-
-        NSData *imageData = [[TVNCApiManager sharedManager]
-            captureScreenshotFromFramebufferWithFormat:format
-                                               quality:quality
-                                                 scale:scale
-                                                  maxW:maxW
-                                                  maxH:maxH];
-
-        if (imageData) {
-            response.statusCode = 200;
-            response.contentType = ([format.lowercaseString containsString:@"png"]) ? @"image/png" : @"image/jpeg";
-            response.body = imageData;
-            // 添加 X-Source 头标识来源
-            return response;
-        }
     }
 
-    // 降级到普通截图
-    NSString *format = query[@"fmt"] ?: query[@"format"] ?: @"jpeg";
-    CGFloat quality = 0.6;
-    NSString *qStr = query[@"q"] ?: query[@"quality"];
-    if (qStr) {
-        quality = [qStr floatValue];
-        if (quality < 0.0) quality = 0.0;
-        if (quality > 1.0) quality = 1.0;
-    }
-    CGFloat scale = 1.0;
-    NSString *scaleStr = query[@"scale"];
-    if (scaleStr) {
-        scale = [scaleStr floatValue];
-        if (scale < 0.1) scale = 0.1;
-        if (scale > 1.0) scale = 1.0;
-    }
+    BOOL isPng = [format.lowercaseString containsString:@"png"];
+    NSString *contentType = isPng ? @"image/png" : @"image/jpeg";
 
+    // --- 策略派发：根据策略选择主路径 + 兜底路径 ---
     NSData *imageData = nil;
-    if (scale < 1.0) {
-        imageData = [[TVNCApiManager sharedManager] captureScreenshotWithFormat:format quality:quality rotation:0 scale:scale];
+
+    if (strategy == TVNCScreenshotStrategyFast) {
+        // Fast: framebuffer 优先
+        if ([[TVNCApiManager sharedManager] isFramebufferAvailable]) {
+            imageData = [[TVNCApiManager sharedManager]
+                captureScreenshotFromFramebufferWithFormat:format
+                                                   quality:quality
+                                                     scale:scale
+                                                      maxW:maxW
+                                                      maxH:maxH];
+        }
+        // P2-2: 空帧体积守卫 — <1KB 判定为空帧
+        if (imageData && imageData.length < 1024) {
+            TVLog(@"[screenshot] Empty frame from framebuffer (%lu bytes), falling back to UIKit",
+                  (unsigned long)imageData.length);
+            imageData = nil;
+        }
+        // 兜底: UIKit 截图
+        if (!imageData) {
+            if (scale < 1.0) {
+                imageData = [[TVNCApiManager sharedManager]
+                    captureScreenshotWithFormat:format quality:quality rotation:0 scale:scale];
+            } else {
+                imageData = isPng
+                    ? [[TVNCApiManager sharedManager] captureScreenshotAsPNG]
+                    : [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+            }
+        }
     } else {
-        if ([format.lowercaseString containsString:@"png"]) {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsPNG];
+        // Auto: UIKit 优先
+        if (scale < 1.0 || rotation != 0) {
+            imageData = [[TVNCApiManager sharedManager]
+                captureScreenshotWithFormat:format quality:quality rotation:rotation scale:scale];
         } else {
-            imageData = [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+            imageData = isPng
+                ? [[TVNCApiManager sharedManager] captureScreenshotAsPNG]
+                : [[TVNCApiManager sharedManager] captureScreenshotAsJPEGWithQuality:quality];
+        }
+        // P2-2: 空帧体积守卫 — <1KB 判定为空帧
+        if (imageData && imageData.length < 1024) {
+            TVLog(@"[screenshot] Empty frame from UIKit (%lu bytes), falling back to framebuffer",
+                  (unsigned long)imageData.length);
+            imageData = nil;
+        }
+        // 兜底: framebuffer（App 后台/锁屏时 UIKit 返回 nil）
+        if (!imageData && [[TVNCApiManager sharedManager] isFramebufferAvailable]) {
+            imageData = [[TVNCApiManager sharedManager]
+                captureScreenshotFromFramebufferWithFormat:format
+                                                   quality:quality
+                                                     scale:scale
+                                                      maxW:0
+                                                      maxH:0];
+            if (imageData) {
+                TVLog(@"[screenshot] UIKit 失败，已回退 VNC 帧缓冲兜底");
+            }
         }
     }
 
+    // --- 统一响应构建 ---
     if (imageData) {
         response.statusCode = 200;
-        response.contentType = [format.lowercaseString containsString:@"png"] ? @"image/png" : @"image/jpeg";
+        response.contentType = contentType;
         response.body = imageData;
     } else {
         response.statusCode = 500;
@@ -164,6 +138,15 @@
     }
 
     return response;
+}
+
+// 原接口保持兼容 — 薄包装，委托给统一方法
+- (TVNCHttpResponse *)handleScreenshot:(NSDictionary *)query {
+    return [self handleScreenshotWithQuery:query strategy:TVNCScreenshotStrategyAuto];
+}
+
+- (TVNCHttpResponse *)handleScreenshotFast:(NSDictionary *)query {
+    return [self handleScreenshotWithQuery:query strategy:TVNCScreenshotStrategyFast];
 }
 
 - (TVNCHttpResponse *)handleStreamMjpeg:(NSDictionary *)query {

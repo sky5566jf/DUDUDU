@@ -2625,22 +2625,43 @@ static NSString *wsReadFrame(int sock) {
                 @"Connection: close\r\n"
                 @"Access-Control-Allow-Origin: *\r\n"
                 @"\r\n"];
-            send(_clientSocket, mjpegHeader.UTF8String, mjpegHeader.length, 0);
+            // P2-3: 设置 send 超时（5s），防止慢客户端导致 daemon 线程永久阻塞
+            struct timeval sndTimeout;
+            sndTimeout.tv_sec = 5;
+            sndTimeout.tv_usec = 0;
+            setsockopt(_clientSocket, SOL_SOCKET, SO_SNDTIMEO, &sndTimeout, sizeof(sndTimeout));
+
+            ssize_t hdrSent = send(_clientSocket, mjpegHeader.UTF8String, mjpegHeader.length, 0);
+            if (hdrSent < 0) {
+                TVLog(@"[MJPEG] Header send failed (errno=%d), aborting", errno);
+                close(_clientSocket);
+                return;
+            }
 
             TVLog(@"[MJPEG] Stream started: q=%.2f scale=%.2f fps=%d maxW=%d maxH=%d",
                   mjpegQuality, mjpegScale, mjpegFps, mjpegMaxW, mjpegMaxH);
 
-            // P1-3: 注册活跃 MJPEG 流（用于多客户端自适应降帧）
-            _server.activeMjpegStreams++;
+            // P1-3 + P2-3: 线程安全注册活跃 MJPEG 流（用于多客户端自适应降帧）
+            @synchronized(_server) {
+                _server.activeMjpegStreams++;
+            }
 
+            // P2-5: 异常安全 — 确保即使循环内抛异常，activeMjpegStreams 也能正确递减
+            @try {
             // 持续推送 JPEG 帧
             int frameCount = 0;
             uint32_t lastFrameHash = 0;   // P1-1: 上一帧哈希
             int sameHashCount = 0;         // P1-1: 连续相同帧计数
+            int dedupSkipCount = 0;       // P2-4: 去重跳过计数
+            NSTimeInterval streamStartTime = [[NSDate date] timeIntervalSince1970];
+            NSTimeInterval lastHealthLogTime = streamStartTime;
             BOOL useFramebuffer = [[TVNCApiManager sharedManager] isFramebufferAvailable];
 
             while (_server.isRunning) {
                 @autoreleasepool {
+                    // P2-6: 记录帧开始时间，用于精确扣除截图/编码/发送耗时
+                    NSTimeInterval frameStartTime = [[NSDate date] timeIntervalSince1970];
+
                     // P0-3: 内存压力降级 — 根据系统内存压力动态调整画质/帧率/缩放
                     CGFloat effectiveQuality = mjpegQuality;
                     CGFloat effectiveScale = mjpegScale;
@@ -2659,8 +2680,11 @@ static NSString *wsReadFrame(int sock) {
                         effectiveFps = MIN(mjpegFps, 6);
                     }
 
-                    // P1-3: 多客户端并发时降帧率（每多一个流 fps 减半，下限 2fps）
-                    int activeStreams = _server.activeMjpegStreams;
+                    // P1-3 + P2-3: 线程安全读取活跃流数（用于多客户端并发降帧）
+                    int activeStreams;
+                    @synchronized(_server) {
+                        activeStreams = _server.activeMjpegStreams;
+                    }
                     if (activeStreams > 1) {
                         effectiveFps = MAX(2, effectiveFps / activeStreams);
                     }
@@ -2674,8 +2698,15 @@ static NSString *wsReadFrame(int sock) {
                         // 连续 2 帧以上完全相同 → 跳过编码，发空 boundary 保活
                         if (sameHashCount >= 2) {
                             const char *keepalive = "--frameboundary\r\n\r\n";
-                            send(_clientSocket, keepalive, (int)strlen(keepalive), 0);
-                            [NSThread sleepForTimeInterval:effectiveInterval];
+                            ssize_t kaSent = send(_clientSocket, keepalive, (int)strlen(keepalive), 0);
+                            if (kaSent < 0) {
+                                TVLog(@"[MJPEG] Keepalive send failed (errno=%d), disconnecting", errno);
+                                break;
+                            }
+                            dedupSkipCount++;
+                            // P2-6: 扣除哈希计算等已耗时，保持目标帧率精度
+                            NSTimeInterval kaElapsed = [[NSDate date] timeIntervalSince1970] - frameStartTime;
+                            [NSThread sleepForTimeInterval:MAX(0, effectiveInterval - kaElapsed)];
                             // 检查连接
                             char peekBuf[1];
                             ssize_t peekResult = recv(_clientSocket, peekBuf, 1, MSG_PEEK | MSG_DONTWAIT);
@@ -2718,6 +2749,12 @@ static NSString *wsReadFrame(int sock) {
                         }
                     }
 
+                    // P2-2: MJPEG 空帧守卫 — <512B 判定为空帧，跳过发送
+                    if (jpegData && jpegData.length < 512) {
+                        TVLog(@"[MJPEG] Empty frame (%lu bytes), skipping", (unsigned long)jpegData.length);
+                        jpegData = nil;
+                    }
+
                     if (jpegData) {
                         // 构建 MJPEG 帧
                         NSString *frameHeader = [NSString stringWithFormat:
@@ -2725,15 +2762,35 @@ static NSString *wsReadFrame(int sock) {
                             @"Content-Type: image/jpeg\r\n"
                             @"Content-Length: %lu\r\n"
                             @"\r\n", (unsigned long)jpegData.length];
-                        send(_clientSocket, frameHeader.UTF8String, frameHeader.length, 0);
-                        send(_clientSocket, jpegData.bytes, jpegData.length, 0);
-                        send(_clientSocket, "\r\n", 2, 0);
+                        ssize_t s1 = send(_clientSocket, frameHeader.UTF8String, frameHeader.length, 0);
+                        ssize_t s2 = (s1 >= 0) ? send(_clientSocket, jpegData.bytes, jpegData.length, 0) : -1;
+                        ssize_t s3 = (s2 >= 0) ? send(_clientSocket, "\r\n", 2, 0) : -1;
+                        if (s1 < 0 || s2 < 0 || s3 < 0) {
+                            TVLog(@"[MJPEG] Frame send failed (errno=%d), disconnecting after %d frames",
+                                  errno, frameCount);
+                            break;
+                        }
 
                         frameCount++;
                     }
 
-                    // 等待下一帧
-                    [NSThread sleepForTimeInterval:effectiveInterval];
+                    // P2-4: 周期性健康日志（每 100 帧或 60s 输出一次）
+                    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                    if (frameCount > 0 && (frameCount % 100 == 0 || (now - lastHealthLogTime) >= 60.0)) {
+                        NSTimeInterval elapsed = now - streamStartTime;
+                        int actualFps = (elapsed > 0) ? (int)(frameCount / elapsed) : 0;
+                        int dedupRate = (frameCount + dedupSkipCount > 0)
+                            ? (int)(dedupSkipCount * 100 / (frameCount + dedupSkipCount)) : 0;
+                        TVLog(@"[MJPEG] Health: frames=%d fps=%d dedup_skip=%d (%d%%) "
+                              @"elapsed=%.0fs memLevel=%d activeStreams=%d",
+                              frameCount, actualFps, dedupSkipCount, dedupRate,
+                              elapsed, memLevel, activeStreams);
+                        lastHealthLogTime = now;
+                    }
+
+                    // 等待下一帧 — P2-6: 扣除截图/编码/发送耗时，保持目标帧率精度
+                    NSTimeInterval frameElapsed = [[NSDate date] timeIntervalSince1970] - frameStartTime;
+                    [NSThread sleepForTimeInterval:MAX(0, effectiveInterval - frameElapsed)];
 
                     // 检查连接是否还活着（非阻塞 recv 检测）
                     char peekBuf[1];
@@ -2744,10 +2801,16 @@ static NSString *wsReadFrame(int sock) {
                         break;
                     }
                 }
-            }
+            } // end while
 
-            // P1-3: 注销活跃 MJPEG 流
-            _server.activeMjpegStreams--;
+            } @catch (NSException *e) {
+                TVLog(@"[MJPEG] Exception: %@ — %@", e.name, e.reason);
+            } @finally {
+                // P1-3 + P2-3 + P2-5: 线程安全注销活跃 MJPEG 流（异常安全）
+                @synchronized(_server) {
+                    _server.activeMjpegStreams--;
+                }
+            }
 
             close(_clientSocket);
             return;
