@@ -2214,9 +2214,19 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
             });
         }
     } else {
-        // No client connected => no concurrent encode => safe to resize directly here.
-        performResizeFramebufferForRotation();
-        gPendingResize = NO;
+        // No client connected => no concurrent encode => safe to resize.
+        // v4.32: Always dispatch to resize queue, even with 0 clients. handleFramebuffer
+        // already holds gFbStateMutex (via TvFbLockGuard trylock) when it calls us —
+        // calling performResizeFramebufferForRotation() directly here would attempt a
+        // recursive lock on gFbStateMutex (PTHREAD_MUTEX_INITIALIZER = NORMAL on iOS =
+        // deadlock). The async dispatch avoids this entirely; the one-frame delay (~33ms
+        // at 30fps) is negligible.
+        if (!gPendingResize) {
+            gPendingResize = YES;
+            dispatch_async(tvGetResizeQueue(), ^{
+                performResizeFramebufferForRotation();
+            });
+        }
     }
 }
 
@@ -2467,13 +2477,34 @@ static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
     // Serialize the whole capture/render/swap against the send-thread resize
     // (performResizeFramebufferForRotation frees gBackBuffer). Holding this mutex here
     // guarantees the send thread cannot free the back buffer while we are writing into it,
-    // eliminating the use-after-free that crashed v4.22. It is held for the duration of a
-    // frame (rarely contended: only when a resize is pending), and lock ordering is
-    // consistent (gFbStateMutex -> client sendMutex) so there is no deadlock.
+    // eliminating the use-after-free that crashed v4.22. Lock ordering is consistent
+    // (gFbStateMutex -> client sendMutex) so there is no deadlock.
+    //
+    // v4.32: Use trylock instead of blocking lock. The CADisplayLink callback runs on the
+    // main thread — if resize is holding gFbStateMutex (waiting on a client sendMutex for
+    // a slow/dead client), a blocking lock here freezes the main thread → iOS watchdog →
+    // abort() (crash report 2026-07-21-204206, faulting thread stuck in __psynch_mutexwait
+    // inside CADisplayLink::dispatch_items). With trylock we simply skip the frame; the next
+    // display link tick will retry. At 30fps daemon cap, losing one frame is invisible.
     struct TvFbLockGuard {
-        TvFbLockGuard() { pthread_mutex_lock(&gFbStateMutex); }
-        ~TvFbLockGuard() { pthread_mutex_unlock(&gFbStateMutex); }
+        BOOL acquired;
+        TvFbLockGuard() : acquired(NO) {
+            if (pthread_mutex_trylock(&gFbStateMutex) == 0) {
+                acquired = YES;
+            }
+        }
+        ~TvFbLockGuard() {
+            if (acquired) pthread_mutex_unlock(&gFbStateMutex);
+        }
     } _tvFbLock;
+
+    if (!_tvFbLock.acquired) {
+        // Resize queue is swapping buffers under gFbStateMutex (possibly blocked on a
+        // slow client's sendMutex). Skip this frame — no data corruption risk because we
+        // haven't touched gBackBuffer yet.
+        TVLogVerbose(@"frame skipped: gFbStateMutex contention (resize in progress)");
+        return;
+    }
 
 #if DEBUG
     // Perf: overall start timestamp
@@ -4729,6 +4760,24 @@ static void prepareClipboardManager(void) {
 }
 
 static void prepareScreenCapturer(void) {
+    // P0 FIX (v4.32): Daemon runs as background process (Non-Frontmost App).
+    // iOS kills background processes exceeding 150 wakeups/s averaged over 300s.
+    // CADisplayLink at 60fps + vImage processing generates ~109 wakeups/s alone,
+    // combined with HTTP/RFB/timers (~45/s) → ~154/s total, exceeding the 150/s limit.
+    // Cap daemon mode to 30fps max: CADisplayLink drops to ~54/s, total ~99/s (33% margin).
+    if (gIsDaemonMode) {
+        const int kDaemonFpsCap = 30;
+        if (gFpsMax > kDaemonFpsCap || gFpsPref > kDaemonFpsCap) {
+            int origPref = gFpsPref;
+            int origMax = gFpsMax;
+            if (gFpsMax > kDaemonFpsCap) gFpsMax = kDaemonFpsCap;
+            if (gFpsPref > kDaemonFpsCap) gFpsPref = kDaemonFpsCap;
+            if (gFpsMin > gFpsMax) gFpsMin = gFpsMax; // keep min <= max
+            TVLog(@"Daemon FPS cap applied: pref %d->%d, max %d->%d (wakeups safety, limit=150/s)",
+                  origPref, gFpsPref, origMax, gFpsMax);
+        }
+    }
+
     // Apply preferred frame rate (if provided)
     if (gFpsMin > 0 || gFpsPref > 0 || gFpsMax > 0) {
         TVLog(@"Applying preferred FPS to ScreenCapturer: min=%d pref=%d max=%d", gFpsMin, gFpsPref, gFpsMax);
@@ -5441,8 +5490,30 @@ static void installFrameLivenessWatchdog(void) {
             time_t now = time(NULL);
             long stalled = (long)(now - gLastFrameProduced);
             if (stalled > TV_FRAME_LIVENESS_TIMEOUT_SEC) {
+                // v4.32: Check if screen is off before triggering restart. When the device
+                // locks, iOS pauses CADisplayLink → no frames → watchdog would exit(0) →
+                // manager restarts → CADisplayLink still paused → exit again → tight restart
+                // loop that burns wakeups and can push the coalition over the 150/s limit.
+                // If the screen is off, skip the restart and wait for it to wake naturally.
+                BOOL screenOff = NO;
+                if (gIsDaemonMode) {
+                    // UIScreen is linked (UIKit imported). brightness is an atomic property;
+                    // reading it on a background queue is safe (we already read UIScreen on
+                    // VNC threads elsewhere). brightness == 0 → screen is off or very dim.
+                    @try {
+                        CGFloat b = [UIScreen mainScreen].brightness;
+                        if (b < 0.01) screenOff = YES;
+                    } @catch (NSException *e) {
+                        // UIScreen unavailable in this context; proceed with restart
+                    }
+                }
+                if (screenOff) {
+                    TVLog(@"[watchdog] no frame for %lds but screen appears off; "
+                           "deferring restart until screen wakes", stalled);
+                    return;
+                }
                 TVLog(@"[watchdog] no frame produced for %lds with %d client(s) connected; "
-                       "capture likely stalled (screen sleep / main-thread freeze). "
+                       "capture likely stalled (main-thread freeze). "
                        "Exiting for supervised restart.", stalled, gClientCount);
                 exit(0);
             }

@@ -351,7 +351,11 @@ int main(int argc, const char *argv[]) {
         }
 
         [gWatchDog setExitTimeOut:3.0];
-        [gWatchDog setThrottleInterval:5.0];
+        // v4.32: Increase throttle from 5s to 10s. Manager and daemon share the same iOS
+        // coalition (com.matisu.xcs); the watchdog timer itself contributes wakeups. Doubling
+        // the interval halves the manager's wakeup contribution and gives the system more
+        // breathing room under the 150 wakeups/s coalitional limit.
+        [gWatchDog setThrottleInterval:10.0];
         [gWatchDog setKeepAlive:@YES];
 
         NSError *argError = nil;
