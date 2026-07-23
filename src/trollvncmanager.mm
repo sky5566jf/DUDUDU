@@ -334,6 +334,13 @@ int main(int argc, const char *argv[]) {
         [gWatchDog setStandardOutputPath:stdoutPath];
         [gWatchDog setStandardErrorPath:stderrPath];
 
+        // v4.33: Truncate log files on manager start to prevent unbounded growth.
+        // The watchdog opens these with O_APPEND, so without truncation the files
+        // grow indefinitely (~156KB/h, ~112MB/month). Each manager restart resets
+        // the logs to zero, keeping a single daemon session's output bounded.
+        truncate([stdoutPath fileSystemRepresentation], 0);
+        truncate([stderrPath fileSystemRepresentation], 0);
+
         BOOL isOwnedByRoot = NO;
         struct stat sb;
         if (stat([executablePath fileSystemRepresentation], &sb) == 0) {

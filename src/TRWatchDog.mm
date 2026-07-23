@@ -427,6 +427,15 @@ NSString *const TRWatchDogErrorDomain = @"TRWatchDogErrorDomain";
 
     // Helper to open a file for append writing using low-level open()
     NSFileHandle * (^openAppendHandle)(NSString *) = ^NSFileHandle *(NSString *path) {
+        // v4.33: Truncate log file if it exceeds 1MB before opening for append.
+        // This handles daemon restarts (watchdog-triggered) without a manager restart,
+        // preventing unbounded log growth across restart cycles.
+        struct stat logSt;
+        if (stat([path fileSystemRepresentation], &logSt) == 0 && logSt.st_size > 1024 * 1024) {
+            truncate([path fileSystemRepresentation], 0);
+            TVLog(@TAG "[%@] truncated log file (was %lld bytes): %@", self.label ?: @"<nil>",
+                  (long long)logSt.st_size, path);
+        }
         int fd = open([path fileSystemRepresentation], O_WRONLY | O_CREAT | O_APPEND, (mode_t)0644);
         if (fd == -1) {
             TVLog(@TAG "[%@] failed to open for append: %@, errno=%d (%s)", self.label ?: @"<nil>", path, errno,
