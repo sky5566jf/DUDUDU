@@ -655,6 +655,7 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/clients", @"block": ^TVNCHttpResponse *{ return [self handleClients]; }},
         @{@"path": @"/api/status", @"block": ^TVNCHttpResponse *{ return [self handleStatus]; }},
         @{@"path": @"/api/device", @"block": ^TVNCHttpResponse *{ return [self handleDeviceInfo:query clientAddr:clientAddr]; }},
+        @{@"path": @"/api/hardware", @"block": ^TVNCHttpResponse *{ return [self handleHardware:query]; }},
         @{@"path": @"/api/checkfile", @"block": ^TVNCHttpResponse *{ return [self handleCheckFile]; }},
         @{@"path": @"/api/upload", @"block": ^TVNCHttpResponse *{ return [self handleUploadFile:query body:body]; }},
         @{@"path": @"/api/volume", @"block": ^TVNCHttpResponse *{ return [self handleVolume:query body:body]; }},
@@ -1266,6 +1267,7 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"状态 / 设备", @"path": @"GET /api/clients", @"doc": @"获取客户端列表"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/status", @"doc": @"获取服务器状态"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/device", @"doc": @"获取设备信息（名称、ID、型号、版本、电量）"},
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/hardware", @"doc": @"获取硬件详情：CPU（核心/使用率）、内存（总量/已用）、电池、散热、运行时间"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/ping", @"doc": @"心跳检测"},
             @{@"category": @"状态 / 设备", @"path": @"GET/POST /api/plist", @"doc": @"读取/写入 plist 配置"},
             // 系统控制

@@ -4,6 +4,14 @@
 //
 #import "TVNCHttpServer+Handlers.h"
 
+// 硬件信息查询所需的 mach 头
+#include <mach/mach.h>
+#include <mach/mach_host.h>
+#include <mach/processor_info.h>
+#include <mach/task_info.h>
+#include <mach/vm_statistics.h>
+#include <time.h>
+
 // v4.34: extern "C" accessors from trollvncserver.mm
 extern "C" int tvncGetMemPressureLevel(void);
 
@@ -1652,6 +1660,254 @@ extern "C" int tvncGetMemPressureLevel(void);
     response.statusCode = 200;
     response.contentType = @"text/html; charset=utf-8";
     response.body = [html dataUsingEncoding:NSUTF8StringEncoding];
+
+    return response;
+}
+
+// GET /api/hardware
+// 返回设备硬件详细信息：CPU（核心数/使用率/family）、内存（总量/已用/空闲）、电池（电量/充电状态）、散热状态、系统运行时间
+- (TVNCHttpResponse *)handleHardware:(NSDictionary *)query {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+
+    // ─── CPU 信息 ───
+    NSMutableDictionary *cpu = [NSMutableDictionary dictionary];
+    NSProcessInfo *processInfo = [NSProcessInfo processInfo];
+
+    // 核心数
+    cpu[@"coreCount"] = @(processInfo.processorCount);
+    cpu[@"activeCoreCount"] = @(processInfo.activeProcessorCount);
+
+    // CPU family (A系列芯片标识)
+    int cpuFamily = 0;
+    size_t familySize = sizeof(cpuFamily);
+    if (sysctlbyname("hw.cpufamily", &cpuFamily, &familySize, NULL, 0) == 0) {
+        cpu[@"cpuFamily"] = @(cpuFamily);
+        cpu[@"cpuFamilyHex"] = [NSString stringWithFormat:@"0x%08X", cpuFamily];
+    } else {
+        cpu[@"cpuFamily"] = @"unknown";
+    }
+
+    // CPU subtype
+    int cpuSubtype = 0;
+    size_t subtypeSize = sizeof(cpuSubtype);
+    if (sysctlbyname("hw.cpusubtype", &cpuSubtype, &subtypeSize, NULL, 0) == 0) {
+        cpu[@"cpuSubtype"] = @(cpuSubtype);
+    }
+
+    // CPU 使用率（通过 host_processor_info — 累计值，仅供参考）
+    processor_info_array_t cpuInfo = NULL;
+    mach_msg_type_number_t cpuInfoCount = 0;
+    natural_t processorCount = 0;
+    natural_t cpuLoadInfoCount = 0;
+
+    kern_return_t kr = host_processor_info(mach_host_self(),
+                                           PROCESSOR_CPU_LOAD_INFO,
+                                           &processorCount,
+                                           &cpuInfo,
+                                           &cpuLoadInfoCount);
+    if (kr == KERN_SUCCESS && cpuInfo != NULL && processorCount > 0) {
+        float totalUser = 0, totalSystem = 0, totalIdle = 0, totalNice = 0;
+        for (natural_t i = 0; i < processorCount; i++) {
+            natural_t offset = i * CPU_STATE_MAX;
+            totalUser   += cpuInfo[offset + CPU_STATE_USER];
+            totalSystem += cpuInfo[offset + CPU_STATE_SYSTEM];
+            totalIdle   += cpuInfo[offset + CPU_STATE_IDLE];
+            totalNice   += cpuInfo[offset + CPU_STATE_NICE];
+        }
+        float totalTicks = totalUser + totalSystem + totalIdle + totalNice;
+        if (totalTicks > 0) {
+            cpu[@"usageUserPercent"]   = @(totalUser   * 100.0 / totalTicks);
+            cpu[@"usageSystemPercent"] = @(totalSystem * 100.0 / totalTicks);
+            cpu[@"usageIdlePercent"]   = @(totalIdle   * 100.0 / totalTicks);
+            cpu[@"usagePercent"]       = @((totalUser + totalSystem + totalNice) * 100.0 / totalTicks);
+        }
+        vm_deallocate(mach_task_self_, (vm_address_t)cpuInfo, cpuInfoCount * sizeof(integer_t));
+    }
+
+    // CPU 使用率（"最近负载"快照法 — 100ms 间隔采样取差值，更准确反映瞬时负载）
+    {
+        host_cpu_load_info_data_t prevLoad, currLoad;
+        mach_msg_type_number_t count = HOST_CPU_LOAD_INFO_COUNT;
+        if (host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, (host_info_t)&prevLoad, &count) == KERN_SUCCESS) {
+            usleep(100000); // 100ms
+            count = HOST_CPU_LOAD_INFO_COUNT;
+            if (host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, (host_info_t)&currLoad, &count) == KERN_SUCCESS) {
+                natural_t userDiff   = currLoad.cpu_ticks[CPU_STATE_USER]   - prevLoad.cpu_ticks[CPU_STATE_USER];
+                natural_t systemDiff = currLoad.cpu_ticks[CPU_STATE_SYSTEM] - prevLoad.cpu_ticks[CPU_STATE_SYSTEM];
+                natural_t idleDiff   = currLoad.cpu_ticks[CPU_STATE_IDLE]   - prevLoad.cpu_ticks[CPU_STATE_IDLE];
+                natural_t niceDiff   = currLoad.cpu_ticks[CPU_STATE_NICE]   - prevLoad.cpu_ticks[CPU_STATE_NICE];
+                natural_t totalDiff  = userDiff + systemDiff + idleDiff + niceDiff;
+
+                if (totalDiff > 0) {
+                    cpu[@"usageUserPercentInstant"]   = @(userDiff   * 100.0 / totalDiff);
+                    cpu[@"usageSystemPercentInstant"] = @(systemDiff * 100.0 / totalDiff);
+                    cpu[@"usageIdlePercentInstant"]   = @(idleDiff   * 100.0 / totalDiff);
+                    cpu[@"usagePercentInstant"]       = @((userDiff + systemDiff + niceDiff) * 100.0 / totalDiff);
+                }
+            }
+        }
+    }
+
+    result[@"cpu"] = cpu;
+
+    // ─── 内存信息 ───
+    NSMutableDictionary *ram = [NSMutableDictionary dictionary];
+
+    // 总物理内存
+    uint64_t totalMem = processInfo.physicalMemory;
+    ram[@"totalBytes"] = @(totalMem);
+
+    // VM 统计（页大小 x 各类页数）
+    mach_port_t hostPort = mach_host_self();
+    vm_size_t pageSize = 0;
+    host_page_size(hostPort, &pageSize);
+
+    vm_statistics64_data_t vmStat;
+    mach_msg_type_number_t vmCount = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(hostPort, HOST_VM_INFO64, (host_info64_t)&vmStat, &vmCount) == KERN_SUCCESS) {
+        uint64_t freePages        = vmStat.free_count;
+        uint64_t activePages      = vmStat.active_count;
+        uint64_t inactivePages    = vmStat.inactive_count;
+        uint64_t wiredPages       = vmStat.wire_count;
+        uint64_t speculativePages = vmStat.speculative_count;
+        uint64_t compressedPages  = vmStat.compressor_page_count;
+        uint64_t purgeablePages   = vmStat.purgeable_count;
+
+        uint64_t usedPages = wiredPages + activePages + compressedPages;
+        uint64_t freeUsablePages = freePages + inactivePages + speculativePages + purgeablePages;
+
+        ram[@"freeBytes"]       = @(freePages * pageSize);
+        ram[@"activeBytes"]     = @(activePages * pageSize);
+        ram[@"inactiveBytes"]   = @(inactivePages * pageSize);
+        ram[@"wiredBytes"]      = @(wiredPages * pageSize);
+        ram[@"compressedBytes"] = @(compressedPages * pageSize);
+        ram[@"usedBytes"]       = @(usedPages * pageSize);
+        ram[@"usableFreeBytes"] = @(freeUsablePages * pageSize);
+        ram[@"usedPercent"]     = @(totalMem > 0 ? (usedPages * pageSize * 100.0 / totalMem) : 0);
+    }
+
+    // 易读格式
+    ram[@"totalMB"] = @(totalMem / (1024.0 * 1024.0));
+    if (ram[@"usedBytes"]) {
+        uint64_t used = [ram[@"usedBytes"] unsignedLongLongValue];
+        ram[@"usedMB"] = @(used / (1024.0 * 1024.0));
+    }
+    if (ram[@"freeBytes"]) {
+        uint64_t free = [ram[@"freeBytes"] unsignedLongLongValue];
+        ram[@"freeMB"] = @(free / (1024.0 * 1024.0));
+    }
+
+    // 内存压力级别（OS 级别 — kern.memorystatus_level）
+    {
+        int pressureLevel = 0;
+        size_t psize = sizeof(pressureLevel);
+        if (sysctlbyname("kern.memorystatus_level", &pressureLevel, &psize, NULL, 0) == 0) {
+            // 0=normal, 1=warn, 2=critical, 4=urgent
+            ram[@"memoryPressureLevel"] = @(pressureLevel);
+            NSString *pressureStr = @"normal";
+            if (pressureLevel >= 4)      pressureStr = @"urgent";
+            else if (pressureLevel >= 2) pressureStr = @"critical";
+            else if (pressureLevel >= 1) pressureStr = @"warn";
+            ram[@"memoryPressure"] = pressureStr;
+        }
+    }
+
+    result[@"ram"] = ram;
+
+    // ─── 电池信息 ───
+    NSMutableDictionary *battery = [NSMutableDictionary dictionary];
+    UIDevice *device = [UIDevice currentDevice];
+    [device setBatteryMonitoringEnabled:YES];
+
+    float level = device.batteryLevel;
+    battery[@"level"] = (level >= 0) ? @(level * 100.0) : @(-1);
+    battery[@"levelRaw"] = @(level);
+
+    UIDeviceBatteryState bstate = device.batteryState;
+    NSString *stateStr = @"unknown";
+    BOOL isCharging = NO;
+    switch (bstate) {
+        case UIDeviceBatteryStateUnplugged: stateStr = @"discharging"; break;
+        case UIDeviceBatteryStateCharging:  stateStr = @"charging"; isCharging = YES; break;
+        case UIDeviceBatteryStateFull:      stateStr = @"full"; isCharging = YES; break;
+        default: break;
+    }
+    battery[@"state"] = stateStr;
+    battery[@"isCharging"] = @(isCharging);
+
+    [device setBatteryMonitoringEnabled:NO];
+    result[@"battery"] = battery;
+
+    // ─── 散热状态 ───
+    NSMutableDictionary *thermal = [NSMutableDictionary dictionary];
+    NSProcessInfoThermalState tstate = processInfo.thermalState;
+    NSString *thermalStr = @"unknown";
+    switch (tstate) {
+        case NSProcessInfoThermalStateNominal:  thermalStr = @"nominal"; break;
+        case NSProcessInfoThermalStateFair:     thermalStr = @"fair"; break;
+        case NSProcessInfoThermalStateSerious:  thermalStr = @"serious"; break;
+        case NSProcessInfoThermalStateCritical: thermalStr = @"critical"; break;
+        default: break;
+    }
+    thermal[@"state"] = thermalStr;
+    thermal[@"level"] = @(tstate);
+    result[@"thermal"] = thermal;
+
+    // ─── 系统运行时间 ───
+    NSMutableDictionary *uptime = [NSMutableDictionary dictionary];
+    {
+        struct timespec ts;
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+            uptime[@"seconds"] = @(ts.tv_sec);
+            uint64_t totalSec = (uint64_t)ts.tv_sec;
+            uint64_t days    = totalSec / 86400;
+            uint64_t hours   = (totalSec % 86400) / 3600;
+            uint64_t minutes = (totalSec % 3600) / 60;
+            uint64_t seconds = totalSec % 60;
+            uptime[@"human"] = [NSString stringWithFormat:@"%llu天 %llu小时 %llu分钟 %llu秒",
+                                days, hours, minutes, seconds];
+        } else {
+            uptime[@"error"] = @"clock_gettime failed";
+        }
+    }
+    result[@"uptime"] = uptime;
+
+    // ─── 系统内核 / 架构信息 ───
+    {
+        struct utsname sysInfo;
+        if (uname(&sysInfo) == 0) {
+            result[@"kernelVersion"] = [NSString stringWithUTF8String:sysInfo.release];
+            result[@"machineArch"]   = [NSString stringWithUTF8String:sysInfo.machine];
+            result[@"kernelName"]    = [NSString stringWithUTF8String:sysInfo.sysname];
+            result[@"nodeName"]      = [NSString stringWithUTF8String:sysInfo.nodename];
+        }
+    }
+
+    // ─── 当前进程虚拟内存统计 ───
+    {
+        struct task_vm_info vmInfo;
+        mach_msg_type_number_t vmCount = TASK_VM_INFO_COUNT;
+        if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vmInfo, &vmCount) == KERN_SUCCESS) {
+            NSMutableDictionary *procVm = [NSMutableDictionary dictionary];
+            procVm[@"virtualSizeMB"]      = @(vmInfo.virtual_size / (1024.0 * 1024.0));
+            procVm[@"residentSizeMB"]     = @(vmInfo.resident_size / (1024.0 * 1024.0));
+            procVm[@"residentSizePeakMB"] = @(vmInfo.resident_size_peak / (1024.0 * 1024.0));
+            result[@"processMemory"] = procVm;
+        }
+    }
+
+    response.statusCode = 200;
+    response.contentType = @"application/json";
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
+
+    TVLog(@"HTTP Server: /api/hardware CPU=%@%%, RAM=%@MB/%@MB, Battery=%@%@%%, Thermal=%@",
+          cpu[@"usagePercentInstant"] ?: cpu[@"usagePercent"] ?: @"N/A",
+          ram[@"usedMB"] ?: @"N/A",
+          ram[@"totalMB"] ?: @"N/A",
+          [battery[@"isCharging"] boolValue] ? @"⚡" : @"",
+          battery[@"level"] ?: @"N/A",
+          thermal[@"state"] ?: @"N/A");
 
     return response;
 }

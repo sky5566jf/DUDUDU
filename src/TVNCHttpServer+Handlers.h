@@ -97,6 +97,7 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleClients;
 - (TVNCHttpResponse *)handleStatus;
 - (TVNCHttpResponse *)handleDeviceInfo:(NSDictionary *)query clientAddr:(NSString *)clientAddr;
+- (TVNCHttpResponse *)handleHardware:(NSDictionary *)query;
 - (NSString *)deviceModelNameFromIdentifier:(NSString *)identifier;
 - (TVNCHttpResponse *)handleCheckFile;
 - (TVNCHttpResponse *)handleUploadFile:(NSDictionary *)query body:(NSData *)body;
