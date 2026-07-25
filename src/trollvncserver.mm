@@ -89,6 +89,14 @@ static volatile time_t gLastFrameProduced = 0; // v3.83: timestamp of last produ
 static BOOL gClipboardEnabled = YES;
 static BOOL gIsDaemonMode = NO; // set when launched with -daemon
 
+// v4.34: Memory pressure level for daemon (0=normal, 1=warning, 2=critical).
+// When system memory is under pressure (e.g. heavy game running), the daemon
+// reduces FPS to lower its resource footprint and avoid being jetsamed.
+static volatile int gMemPressureLevel = 0;
+static int gOrigFpsMin = 0;   // saved FPS before memory-pressure degradation
+static int gOrigFpsPref = 0;
+static int gOrigFpsMax = 0;
+
 static double gScale = 1.0; // 0 < scale <= 1.0, 1.0 = no scaling
 // Preferred frame rate range (0 = unspecified)
 static int gFpsMin = 0;
@@ -1658,6 +1666,7 @@ void *tvncGetFrontBuffer(void) { return gFrontBuffer; }
 int tvncGetFBWidth(void) { return gWidth; }
 int tvncGetFBHeight(void) { return gHeight; }
 int tvncGetFBBytesPerPixel(void) { return gBytesPerPixel; }
+int tvncGetMemPressureLevel(void) { return gMemPressureLevel; } // v4.34: 0=normal 1=warn 2=critical
 }
 
 // Hash algorithm selection (auto: prefer CRC32 on ARM with hardware support)
@@ -5523,6 +5532,107 @@ static void installFrameLivenessWatchdog(void) {
     });
 }
 
+#pragma mark - Memory pressure monitor (v4.34: iOS 16 jetsam hardening)
+
+// On iOS 16, when a memory-heavy App (e.g. Unity game) runs, the system triggers
+// memory pressure jetsam that kills background processes including our daemon.
+// This monitor detects memory pressure and degrades the daemon's FPS to reduce
+// its resource footprint, lowering the chance of being jetsamed.
+//
+// Levels:
+//   0 (normal)   → restore original FPS (capped at daemon 30fps)
+//   1 (warning)  → drop to 10fps
+//   2 (critical) → drop to 5fps
+static void applyMemoryPressureFPS(int level) {
+    if (level == gMemPressureLevel) return; // no change
+
+    int oldLevel = gMemPressureLevel;
+    gMemPressureLevel = level;
+
+    if (level == 0) {
+        // Restore original FPS (re-apply daemon cap)
+        int restoreMin = gOrigFpsMin;
+        int restorePref = gOrigFpsPref;
+        int restoreMax = gOrigFpsMax;
+        if (gIsDaemonMode && restoreMax > 30) restoreMax = 30;
+        if (gIsDaemonMode && restorePref > 30) restorePref = 30;
+        if (restoreMin > restoreMax) restoreMin = restoreMax;
+        gFpsMin = restoreMin;
+        gFpsPref = restorePref;
+        gFpsMax = restoreMax;
+        TVLog(@"[mempress] pressure cleared (was level %d), restoring FPS: min=%d pref=%d max=%d",
+              oldLevel, gFpsMin, gFpsPref, gFpsMax);
+    } else if (level == 1) {
+        // Save originals on first degradation
+        if (oldLevel == 0) {
+            gOrigFpsMin = gFpsMin;
+            gOrigFpsPref = gFpsPref;
+            gOrigFpsMax = gFpsMax;
+        }
+        gFpsMin = 0;
+        gFpsPref = 10;
+        gFpsMax = 10;
+        TVLog(@"[mempress] WARNING level — degrading FPS to 10");
+    } else {
+        // level == 2 (critical)
+        if (oldLevel == 0) {
+            gOrigFpsMin = gFpsMin;
+            gOrigFpsPref = gFpsPref;
+            gOrigFpsMax = gFpsMax;
+        }
+        gFpsMin = 0;
+        gFpsPref = 5;
+        gFpsMax = 5;
+        TVLog(@"[mempress] CRITICAL level — degrading FPS to 5");
+    }
+
+    // Apply to ScreenCapturer (safe to call from any queue — it's an atomic property update)
+    @try {
+        [[ScreenCapturer sharedCapturer] setPreferredFrameRateWithMin:gFpsMin
+                                                              preferred:gFpsPref
+                                                                   max:gFpsMax];
+    } @catch (NSException *e) {
+        TVLog(@"[mempress] failed to apply FPS: %@", e);
+    }
+}
+
+static void installMemoryPressureMonitor(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_queue_t q = dispatch_get_global_queue(QOS_CLASS_UTILITY, 0);
+        dispatch_source_t src = dispatch_source_create(DISPATCH_SOURCE_TYPE_MEMORYPRESSURE,
+                                                       0, 0, q);
+        if (!src) {
+            TVLog(@"[mempress] failed to create memory pressure source; monitor disabled");
+            return;
+        }
+
+        // Save originals at install time
+        gOrigFpsMin = gFpsMin;
+        gOrigFpsPref = gFpsPref;
+        gOrigFpsMax = gFpsMax;
+
+        dispatch_source_set_event_handler(src, ^{
+            unsigned long pressure = dispatch_source_get_data(src);
+            switch (pressure) {
+                case DISPATCH_MEMORYPRESSURE_CRITICAL:
+                    applyMemoryPressureFPS(2);
+                    break;
+                case DISPATCH_MEMORYPRESSURE_WARN:
+                    applyMemoryPressureFPS(1);
+                    break;
+                case DISPATCH_MEMORYPRESSURE_NORMAL:
+                    applyMemoryPressureFPS(0);
+                    break;
+                default:
+                    break;
+            }
+        });
+        dispatch_resume(src);
+        TVLog(@"[mempress] memory pressure monitor installed (daemon FPS degradation: warn→10, critical→5, normal→restore)");
+    });
+}
+
 static void initializeAndRunRfbServer(void) {
     TVLog(@"initializeAndRunRfbServer: BEFORE rfbInitServer - port=%d, ipv6port=%d, httpPort=%d, http6Port=%d, httpDir=%s",
           gScreen->port, gScreen->ipv6port, gScreen->httpPort, gScreen->http6Port,
@@ -6045,6 +6155,10 @@ int main(int argc, const char *argv[]) {
         prepareBulletinManager();
         prepareClipboardManager();
         prepareScreenCapturer();
+
+        // v4.34: Install memory pressure monitor (degrades FPS when system is under
+        // memory pressure, e.g. heavy game running → reduces jetsam kill probability)
+        installMemoryPressureMonitor();
 
         initializeTilingOrReset();
         initializeAndRunRfbServer();

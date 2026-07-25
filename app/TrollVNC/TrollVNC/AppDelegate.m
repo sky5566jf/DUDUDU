@@ -114,4 +114,34 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
     // discarded scenes, as they will not return.
 }
 
+// v4.34: Immediate daemon restart check when App becomes active.
+// On iOS 16, when user switches to a heavy App (e.g. Unity game), the App gets suspended
+// and jetsam may kill the daemon. When the user returns, we immediately check and restart.
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+}
+
+// v4.34: When App is about to go to background, start a background task to keep monitoring
+// the daemon for a short window. This bridges the gap between App suspension and BGTask fire.
+- (void)applicationWillResignActive:(UIApplication *)application {
+    __block UIBackgroundTaskIdentifier bgTask = [application beginBackgroundTaskWithExpirationHandler:^{
+        [application endBackgroundTask:bgTask];
+        bgTask = UIBackgroundTaskInvalid;
+    }];
+    if (bgTask == UIBackgroundTaskInvalid) return;
+
+    // Check daemon health every 5s for the duration of the background task (~30s on iOS 16)
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (int i = 0; i < 5; i++) {
+            if (bgTask == UIBackgroundTaskInvalid) return;
+            [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+            [NSThread sleepForTimeInterval:5.0];
+        }
+        if (bgTask != UIBackgroundTaskInvalid) {
+            [application endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }
+    });
+}
+
 @end

@@ -4,6 +4,9 @@
 //
 #import "TVNCHttpServer+Handlers.h"
 
+// v4.34: extern "C" accessors from trollvncserver.mm
+extern "C" int tvncGetMemPressureLevel(void);
+
 @interface TVNCHttpServer (System)
 @end
 
@@ -1017,7 +1020,8 @@
     NSDictionary *result = @{
         @"status": @"running",
         @"httpPort": @(currentPort),
-        @"version": version
+        @"version": version,
+        @"memPressure": @(tvncGetMemPressureLevel()) // v4.34: 0=normal 1=warn 2=critical
     };
     response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
     

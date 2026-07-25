@@ -19,6 +19,7 @@
 #import "TrollVNC-Swift.h"
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <MobileCoreServices/LSApplicationProxy.h>
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -91,6 +92,16 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
             [_userDefaults registerDefaults:presetDefaults];
         }
     }
+
+    // v4.34: Register for foreground transition to immediately restart daemon
+    // On iOS 16, when user switches to another App (e.g. a heavy game), the App gets
+    // suspended, the 3s checkTimer stops, and if jetsam kills the daemon while the App
+    // is suspended, the daemon stays dead until the App regains foreground or BGTask fires.
+    // This observer ensures an immediate restart check when the App becomes active again.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(applicationDidBecomeActive)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
 }
 
 #pragma mark - Public Methods
@@ -115,11 +126,61 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
     [self ensureServiceRunning];
 }
 
+// v4.34: Called when App returns to foreground (via UIApplicationDidBecomeActiveNotification).
+// Immediately checks and restarts the daemon if it was killed by jetsam while the App was suspended.
+- (void)applicationDidBecomeActive {
+    [self ensureServiceRunning];
+}
+
+// v4.34: Aggressive recovery using a background task.
+// When daemon death is detected, acquire a ~30s background execution window and retry
+// spawning the manager+daemon every 5s. This handles the iOS 16 scenario where:
+// 1) App is suspended → 3s timer stops → can't detect daemon death
+// 2) BGTask fires but single spawn attempt may fail if the system is still under pressure
+// 3) Multiple retries within a background task window significantly improve recovery odds
+- (void)aggressiveRecoveryWithBackgroundTask {
+    UIApplication *app = [UIApplication sharedApplication];
+    __block UIBackgroundTaskIdentifier bgTask = [app beginBackgroundTaskWithExpirationHandler:^{
+        if (bgTask != UIBackgroundTaskInvalid) {
+            [app endBackgroundTask:bgTask];
+            bgTask = UIBackgroundTaskInvalid;
+        }
+    }];
+
+    if (bgTask == UIBackgroundTaskInvalid) {
+        // No background time available — just spawn once and hope for the best
+        [self spawnService];
+        return;
+    }
+
+    // Retry spawn in a background queue for up to 5 attempts (~25s total).
+    // Each attempt: spawn manager → wait 5s → check if daemon came up.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (int attempt = 0; attempt < 5; attempt++) {
+            if ([self _isServiceRunning]) {
+                break;
+            }
+            [self spawnService];
+            [NSThread sleepForTimeInterval:5.0];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (bgTask != UIBackgroundTaskInvalid) {
+                [app endBackgroundTask:bgTask];
+                bgTask = UIBackgroundTaskInvalid;
+            }
+        });
+    });
+}
+
 - (void)ensureServiceRunning {
     BOOL running = [self _isServiceRunning];
     if (!running) {
         [self checkPrebootDependencies];
-        [self spawnService];
+        // v4.34: Use aggressive recovery with background task instead of single spawn.
+        // This retries multiple times within a ~30s background window, significantly
+        // improving recovery odds on iOS 16 where jetsam may kill the daemon while
+        // the App is suspended and the 3s checkTimer is stopped.
+        [self aggressiveRecoveryWithBackgroundTask];
     }
     if (_serviceRunning != running) {
         _serviceRunning = running;
