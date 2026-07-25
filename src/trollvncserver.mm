@@ -2147,6 +2147,97 @@ NS_INLINE void alignDimensions(int rawW, int rawH, int *alignedW, int *alignedH)
     *alignedH = hAdj;
 }
 
+// ─── v4.35: Idle Frame Buffer Release ──────────────────────────────────────
+// When all VNC clients disconnect, endCapture stops the CADisplayLink but the
+// double buffers (gFrontBuffer + gBackBuffer ≈ 6 MB), rotation scratch, and
+// vImage scale temp stay allocated. On a 2 GB iPhone SE2 running a heavy game
+// (500+ MB), the daemon's ~20 MB idle footprint puts it in the "maybe kill"
+// tier for jetsam.  By dropping to ~5 MB we become the least attractive target
+// in the entire coalition, so the game dies first every time.
+//
+// Freeing is dispatched to the dedicated resize queue (tvGetResizeQueue) so
+// any in-flight performResizeFramebufferForRotation runs to completion before
+// we release the buffers — no double-free or use-after-free race.
+// ────────────────────────────────────────────────────────────────────────────
+
+static void freeFrameBuffersIfIdle(void) {
+    pthread_mutex_lock(&gFbStateMutex);
+
+    // Cancel any deferred resize so a queued block doesn't re-allocate on top
+    // of buffers we are about to free (or worse, rfbNewFramebuffer the old
+    // front buffer that we then free a second time).
+    gPendingResize = NO;
+
+    if (gFrontBuffer)  { free(gFrontBuffer);  gFrontBuffer  = NULL; }
+    if (gBackBuffer)   { free(gBackBuffer);   gBackBuffer   = NULL; }
+    if (gRotateScratch) { free(gRotateScratch); gRotateScratch = NULL; gRotateScratchSize = 0; }
+    if (gScaleTemp)    { free(gScaleTemp);    gScaleTemp    = NULL; gScaleTempSize    = 0; }
+
+    // Prevent libvncserver from touching freed memory.
+    if (gScreen) gScreen->frameBuffer = NULL;
+
+    size_t savedFBSize = gFBSize;
+    gFBSize = 0;
+    gWidth  = 0;
+    gHeight = 0;
+
+    pthread_mutex_unlock(&gFbStateMutex);
+
+    // gSrcWidth / gSrcHeight are preserved so re-allocate can reconstruct
+    TVLog(@"v4.35 idle-free: released %.1f KB frame buffers (front+back+scratch)",
+          (double)savedFBSize * 2.0 / 1024.0);
+}
+
+static void reallocateFrameBuffersIfNeeded(void) {
+    pthread_mutex_lock(&gFbStateMutex);
+
+    // Already have valid buffers — nothing to do
+    if (gFrontBuffer && gBackBuffer && gWidth > 0 && gHeight > 0) {
+        pthread_mutex_unlock(&gFbStateMutex);
+        return;
+    }
+
+    // Re-derive output dimensions from stored source geometry + scale
+    int tmpW = (gScale > 0.0 && gScale < 1.0)
+                   ? MAX(1, (int)floor((double)gSrcWidth  * gScale))
+                   : gSrcWidth;
+    int tmpH = (gScale > 0.0 && gScale < 1.0)
+                   ? MAX(1, (int)floor((double)gSrcHeight * gScale))
+                   : gSrcHeight;
+    int outW = 0, outH = 0;
+    alignDimensions(tmpW, tmpH, &outW, &outH);
+
+    gWidth  = outW;
+    gHeight = outH;
+    gFBSize = (size_t)outW * (size_t)outH * (size_t)gBytesPerPixel;
+
+    gFrontBuffer = calloc(1, gFBSize);
+    gBackBuffer  = calloc(1, gFBSize);
+    if (!gFrontBuffer || !gBackBuffer) {
+        TVPrintError("v4.35: failed to re-allocate frame buffers from idle");
+        exit(EXIT_FAILURE);
+    }
+
+    // Re-plumb libvncserver to the new front buffer
+    if (gScreen) {
+        gScreen->frameBuffer       = (char *)gFrontBuffer;
+        gScreen->width             = outW;
+        gScreen->height            = outH;
+        gScreen->paddedWidthInBytes = outW * (int)gBytesPerPixel;
+    }
+
+    // Clear stale pending flag (initializeTilingOrReset will reset hash state)
+    gHasPending  = NO;
+
+    // Re-init tiling hash state for the new geometry
+    initializeTilingOrReset();
+
+    pthread_mutex_unlock(&gFbStateMutex);
+
+    TVLog(@"v4.35 idle-alloc: re-allocated %dx%d (%.1f KB each) after idle sleep",
+          gWidth, gHeight, (double)gFBSize / 1024.0);
+}
+
 // Resize framebuffer according to rotation (0/180 keep WxH from src, 90/270 swap), then apply scale
 // Forward declarations (defined later in this file) — needed so the resize
 // path below can serialize against the VNC send threads.
@@ -2252,6 +2343,10 @@ static void performResizeFramebufferForRotation(void) {
     int outH = gPendingResizeH;
     if (outW <= 0 || outH <= 0)
         return;
+    // v4.35: If freeFrameBuffersIfIdle() beat us to the punch, bail.
+    if (!gPendingResize) {
+        return;
+    }
     if (outW == gWidth && outH == gHeight) {
         gPendingResize = NO; // geometry already current; clear the deferred flag
         return;
@@ -2482,6 +2577,14 @@ static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
     // screen is on, so a stale value means the display link paused (screen sleep)
     // or the main thread is frozen. The frame-liveness watchdog relies on this.
     gLastFrameProduced = time(NULL);
+
+    // v4.35: Safety — if buffers were freed by freeFrameBuffersIfIdle() during
+    // a zero-client idle window, bail out early.  This is a belt-and-suspenders
+    // check; the capture pipeline should be stopped before buffers are freed,
+    // but CADisplayLink invalidation is async on the main runloop.
+    if (!gFrontBuffer || !gBackBuffer) {
+        return;
+    }
 
     // Serialize the whole capture/render/swap against the send-thread resize
     // (performResizeFramebufferForRotation frees gBackBuffer). Holding this mutex here
@@ -4405,6 +4508,14 @@ static void clientGoneHook(rfbClientPtr cl) {
         [[ScreenCapturer sharedCapturer] endCapture];
         gIsCaptureStarted = NO;
         TVLog(@"No clients remaining; screen capture stopped.");
+
+        // v4.35: Release all frame buffers on the resize queue (serial),
+        // after any in-flight performResizeFramebufferForRotation completes.
+        // This drops daemon idle memory from ~20 MB to ~5 MB, making the
+        // daemon the least attractive jetsam target in its coalition.
+        dispatch_async(tvGetResizeQueue(), ^{
+            freeFrameBuffersIfIdle();
+        });
     }
 
     if (gIsClipboardStarted && gClientCount == 0) {
@@ -4512,6 +4623,11 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
     tvPublishClientConnectedNotif(host);
 
     if (!gIsCaptureStarted && gClientCount > 0 && gFrameHandler) {
+        // v4.35: If buffers were freed during idle (0-client) state,
+        // re-allocate them before starting the capture pipeline.
+        if (!gFrontBuffer || !gBackBuffer) {
+            reallocateFrameBuffersIfNeeded();
+        }
         // Start capture when entering non-zero client population.
         gIsCaptureStarted = YES;
         [[ScreenCapturer sharedCapturer] startCaptureWithFrameHandler:gFrameHandler];
