@@ -1267,7 +1267,7 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"状态 / 设备", @"path": @"GET /api/clients", @"doc": @"获取客户端列表"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/status", @"doc": @"获取服务器状态"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/device", @"doc": @"获取设备信息（名称、ID、型号、版本、电量）"},
-            @{@"category": @"状态 / 设备", @"path": @"GET /api/hardware", @"doc": @"获取硬件详情：CPU（核心/使用率）、内存（总量/已用）、电池、散热、运行时间"},
+            @{@"category": @"状态 / 设备", @"path": @"GET /api/hardware", @"doc": @"获取硬件详情：CPU（核心/使用率）、内存（总量/已用）、电池、散热状态+温度传感器、运行时间"},
             @{@"category": @"状态 / 设备", @"path": @"GET /api/ping", @"doc": @"心跳检测"},
             @{@"category": @"状态 / 设备", @"path": @"GET/POST /api/plist", @"doc": @"读取/写入 plist 配置"},
             // 系统控制

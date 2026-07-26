@@ -15,6 +15,23 @@
 // v4.34: extern "C" accessors from trollvncserver.mm
 extern "C" int tvncGetMemPressureLevel(void);
 
+// v4.37: IOKit C API 声明（IOKit framework 已链接，但公开头文件不暴露这些函数）
+// 用于读取电池温度和 SoC 温度传感器
+extern "C" {
+typedef mach_port_t       io_object_t;
+typedef io_object_t       io_service_t;
+typedef io_object_t       io_registry_entry_t;
+typedef UInt32            IOOptionBits;
+
+io_service_t          IOServiceGetMatchingService(mach_port_t masterPort, CFDictionaryRef matching);
+CFMutableDictionaryRef IOServiceNameMatching(const char *name);
+kern_return_t         IORegistryEntryCreateCFProperties(io_registry_entry_t entry,
+                                                         CFMutableDictionaryRef *properties,
+                                                         CFAllocatorRef allocator,
+                                                         IOOptionBits options);
+kern_return_t         IOObjectRelease(io_object_t object);
+}
+
 @interface TVNCHttpServer (System)
 @end
 
@@ -1852,6 +1869,106 @@ extern "C" int tvncGetMemPressureLevel(void);
     }
     thermal[@"state"] = thermalStr;
     thermal[@"level"] = @(tstate);
+
+    // v4.37: 具体温度值（通过 IOKit 读取传感器）
+    // 尝试多个温度源：电池（最可靠）+ SoC（尝试多个节点）
+    NSMutableDictionary *temps = [NSMutableDictionary dictionary];
+
+    // 1. 电池温度 — IOServiceNameMatching("battery") → "Temperature" 属性
+    //    Temperature 是 int32_t，单位 1/100°C（如 3250 = 32.50°C）
+    {
+        io_service_t batSvc = IOServiceGetMatchingService(0, IOServiceNameMatching("battery"));
+        if (batSvc) {
+            CFMutableDictionaryRef props = NULL;
+            if (IORegistryEntryCreateCFProperties(batSvc, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS && props) {
+                CFNumberRef tempRef = (CFNumberRef)CFDictionaryGetValue(props, CFSTR("Temperature"));
+                if (tempRef && CFGetTypeID(tempRef) == CFNumberGetTypeID()) {
+                    int32_t tempRaw = 0;
+                    if (CFNumberGetValue(tempRef, kCFNumberSInt32Type, &tempRaw)) {
+                        double celsius = tempRaw / 100.0;
+                        temps[@"battery"] = @{
+                            @"celsius":    @(celsius),
+                            @"fahrenheit": @(celsius * 1.8 + 32.0)
+                        };
+                    }
+                }
+                CFRelease(props);
+            }
+            IOObjectRelease(batSvc);
+        }
+    }
+
+    // 2. SoC/CPU 温度 — 尝试多个传感器节点
+    //    AppleARMTemperatureSensor：A 系列芯片温度传感器（常见于 A10+）
+    //    ARMIODevice：旧设备
+    //    AppleSMCTherMO：Mac 风格 SMC（部分 iPad/iOS 设备）
+    {
+        NSArray *sensorCandidates = @[
+            @"AppleARMTemperatureSensor",
+            @"ARMIODevice",
+            @"AppleSMCTherMO"
+        ];
+        BOOL foundSOC = NO;
+        for (NSString *sensorName in sensorCandidates) {
+            if (foundSOC) break;
+            io_service_t socSvc = IOServiceGetMatchingService(0, IOServiceNameMatching([sensorName UTF8String]));
+            if (!socSvc) continue;
+
+            CFMutableDictionaryRef props = NULL;
+            if (IORegistryEntryCreateCFProperties(socSvc, &props, kCFAllocatorDefault, 0) == KERN_SUCCESS && props) {
+                NSMutableDictionary *socTemps = [NSMutableDictionary dictionary];
+                CFIndex count = CFDictionaryGetCount(props);
+                if (count > 0) {
+                    const void **keys   = (const void **)malloc(sizeof(void *) * count);
+                    const void **values = (const void **)malloc(sizeof(void *) * count);
+                    CFDictionaryGetKeysAndValues(props, keys, values);
+                    for (CFIndex i = 0; i < count; i++) {
+                        NSString *key = (__bridge NSString *)keys[i];
+                        CFTypeRef   val = values[i];
+                        // 只处理数值类型的温度属性
+                        if (CFGetTypeID(val) != CFNumberGetTypeID()) continue;
+                        if (![key containsString:@"Temperature"] && ![key hasSuffix:@"Temp"]) continue;
+
+                        int32_t rawVal = 0;
+                        if (CFNumberGetValue((CFNumberRef)val, kCFNumberSInt32Type, &rawVal)) {
+                            // 不同传感器缩放因子不同：
+                            // - AppleARMTemperatureSensor 通常用 1/1000°C（如 35000 = 35.00°C）
+                            // - battery 用 1/100°C
+                            // 启发式：> 10000 → /1000，否则 → /100
+                            double celsius;
+                            if (rawVal > 10000) {
+                                celsius = rawVal / 1000.0;
+                            } else {
+                                celsius = rawVal / 100.0;
+                            }
+                            // 合理性检查：-20°C ~ 120°C
+                            if (celsius > -20.0 && celsius < 120.0) {
+                                socTemps[key] = @{
+                                    @"celsius":    @(celsius),
+                                    @"fahrenheit": @(celsius * 1.8 + 32.0)
+                                };
+                            }
+                        }
+                    }
+                    free(keys);
+                    free(values);
+                }
+                if (socTemps.count > 0) {
+                    temps[@"soc"] = socTemps;
+                    foundSOC = YES;
+                }
+                CFRelease(props);
+            }
+            IOObjectRelease(socSvc);
+        }
+    }
+
+    if (temps.count > 0) {
+        thermal[@"temperatures"] = temps;
+    } else {
+        thermal[@"temperatures"] = @{ @"note": @"IOKit temperature sensors not accessible (sandbox or permission restricted)" };
+    }
+
     result[@"thermal"] = thermal;
 
     // ─── 系统运行时间 ───
@@ -1901,13 +2018,14 @@ extern "C" int tvncGetMemPressureLevel(void);
     response.contentType = @"application/json";
     response.body = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingPrettyPrinted error:nil];
 
-    TVLog(@"HTTP Server: /api/hardware CPU=%@%%, RAM=%@MB/%@MB, Battery=%@%@%%, Thermal=%@",
+    TVLog(@"HTTP Server: /api/hardware CPU=%@%%, RAM=%@MB/%@MB, Battery=%@%@%%, Thermal=%@, Temp=%@",
           cpu[@"usagePercentInstant"] ?: cpu[@"usagePercent"] ?: @"N/A",
           ram[@"usedMB"] ?: @"N/A",
           ram[@"totalMB"] ?: @"N/A",
           [battery[@"isCharging"] boolValue] ? @"⚡" : @"",
           battery[@"level"] ?: @"N/A",
-          thermal[@"state"] ?: @"N/A");
+          thermal[@"state"] ?: @"N/A",
+          [temps[@"battery"] objectForKey:@"celsius"] ?: @"N/A");
 
     return response;
 }
