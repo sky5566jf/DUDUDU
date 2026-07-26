@@ -667,6 +667,7 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/screen/unlock", @"block": ^TVNCHttpResponse *{ return [self handleScreenUnlock]; }},
         @{@"path": @"/api/home", @"block": ^TVNCHttpResponse *{ return [self handleHome]; }},
         @{@"path": @"/api/taskmanager", @"block": ^TVNCHttpResponse *{ return [self handleTaskManager]; }},
+        @{@"path": @"/api/swipe/back", @"block": ^TVNCHttpResponse *{ return [self handleSwipeBack]; }},
         @{@"path": @"/api/clearapps/smart", @"block": ^TVNCHttpResponse *{ return [self handleClearAppsSmart]; }},
         @{@"path": @"/api/clearapps/force", @"block": ^TVNCHttpResponse *{ return [self handleClearAppsForce]; }},
         @{@"path": @"/api/frontmost", @"block": ^TVNCHttpResponse *{ return [self handleFrontmost]; }},
@@ -1199,6 +1200,9 @@ NSString *tvncGetRealDeviceName(void) {
 // POST /api/taskmanager
 // 打开任务管理器（双击 Home 键）
 
+// POST /api/swipe/back
+// 左滑返回（iOS 边缘手势返回上一页）
+
 
 // POST /api/clearapps/smart
 // 智能清理后台应用（识别当前应用，桌面则跳过）
@@ -1280,6 +1284,7 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"系统控制", @"path": @"POST /api/screen/unlock", @"doc": @"解锁屏幕（唤醒+Home 键）"},
             @{@"category": @"系统控制", @"path": @"POST /api/home", @"doc": @"返回桌面（按一次 Home 键）"},
             @{@"category": @"系统控制", @"path": @"POST /api/taskmanager", @"doc": @"打开任务管理器（双击 Home 键）"},
+            @{@"category": @"系统控制", @"path": @"POST /api/swipe/back", @"doc": @"左滑返回（iOS 边缘手势返回上一页）"},
             @{@"category": @"系统控制", @"path": @"POST /api/clearapps/smart", @"doc": @"智能清理后台（不在桌面则关闭前台应用）"},
             @{@"category": @"系统控制", @"path": @"POST /api/clearapps/force", @"doc": @"强制清理后台（即使在桌面也执行：多任务+上滑杀进程）"},
             @{@"category": @"系统控制", @"path": @"GET/POST /api/assistivetouch?action=enable|disable", @"doc": @"辅助触控（小白点）状态获取/启用/禁用"},

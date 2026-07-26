@@ -281,6 +281,13 @@ NS_ASSUME_NONNULL_BEGIN
  */
 - (BOOL)openTaskManager;
 
+/**
+ * 左滑返回（边缘手势返回）
+ * 从屏幕左边缘向右滑动，模拟 iOS 系统的 back 手势
+ * @return 是否成功
+ */
+- (BOOL)swipeBack;
+
 #pragma mark - 智能清理后台应用
 
 /**

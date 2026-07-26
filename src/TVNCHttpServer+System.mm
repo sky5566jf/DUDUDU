@@ -242,6 +242,31 @@ kern_return_t         IOObjectRelease(io_object_t object);
     return response;
 }
 
+- (TVNCHttpResponse *)handleSwipeBack {
+    TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
+
+    TVLog(@"HTTP Server: Swipe back request received");
+
+    BOOL success = [[TVNCApiManager sharedManager] swipeBack];
+
+    response.statusCode = success ? 200 : 500;
+    response.contentType = @"application/json";
+
+    NSDictionary *result = success ?
+        @{
+            @"success": @YES,
+            @"action": @"swipeBack",
+            @"message": @"Edge swipe back gesture sent"
+        } :
+        @{
+            @"success": @NO,
+            @"error": @"Failed to perform swipe back"
+        };
+
+    response.body = [NSJSONSerialization dataWithJSONObject:result options:0 error:nil];
+    return response;
+}
+
 - (TVNCHttpResponse *)handleClearAppsSmart {
     TVNCHttpResponse *response = [[TVNCHttpResponse alloc] init];
 

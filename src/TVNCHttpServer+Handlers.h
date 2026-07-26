@@ -118,6 +118,7 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleScreenUnlock;
 - (TVNCHttpResponse *)handleHome;
 - (TVNCHttpResponse *)handleTaskManager;
+- (TVNCHttpResponse *)handleSwipeBack;
 - (TVNCHttpResponse *)handleClearAppsSmart;
 - (TVNCHttpResponse *)handleClearAppsForce;
 - (TVNCHttpResponse *)handleFrontmost;

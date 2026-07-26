@@ -2382,6 +2382,38 @@ static BOOL tvncIsAllASCII(NSString *text) {
     }
 }
 
+// 左滑返回（边缘手势返回）
+- (BOOL)swipeBack {
+    @try {
+        TVLog(@"Swipe back gesture...");
+
+        STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+
+        // 获取屏幕尺寸（daemon 下 UIScreen 可能取不到，给一个常见兜底值）
+        CGRect screenBounds = [UIScreen mainScreen].bounds;
+        CGFloat screenWidth = screenBounds.size.width;
+        CGFloat screenHeight = screenBounds.size.height;
+        if (screenWidth < 100 || screenHeight < 100) {
+            screenWidth = 390;
+            screenHeight = 844;
+            TVLog(@"Swipe back: UIScreen bounds invalid, fallback to %gx%g", screenWidth, screenHeight);
+        }
+
+        // iOS 边缘返回手势：从屏幕最左边缘(1px)向右滑到屏幕中右侧
+        // y 位置取屏幕中上方区域，避开底部 Home indicator 和顶部状态栏
+        CGFloat y = screenHeight * 0.45;
+        CGPoint start = CGPointMake(1, y);
+        CGPoint end = CGPointMake(screenWidth * 0.55, y);
+
+        [generator dragLinearWithStartPoint:start endPoint:end duration:0.3];
+        TVLog(@"Swipe back: (%.0f,%.0f) -> (%.0f,%.0f)", start.x, start.y, end.x, end.y);
+        return YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Swipe back failed: %@", exception.reason);
+        return NO;
+    }
+}
+
 // 解锁屏幕（按 Home 键唤醒/解锁）
 - (BOOL)unlockDeviceScreen {
     @try {
