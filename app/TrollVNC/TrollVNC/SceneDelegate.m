@@ -26,10 +26,22 @@
 - (void)scene:(UIScene *)scene
     willConnectToSession:(UISceneSession *)session
                  options:(UISceneConnectionOptions *)connectionOptions {
-    // Use this method to optionally configure and attach the UIWindow `window` to the provided UIWindowScene `scene`.
-    // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
-    // This delegate does not imply the connecting scene or session are new (see
-    // `application:configurationForConnectingSceneSession` instead).
+    // 纯启动器模式：不加载任何 UI（Main.storyboard 已不再自动加载）。
+    // 仅创建一个空白窗口作为 App 存活所需的表面；服务由 AppDelegate 拉起，
+    // 在 applicationDidBecomeActive 确认 kTvAlivePort 就绪后 App 自动 exit(0)。
+    // 窗口内容完全空白（无文字/品牌/按钮），符合「App 不显示任何东西」的需求。
+    if (![scene isKindOfClass:[UIWindowScene class]]) {
+        return;
+    }
+    UIWindowScene *windowScene = (UIWindowScene *)scene;
+    self.window = [[UIWindow alloc] initWithWindowScene:windowScene];
+
+    UIViewController *blankViewController = [[UIViewController alloc] init];
+    blankViewController.view.backgroundColor = [UIColor systemBackgroundColor];
+    blankViewController.view.opaque = YES;
+
+    self.window.rootViewController = blankViewController;
+    [self.window makeKeyAndVisible];
 }
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
