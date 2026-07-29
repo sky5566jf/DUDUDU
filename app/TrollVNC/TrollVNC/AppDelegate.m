@@ -22,6 +22,9 @@
 #import "Control.h"
 #import <BackgroundTasks/BackgroundTasks.h>
 #import <stdlib.h>
+#import <sys/socket.h>
+#import <netinet/in.h>
+#import <arpa/inet.h>
 
 #ifdef THEBOOTSTRAP
 #import "GitHubReleaseUpdater.h"
