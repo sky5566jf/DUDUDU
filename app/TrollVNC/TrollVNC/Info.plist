@@ -46,5 +46,9 @@
 		<string>trollstore</string>
 		<string>apple-magnifier</string>
 	</array>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+	</array>
 </dict>
 </plist>
