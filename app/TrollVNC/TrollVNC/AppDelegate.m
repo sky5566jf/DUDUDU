@@ -197,7 +197,7 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
             [banner.centerYAnchor constraintEqualToAnchor:window.centerYAnchor],
         ]];
         banner.alpha = 0;
-        banner.transform = CGAffineTransformMakeScale(0.92);
+        banner.transform = CGAffineTransformMakeScale(0.92, 0.92);
         [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
             banner.alpha = 1;
             banner.transform = CGAffineTransformIdentity;
