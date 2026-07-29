@@ -33,7 +33,6 @@
 static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemonitor";
 
 @interface AppDelegate ()
-@property (nonatomic, assign) BOOL tvnc_didAutoCloseUI;
 @end
 
 @implementation AppDelegate
@@ -129,24 +128,18 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
 
-    // C方案 (v4.39): App 作为纯启动器——确认服务真正就绪后再彻底退出（而非挂起）。
-    // 之所以能安全退出：trollvncmanager 在 THEBOOTSTRAP(.tipa) 下已 setsid() 脱离 App 进程组
-    // 并吞掉 SIGHUP/SIGINT/SIGTERM，由 TRWatchDog(KeepAlive=YES) 常驻看管 trollvncserver，
-    // 故 App 进程退出后 8182/5901/WebDAV 服务继续存活。重启用 TVNCHotspotManager 的
-    // NEHotspotHelper(WiFi 关联唤醒本 App) 重新 spawn manager —— 已实机验证。
-    // /api/input 走 daemon 内 剪贴板+Cmd+V 通道(TVNCApiManager.inputText:，中文可靠)，
-    // 不依赖 App 内 8184(TVNCAppInputServer 为死代码，daemon 调 AX 会崩)，故退出不影响输入。
-    // 关键：必须先确认 kTvAlivePort(46751) 端口可连（daemon 已监听）才退出，
-    // 否则出现「App 退了但服务没起来」的黑屏。超时(默认10s)未就绪则放弃退出，App 留前台兜底。
-    if (self.tvnc_didAutoCloseUI) return;
-    self.tvnc_didAutoCloseUI = YES;
-
-    [self tvnc_waitThenExitWhenServiceReadyWithTimeout:10.0];
+    // v4.41: 纯启动器每次 active 都走「确认服务就绪 → 显示提示 → 退出回收 GUI 内存」流程。
+    // 关键修复：此处刻意不使用「只退出一次」的跨次 guard（v4.39/4.40 的 tvnc_didAutoCloseUI）。
+    // 原因：iOS 在前台 active 阶段调用 exit(0) 偶尔不会干净终止进程（被系统保留为 suspended），
+    // 导致下次打开是 resume 同一进程、命中旧 guard 而停留在界面（#2 已知 bug）。
+    // 改为每次 active 都重新确认并退出，banner 用固定 tag 去重防止叠加，确保「服务起来后一定退得掉」。
+    [self tvnc_startLauncherFlowWithTimeout:10.0];
 }
 
-// 后台轮询 kTvAlivePort，确认 daemon 真正监听端口后再干净退出；
+// 后台轮询 kTvAlivePort，确认 daemon 真正监听端口后回到主线程显示提示并退出；
 // 超时未就绪则放弃退出（App 留在前台），避免「App 退了服务没起来」的黑屏。
-- (void)tvnc_waitThenExitWhenServiceReadyWithTimeout:(NSTimeInterval)timeoutSec {
+// 每次 applicationDidBecomeActive 都会调用本方法（无跨次 guard），保证 resume 场景也能退出。
+- (void)tvnc_startLauncherFlowWithTimeout:(NSTimeInterval)timeoutSec {
     static const NSTimeInterval kPollInterval = 0.5;  // 每 0.5s 探测一次
     static const int kRespawnEveryN = 4;              // 每 2s 重新触发一次 spawn 兜底
     __block NSTimeInterval waited = 0;
@@ -155,7 +148,7 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
         while (waited < timeoutSec) {
             if ([self tvnc_isAlivePortOpen]) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    exit(EXIT_SUCCESS);
+                    [self tvnc_showSuccessBannerThenExit];
                 });
                 return;
             }
@@ -168,6 +161,62 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
         }
         // 超时未就绪：放弃退出，App 留在前台，用户可手动排查（而非黑屏退出）
     });
+}
+
+// 在窗口上显示「XCS 服务启动成功」提示，短暂停留后 exit(0) 回收 App GUI 内存。
+// banner 用固定 tag(98765) 去重，避免多次 active 叠加多个提示；多次调用只会安排一次退出。
+- (void)tvnc_showSuccessBannerThenExit {
+    UIWindow *window = [self tvnc_activeWindow];
+    if (!window) {
+        // 拿不到窗口（极端情况）也直接退，不卡界面
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ exit(EXIT_SUCCESS); });
+        return;
+    }
+
+    UILabel *existing = [window viewWithTag:98765];
+    if (!existing) {
+        UILabel *banner = [[UILabel alloc] init];
+        banner.tag = 98765;
+        banner.text = @"XCS服务启动成功";
+        banner.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
+        banner.textColor = [UIColor labelColor];
+        banner.backgroundColor = [UIColor secondarySystemBackgroundColor];
+        banner.textAlignment = NSTextAlignmentCenter;
+        banner.layer.cornerRadius = 14;
+        banner.layer.masksToBounds = YES;
+        banner.translatesAutoresizingMaskIntoConstraints = NO;
+        [window addSubview:banner];
+        [NSLayoutConstraint activateConstraints:@[
+            [banner.widthAnchor constraintEqualToConstant:220],
+            [banner.heightAnchor constraintEqualToConstant:48],
+            [banner.centerXAnchor constraintEqualToAnchor:window.centerXAnchor],
+            [banner.centerYAnchor constraintEqualToAnchor:window.centerYAnchor],
+        ]];
+        banner.alpha = 0;
+        [UIView animateWithDuration:0.25 animations:^{ banner.alpha = 1; }];
+    }
+
+    // 停留 1.2s 让用户看清提示，然后干净退出回收 GUI 内存
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        exit(EXIT_SUCCESS);
+    });
+}
+
+// 取当前前台 active 的 window（iOS 13+ 多场景）
+- (UIWindow *)tvnc_activeWindow {
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+            if ([scene isKindOfClass:[UIWindowScene class]] &&
+                ((UIWindowScene *)scene).activationState == UISceneActivationStateForegroundActive) {
+                UIWindowScene *ws = (UIWindowScene *)scene;
+                // 最后一个 window 通常是我们的空白窗口（keyWindow）
+                return ws.windows.lastObject ?: ws.windows.firstObject;
+            }
+        }
+    }
+    return UIApplication.sharedApplication.keyWindow;
 }
 
 // 探测 daemon 存活端口 kTvAlivePort(46751) 是否可连（端口已监听 = 服务就绪）。
