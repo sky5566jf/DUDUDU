@@ -127,18 +127,20 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
 // and jetsam may kill the daemon. When the user returns, we immediately check and restart.
 - (void)applicationDidBecomeActive:(UIApplication *)application {
     [[TVNCServiceCoordinator sharedCoordinator] ensureServiceRunning];
+    [self tvnc_runLauncherFlow];
+}
 
-    // v4.41: 纯启动器每次 active 都走「确认服务就绪 → 显示提示 → 退出回收 GUI 内存」流程。
-    // 关键修复：此处刻意不使用「只退出一次」的跨次 guard（v4.39/4.40 的 tvnc_didAutoCloseUI）。
-    // 原因：iOS 在前台 active 阶段调用 exit(0) 偶尔不会干净终止进程（被系统保留为 suspended），
-    // 导致下次打开是 resume 同一进程、命中旧 guard 而停留在界面（#2 已知 bug）。
-    // 改为每次 active 都重新确认并退出，banner 用固定 tag 去重防止叠加，确保「服务起来后一定退得掉」。
+// 公开入口：纯启动器流程。被 applicationDidBecomeActive: 与 sceneDidBecomeActive: 双调用。
+// 刻意不设置「只跑一次」的持久 guard —— 因为 iOS 在前台 active 阶段调 exit(0) 偶尔不会干净
+// 终止进程（被挂起为 suspended），下次打开是 resume 同一进程；若无 guard 则 resume 会重新
+// 进入本流程再次确认端口并退出，从而根治「二次打开停留在界面」的 bug。
+- (void)tvnc_runLauncherFlow {
     [self tvnc_startLauncherFlowWithTimeout:10.0];
 }
 
 // 后台轮询 kTvAlivePort，确认 daemon 真正监听端口后回到主线程显示提示并退出；
 // 超时未就绪则放弃退出（App 留在前台），避免「App 退了服务没起来」的黑屏。
-// 每次 applicationDidBecomeActive 都会调用本方法（无跨次 guard），保证 resume 场景也能退出。
+// 每次 active 都会重新调用本方法（无跨次 guard），保证 resume 场景也能退出。
 - (void)tvnc_startLauncherFlowWithTimeout:(NSTimeInterval)timeoutSec {
     static const NSTimeInterval kPollInterval = 0.5;  // 每 0.5s 探测一次
     static const int kRespawnEveryN = 4;              // 每 2s 重新触发一次 spawn 兜底
@@ -163,7 +165,7 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
     });
 }
 
-// 在窗口上显示「XCS 服务启动成功」提示，短暂停留后 exit(0) 回收 App GUI 内存。
+// 在窗口上显示醒目的「XCS服务启动成功」提示，短暂停留后 exit(0) 回收 App GUI 内存。
 // banner 用固定 tag(98765) 去重，避免多次 active 叠加多个提示；多次调用只会安排一次退出。
 - (void)tvnc_showSuccessBannerThenExit {
     UIWindow *window = [self tvnc_activeWindow];
@@ -179,44 +181,57 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
         UILabel *banner = [[UILabel alloc] init];
         banner.tag = 98765;
         banner.text = @"XCS服务启动成功";
-        banner.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
-        banner.textColor = [UIColor labelColor];
-        banner.backgroundColor = [UIColor secondarySystemBackgroundColor];
+        banner.font = [UIFont boldSystemFontOfSize:19];
+        banner.textColor = [UIColor whiteColor];
+        // 醒目蓝色胶囊，主屏深色背景下清晰可见
+        banner.backgroundColor = [UIColor colorWithRed:0.0 green:0.47 blue:1.0 alpha:1.0];
         banner.textAlignment = NSTextAlignmentCenter;
-        banner.layer.cornerRadius = 14;
+        banner.layer.cornerRadius = 16;
         banner.layer.masksToBounds = YES;
         banner.translatesAutoresizingMaskIntoConstraints = NO;
         [window addSubview:banner];
         [NSLayoutConstraint activateConstraints:@[
-            [banner.widthAnchor constraintEqualToConstant:220],
-            [banner.heightAnchor constraintEqualToConstant:48],
+            [banner.widthAnchor constraintEqualToConstant:260],
+            [banner.heightAnchor constraintEqualToConstant:56],
             [banner.centerXAnchor constraintEqualToAnchor:window.centerXAnchor],
             [banner.centerYAnchor constraintEqualToAnchor:window.centerYAnchor],
         ]];
         banner.alpha = 0;
-        [UIView animateWithDuration:0.25 animations:^{ banner.alpha = 1; }];
+        banner.transform = CGAffineTransformMakeScale(0.92);
+        [UIView animateWithDuration:0.3 delay:0 options:UIViewAnimationOptionCurveEaseOut animations:^{
+            banner.alpha = 1;
+            banner.transform = CGAffineTransformIdentity;
+        } completion:nil];
     }
 
-    // 停留 1.2s 让用户看清提示，然后干净退出回收 GUI 内存
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)),
+    // 停留 1.5s 让用户看清提示，然后干净退出回收 GUI 内存
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         exit(EXIT_SUCCESS);
     });
 }
 
-// 取当前前台 active 的 window（iOS 13+ 多场景）
+// 取当前前台 active 的 window（iOS 13+ 多场景）。
+// 优先用 windowScene.keyWindow —— 旧实现用 ws.windows.lastObject 经常取到系统窗口
+// （状态栏等），导致 banner 加在不可见窗口上而从没显示出来。
 - (UIWindow *)tvnc_activeWindow {
     if (@available(iOS 13.0, *)) {
         for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
-            if ([scene isKindOfClass:[UIWindowScene class]] &&
-                ((UIWindowScene *)scene).activationState == UISceneActivationStateForegroundActive) {
-                UIWindowScene *ws = (UIWindowScene *)scene;
-                // 最后一个 window 通常是我们的空白窗口（keyWindow）
+            if (![scene isKindOfClass:[UIWindowScene class]]) continue;
+            UIWindowScene *ws = (UIWindowScene *)scene;
+            if (ws.activationState == UISceneActivationStateForegroundActive) {
+                UIWindow *kw = ws.keyWindow;
+                if (kw) return kw;
+                // 回退：找带 rootViewController 的窗口
+                for (UIWindow *w in ws.windows) {
+                    if (w.rootViewController) return w;
+                }
                 return ws.windows.lastObject ?: ws.windows.firstObject;
             }
         }
     }
-    return UIApplication.sharedApplication.keyWindow;
+    UIWindow *kw = UIApplication.sharedApplication.keyWindow;
+    return kw ?: UIApplication.sharedApplication.windows.lastObject;
 }
 
 // 探测 daemon 存活端口 kTvAlivePort(46751) 是否可连（端口已监听 = 服务就绪）。

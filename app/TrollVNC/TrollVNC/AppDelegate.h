@@ -19,4 +19,8 @@
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate>
 
+// 纯启动器流程：确认服务就绪 → 显示提示 → exit(0) 回收 GUI 内存。
+// 同时被 applicationDidBecomeActive: 与 SceneDelegate 的 sceneDidBecomeActive: 调用（双保险）。
+- (void)tvnc_runLauncherFlow;
+
 @end

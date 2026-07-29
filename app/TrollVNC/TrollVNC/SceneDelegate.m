@@ -16,6 +16,7 @@
 */
 
 #import "SceneDelegate.h"
+#import "AppDelegate.h"
 
 @interface SceneDelegate ()
 
@@ -53,8 +54,14 @@
 }
 
 - (void)sceneDidBecomeActive:(UIScene *)scene {
-    // Called when the scene has moved from an inactive state to an active state.
-    // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
+    // 纯启动器双保险：scene 进入 active 时也触发一次启动流程。
+    // 根因：iOS 在前台 active 阶段调 exit(0) 偶尔不会干净终止进程（挂起为 suspended），
+    // 下次打开是 resume 同一进程，仅靠 applicationDidBecomeActive: 在个别机型/时序下可能不触发，
+    // 导致「二次打开停留在界面」。这里再补一刀，确保 resume 后一定会重新确认端口并退出。
+    AppDelegate *appDelegate = (AppDelegate *)UIApplication.sharedApplication.delegate;
+    if ([appDelegate respondsToSelector:@selector(tvnc_runLauncherFlow)]) {
+        [appDelegate tvnc_runLauncherFlow];
+    }
 }
 
 - (void)sceneWillResignActive:(UIScene *)scene {

@@ -42,11 +42,12 @@ def stamp_version(input_path: str, output_path: str, version: str) -> None:
     w, h = img.size
 
     # 比例尺寸（以高为基准，适配不同分辨率图标）
-    font_size = max(12, int(h * 0.055))
-    badge_h = max(22, int(h * 0.085))
-    padding = max(6, int(h * 0.045))
-    inner_pad = max(4, int(badge_h * 0.22))
-    radius = int(badge_h * 0.35)
+    # v4.42: 放大并加强对比，主屏小尺寸下也清晰可读
+    font_size = max(16, int(h * 0.09))
+    badge_h = max(34, int(h * 0.14))
+    padding = max(10, int(h * 0.055))
+    inner_pad = max(8, int(badge_h * 0.28))
+    radius = int(badge_h * 0.4)
 
     font = find_font(font_size)
 
@@ -60,13 +61,13 @@ def stamp_version(input_path: str, output_path: str, version: str) -> None:
     badge_x = w - badge_w - padding
     badge_y = h - badge_h - padding
 
-    # 深色半透明胶囊
+    # 深色不透明胶囊（高对比，主屏小尺寸也清晰）
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     overlay_draw.rounded_rectangle(
         [badge_x, badge_y, badge_x + badge_w, badge_y + badge_h],
         radius=radius,
-        fill=(0, 0, 0, 185),
+        fill=(17, 17, 19, 255),
     )
     img = Image.alpha_composite(img, overlay)
 
