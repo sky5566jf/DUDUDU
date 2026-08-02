@@ -48,6 +48,9 @@ extern NSString * const kTVNCEndpointsKey;
     @property (nonatomic, assign) BOOL wsRunning;
     @property (nonatomic, strong) NSMutableArray<NSNumber *> * wsClientSockets;
     @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSString *> * wsClientIPs;
+    @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSMutableData *> * wsClientPending;   // P1: 每从控独立发送缓冲（非阻塞广播背压）
+    @property (nonatomic, strong) NSMutableDictionary<NSNumber *, NSNumber *> * wsClientFlushing;        // P1: 该从控是否正在异步 flush
+    @property (nonatomic, strong) dispatch_queue_t groupFlushQueue;                                      // P1: 串行 flush 队列
     @property (nonatomic, strong) dispatch_queue_t wsServerQueue;
     @property (nonatomic, assign) int masterSocket;
     @property (nonatomic, assign) BOOL masterConnected;
@@ -143,6 +146,12 @@ extern NSString * const kTVNCEndpointsKey;
 - (NSInteger)groupSlaveCount;
 - (NSArray<NSString *> *)groupSlaveIPs;
 - (void)broadcastGroupEvent:(NSString *)eventJSON exceptSock:(int)excludeSock;
+- (void)tvnc_flushSlave:(int)s;
+- (void)tvnc_dropSlave:(int)s;
+- (void)tvnc_coalescePending:(NSMutableData *)pending;
+- (NSUInteger)tvnc_wsFrameTotalLen:(const uint8_t *)p length:(NSUInteger)len;
+- (NSUInteger)tvnc_wsFramePayloadLen:(const uint8_t *)p length:(NSUInteger)len;
+- (BOOL)tvnc_frameIsAction:(NSData *)pending range:(NSRange)r action:(NSString *)action;
 - (BOOL)connectToMaster:(NSString *)masterIP port:(NSUInteger)port;
 - (void)disconnectFromMaster;
 - (BOOL)isConnectedToMaster;
@@ -174,6 +183,7 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleNetworkTestHelper;
 - (TVNCHttpResponse *)handleNetworkIpMethods:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleNetworkDebug;
+- (TVNCHttpResponse *)handleReflect:(NSDictionary *)query;   // TEMP DEBUG: Plan A 私有符号反射，提取后删除
 - (void)handle;
 @end
 

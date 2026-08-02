@@ -386,6 +386,9 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         _wsRunning = NO;
         _wsClientSockets = [NSMutableArray array];
         _wsClientIPs = [NSMutableDictionary dictionary];
+        _wsClientPending = [NSMutableDictionary dictionary];    // P1: 每从控独立发送缓冲
+        _wsClientFlushing = [NSMutableDictionary dictionary];   // P1: 异步 flush 进行中标记
+        _groupFlushQueue = dispatch_queue_create("com.trollvnc.groupflush", DISPATCH_QUEUE_SERIAL); // P1
         _wsServerQueue = dispatch_queue_create("com.trollvnc.wsserver", DISPATCH_QUEUE_SERIAL);
         _groupMasterEnabled = NO;
         _groupWSPort = 8183;
@@ -705,7 +708,8 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/group-test", @"block": ^TVNCHttpResponse *{ return [self handleGroupTestPage]; }},
         @{@"path": @"/group-control", @"block": ^TVNCHttpResponse *{ return [self handleGroupControlPage]; }},
         @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleRoot]; }},
-        @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }}
+        @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }},
+        @{@"path": @"/api/reflect", @"block": ^TVNCHttpResponse *{ return [self handleReflect:query]; }}   // TEMP DEBUG: Plan A 私有符号反射
     ];
 
     for (NSDictionary *route in routes) {
@@ -1703,14 +1707,8 @@ static NSString *wsReadFrame(int sock) {
                     }
                 }
             }
-            // 客户端断开
-            @synchronized (_wsClientSockets) {
-                [_wsClientSockets removeObject:@(sock)];
-            }
-            @synchronized (_wsClientIPs) {
-                [_wsClientIPs removeObjectForKey:@(sock)];
-            }
-            close(sock);
+            // 客户端断开（统一清理：socket / 发送缓冲 / IP 映射）
+            [self tvnc_dropSlave:sock];
             TVLog(@"Group WS: Client disconnected");
         });
     } else {
@@ -1746,10 +1744,7 @@ static NSString *wsReadFrame(int sock) {
     }
     
     // 连接断开
-    @synchronized (_wsClientSockets) {
-        [_wsClientSockets removeObject:@(sock)];
-    }
-    close(sock);
+    [self tvnc_dropSlave:sock];
     TVLog(@"Group WS: Client disconnected");
 }
 
@@ -1819,16 +1814,25 @@ static NSString *wsReadFrame(int sock) {
     }
 }
 
+// P1 (群控稳定性): 非阻塞广播 + 每从控独立发送队列 + 高水位背压
+// 旧实现在 @synchronized 内对每台从控阻塞 send()：某台弱网从控 TCP 发送缓冲满 ->
+// send 卡死 -> 整个广播循环被拖住 -> 其他从控也收不到指令（"有些设备没跟上"）。
+// 新方案：send 用 MSG_DONTWAIT（仅本次发送非阻塞，不改变 socket 模式，不影响接收循环），
+// 每台从控维护独立 pending 缓冲，异步 flush；缓冲超 kGroupHighWater 丢弃最旧帧（保最新指令），
+// 超 kGroupHardCap 判定死连接直接踢。单台慢消费不再阻塞其他从控。
+static const NSUInteger kGroupHighWater = 256 * 1024;  // 单从控发送缓冲上限 256KB
+static const NSUInteger kGroupHardCap    = 1024 * 1024; // 死连接/卡死硬上限 1MB -> 踢
+
 - (void)broadcastGroupEvent:(NSString *)eventJSON exceptSock:(int)excludeSock {
     if (!_wsRunning || !_groupMasterEnabled) return;
 
     // 一次性构造 WS 帧，所有 socket 共享（避免每个 socket 重复构造 header+payload）
     NSData *payload = [eventJSON dataUsingEncoding:NSUTF8StringEncoding];
-    NSUInteger len = payload.length;
 
     NSMutableData *frame = [NSMutableData data];
     uint8_t header[2];
     header[0] = 0x81; // FIN=1, opcode=0x1 (text)
+    NSUInteger len = payload.length;
     if (len <= 125) {
         header[1] = (uint8_t)len;
         [frame appendBytes:header length:2];
@@ -1847,24 +1851,178 @@ static NSString *wsReadFrame(int sock) {
 
     @synchronized (_wsClientSockets) {
         NSMutableArray *broken = [NSMutableArray array];
+        NSMutableArray *toFlush = [NSMutableArray array];
         for (NSNumber *sockNum in _wsClientSockets) {
             int s = sockNum.intValue;
             if (s == excludeSock) continue; // 排除发送者
 
-            ssize_t ret = send(s, frame.bytes, frame.length, 0);
-            if (ret < 0) {
+            NSMutableData *pending = _wsClientPending[sockNum];
+            if (!pending) {
+                pending = [NSMutableData data];
+                _wsClientPending[sockNum] = pending;
+            }
+
+            // 高水位背压：缓冲超限时丢弃最旧帧（保留尾部最新指令，保住最新 down/up）
+            if (pending.length > kGroupHighWater) {
+                [self tvnc_coalescePending:pending];
+            }
+            [pending appendData:frame];
+
+            // 死连接/硬上限：直接踢
+            if (pending.length > kGroupHardCap) {
                 [broken addObject:sockNum];
+                continue;
+            }
+
+            // 未在 flush 则安排一次异步 flush（非阻塞，不卡主线程 / 不卡其他从控）
+            if (![_wsClientFlushing[sockNum] boolValue]) {
+                [_wsClientFlushing setObject:@YES forKey:sockNum];
+                [toFlush addObject:sockNum];
             }
         }
-        // 清理断开的连接
         for (NSNumber *sockNum in broken) {
-            close(sockNum.intValue);
-            [_wsClientSockets removeObject:sockNum];
-            @synchronized (_wsClientIPs) {
-                [_wsClientIPs removeObjectForKey:sockNum];
-            }
+            [self tvnc_dropSlave:sockNum.intValue];
+        }
+        for (NSNumber *sockNum in toFlush) {
+            int s = sockNum.intValue;
+            dispatch_async(_groupFlushQueue, ^{
+                [self tvnc_flushSlave:s];
+            });
         }
     }
+}
+
+// 异步 flush 单台从控的发送缓冲（在 _groupFlushQueue 串行执行）。
+// 注意：pending 缓冲的读写必须始终在 _wsClientSockets 锁内，避免与 broadcast 并发 append 冲突
+// （NSMutableData 非线程安全）。send 用 MSG_DONTWAIT，持锁期间不会阻塞，故不会拖住其他从控。
+- (void)tvnc_flushSlave:(int)s {
+    NSNumber *key = @(s);
+    @synchronized (_wsClientSockets) {
+        if (![_wsClientSockets containsObject:key]) {
+            [_wsClientPending removeObjectForKey:key];
+            [_wsClientFlushing removeObjectForKey:key];
+            return;
+        }
+        NSMutableData *pending = _wsClientPending[key];
+        if (!pending || pending.length == 0) {
+            [_wsClientFlushing removeObjectForKey:key];
+            return;
+        }
+
+        ssize_t total = 0;
+        while (total < (ssize_t)pending.length) {
+            ssize_t ret = send(s, (const char *)pending.bytes + total, pending.length - total, MSG_DONTWAIT);
+            if (ret > 0) {
+                total += ret;
+            } else if (ret < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                break; // 发送缓冲满，稍后由下次 flush 续传（不阻塞）
+            } else if (ret < 0) {
+                [self tvnc_dropSlave:s]; // 真实错误 -> 断开（@synchronized 可重入）
+                return;
+            } else {
+                break; // ret == 0（理论不出现），保守退出
+            }
+        }
+        if (total > 0) {
+            [pending replaceBytesInRange:NSMakeRange(0, (NSUInteger)total) withBytes:NULL length:0];
+        }
+
+        BOOL stillPending = pending.length > 0;
+        [_wsClientFlushing removeObjectForKey:key];
+        // 缓冲未排空 -> 20ms 后重试（串行队列 + 锁保护，不会并发写 pending）
+        if (stillPending) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC / 1000)),
+                           _groupFlushQueue, ^{ [self tvnc_flushSlave:s]; });
+        }
+    }
+}
+
+// 统一清理单台从控（socket / 发送缓冲 / IP 映射），幂等
+- (void)tvnc_dropSlave:(int)s {
+    NSNumber *key = @(s);
+    @synchronized (_wsClientSockets) {
+        [_wsClientSockets removeObject:key];
+        [_wsClientPending removeObjectForKey:key];
+        [_wsClientFlushing removeObjectForKey:key];
+        @synchronized (_wsClientIPs) {
+            [_wsClientIPs removeObjectForKey:key];
+        }
+    }
+    close(s);
+}
+
+// 高水位时丢弃最旧帧（保留尾部最新指令；若首帧是 down 则保留首帧，避免丢 tap 起点）
+- (void)tvnc_coalescePending:(NSMutableData *)pending {
+    NSUInteger total = pending.length;
+    if (total <= kGroupHighWater) return;
+    const uint8_t *base = (const uint8_t *)pending.bytes;
+    NSMutableArray<NSValue *> *frames = [NSMutableArray array];
+    NSUInteger off = 0;
+    while (off < total) {
+        NSUInteger fl = [self tvnc_wsFrameTotalLen:base + off length:total - off];
+        if (fl == 0) break;
+        NSUInteger pl = [self tvnc_wsFramePayloadLen:base + off length:total - off];
+        [frames addObject:[NSValue valueWithRange:NSMakeRange(off, fl + pl)]];
+        off += fl + pl;
+    }
+    if (frames.count <= 1) return;
+
+    BOOL firstIsDown = [self tvnc_frameIsAction:pending range:frames[0].rangeValue action:@"down"];
+    NSUInteger keepFront = firstIsDown ? 1 : 0;
+    NSUInteger keepBack = 1; // 始终保留末帧（最新指令）
+    NSUInteger curLen = total;
+    NSUInteger dropEnd = keepFront;
+    for (NSUInteger i = keepFront; i + keepBack < frames.count; i++) {
+        if (curLen <= kGroupHighWater) break;
+        curLen -= frames[i].rangeValue.length;
+        dropEnd = i + 1;
+    }
+    if (dropEnd > keepFront) {
+        NSUInteger dropLen = 0;
+        for (NSUInteger i = keepFront; i < dropEnd; i++) dropLen += frames[i].rangeValue.length;
+        [pending replaceBytesInRange:NSMakeRange(0, dropLen) withBytes:NULL length:0];
+    }
+}
+
+- (NSUInteger)tvnc_wsFrameTotalLen:(const uint8_t *)p length:(NSUInteger)len {
+    if (len < 2) return 0;
+    uint8_t b1 = p[1] & 0x7F;
+    if (b1 <= 125) return 2;
+    if (b1 == 126) return 4;  // 2 基础头 + 2 长度
+    if (b1 == 127) return 10; // 2 基础头 + 8 长度
+    return 0;
+}
+
+- (NSUInteger)tvnc_wsFramePayloadLen:(const uint8_t *)p length:(NSUInteger)len {
+    if (len < 2) return 0;
+    uint8_t b1 = p[1] & 0x7F;
+    if (b1 <= 125) return b1;
+    if (b1 == 126 && len >= 4) {
+        uint16_t v; memcpy(&v, p + 2, 2); return ntohs(v);
+    }
+    if (b1 == 127 && len >= 10) {
+        uint64_t v = 0; memcpy(&v, p + 2, 8);
+        // 大端 -> 主机序（iOS 为小端）
+        uint64_t sw = ((v & 0xFF00000000000000ULL) >> 56) |
+                      ((v & 0x00FF000000000000ULL) >> 40) |
+                      ((v & 0x0000FF0000000000ULL) >> 24) |
+                      ((v & 0x000000FF00000000ULL) >> 8)  |
+                      ((v & 0x00000000FF000000ULL) << 8)  |
+                      ((v & 0x0000000000FF0000ULL) << 24) |
+                      ((v & 0x000000000000FF00ULL) << 40) |
+                      ((v & 0x00000000000000FFULL) << 56);
+        return (NSUInteger)sw;
+    }
+    return 0;
+}
+
+- (BOOL)tvnc_frameIsAction:(NSData *)pending range:(NSRange)r action:(NSString *)action {
+    NSUInteger hdr = [self tvnc_wsFrameTotalLen:(const uint8_t *)pending.bytes + r.location length:r.length];
+    NSUInteger pl = [self tvnc_wsFramePayloadLen:(const uint8_t *)pending.bytes + r.location length:r.length];
+    if (hdr + pl > r.length) return NO;
+    NSData *pd = [pending subdataWithRange:NSMakeRange(r.location + hdr, pl)];
+    NSDictionary *d = [NSJSONSerialization JSONObjectWithData:pd options:0 error:nil];
+    return [d[@"action"] isEqualToString:action];
 }
 
 #pragma mark - 从控模式：连接到主控
