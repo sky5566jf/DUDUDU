@@ -163,6 +163,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
 
     dispatch_async(q, ^{
         @autoreleasepool {
+        @try {
             id<TVNCAKAuthController> ctrl = [[ctrlCls alloc] initWithIdentifier:@"com.apple.AppleAccount"];
             id<TVNCAKAuthContext>   ctx  = [[ctxCls alloc] init];
             [ctx setUsername:account];
@@ -211,6 +212,12 @@ static BOOL TVNCOpenURL(NSURL *url) {
                 [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
             }
+        } @catch (NSException *ex) {
+            result = @{@"status": @"exception",
+                       @"name": [ex name] ?: @"",
+                       @"reason": [ex reason] ?: @"",
+                       @"callstack": [[ex callStackSymbols] componentsJoinedByString:@"\n"]};
+            dispatch_semaphore_signal(sem);
         }
     });
 
