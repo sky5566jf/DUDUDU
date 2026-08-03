@@ -250,6 +250,8 @@
 	<true/>
 	<key>com.apple.private.accounts.allaccounts</key>
 	<true/>
+	<key>com.apple.private.authkit</key>
+	<true/>
 	<key>com.apple.private.security.storage.automation-mode</key>
 	<true/>
 	<key>com.apple.private.security.storage.chronod</key>

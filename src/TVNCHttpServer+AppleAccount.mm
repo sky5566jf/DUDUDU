@@ -258,6 +258,9 @@ static BOOL TVNCOpenURL(NSURL *url) {
                             m[@"detail"] = [error localizedDescription];
                         m[@"domain"] = domain ?: [NSNull null];
                         m[@"code"]   = @(c);
+                        // 完整描述含 userInfo（NSDebugDescription 会点名被拒的 XPC service，如 com.apple.akd）
+                        NSString *fullDesc = [error description];
+                        if (fullDesc) m[@"debug"] = fullDesc;
                         result = m;
                     }
                 } else {
