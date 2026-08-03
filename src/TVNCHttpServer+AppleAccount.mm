@@ -39,7 +39,6 @@
 
 @protocol TVNCAKAuthContext <NSObject>
 - (void)setUsername:(NSString *)username;
-- (void)setPassword:(NSString *)password;
 - (void)setShouldPreventInteractiveAuth:(BOOL)prevent;
 - (void)setFirstTimeLogin:(BOOL)firstTime;
 - (void)setVerificationCode:(NSString *)code;       // 2FA 验证码（部分版本存在）
@@ -222,7 +221,15 @@ static BOOL TVNCOpenURL(NSURL *url) {
             id<TVNCAKAuthController> ctrl = [[ctrlCls alloc] initWithIdentifier:@"com.apple.AppleAccount"];
             id<TVNCAKAuthContext>   ctx  = [[ctxCls alloc] init];
             [ctx setUsername:account];
-            [ctx setPassword:password];
+            // 密码 setter 跨版本不一致：iOS14+ 为 setPassword:，iOS13 为下划线私有 _setPassword:
+            if ([ctx respondsToSelector:@selector(setPassword:)]) {
+                [ctx setPassword:password];
+            } else {
+                SEL setPw = NSSelectorFromString(@"_setPassword:");
+                if ([ctx respondsToSelector:setPw]) {
+                    [ctx performSelector:setPw withObject:password];
+                }
+            }
             if ([ctx respondsToSelector:@selector(setShouldPreventInteractiveAuth:)])
                 [ctx setShouldPreventInteractiveAuth:YES];
             if ([ctx respondsToSelector:@selector(setFirstTimeLogin:)])
