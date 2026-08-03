@@ -208,7 +208,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
             [ctrl authenticateWithContext:ctx completion:comp];
 
             // run loop 保活，直至回调 signal
-            while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 0.2)) != 0) {
+            while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC))) != 0) {
                 [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
             }
@@ -218,6 +218,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
                        @"reason": [ex reason] ?: @"",
                        @"callstack": [[ex callStackSymbols] componentsJoinedByString:@"\n"]};
             dispatch_semaphore_signal(sem);
+        }
         }
     });
 
@@ -265,7 +266,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
                 dispatch_semaphore_signal(sem);
             };
             [ctrl reportSignOutForAllAppleIDsWithCompletion:comp];
-            while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 0.2)) != 0) {
+            while (dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.2 * NSEC_PER_SEC))) != 0) {
                 [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                                          beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.2]];
             }
