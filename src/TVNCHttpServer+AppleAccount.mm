@@ -75,6 +75,34 @@ static TVNCHttpResponse *TVNCErr(NSInteger code, NSDictionary *body) {
     return r;
 }
 
+// ── TEMP DIAG 4.48：反射 iOS13 私有 API 真实方法签名 ─────────────────────
+static NSArray *TVNCInstanceMethods(Class cls) {
+    if (!cls) return @[];
+    unsigned count = 0;
+    Method *m = class_copyMethodList(cls, &count);
+    NSMutableArray *a = [NSMutableArray array];
+    for (unsigned i = 0; i < count; i++)
+        [a addObject:NSStringFromSelector(method_getName(m[i]))];
+    free(m);
+    return a;
+}
+static NSArray *TVNCClassMethods(Class cls) {
+    if (!cls) return @[];
+    return TVNCInstanceMethods(object_getClass(cls));
+}
+// 只保留和登录/账号相关的 selector，避免刷屏
+static NSArray *TVNCFilterAuth(NSArray *names) {
+    NSArray *keys = @[@"authenticat", @"apple", @"user", @"pass", @"sign", @"account",
+                      @"verify", @"login", @"context", @"session", @"register", @"credential"];
+    NSMutableArray *a = [NSMutableArray array];
+    for (NSString *n in names) {
+        NSString *ln = [n lowercaseString];
+        for (NSString *k in keys)
+            if ([ln containsString:k]) { [a addObject:n]; break; }
+    }
+    return [a sortedArrayUsingSelector:@selector(compare:)];
+}
+
 // ── 已登录检测（公开 Accounts 框架，跨版本稳定）────────────────────────
 static BOOL TVNCIsAppleIDSignedIn(void) {
     Class storeCls = NSClassFromString(@"ACAccountStore");
@@ -111,6 +139,33 @@ static BOOL TVNCOpenURL(NSURL *url) {
 #pragma mark - 路由处理
 
 @implementation TVNCHttpServer (Handlers)
+
+// ── TEMP DIAG 4.48：反射 iOS13 私有 API 真实方法签名 ──
+- (TVNCHttpResponse *)handleAppleAccountProbe:(NSDictionary *)query {
+    if (!TVNCCheckApiToken(query)) return TVNCErr(401, @{@"error": @"unauthorized"});
+    TVNCLoadAccountFramework(@"AppleAccount");
+    TVNCLoadAccountFramework(@"AuthKit");
+    TVNCLoadAccountFramework(@"Accounts");
+    NSArray *classes = @[@"AKAppleIDAuthenticationContext", @"AKAppleIDAuthenticationController",
+                         @"AAAccountManager", @"AKAccountManager", @"AKAppleIDSession",
+                         @"AKAuthenticationController"];
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    for (NSString *cn in classes) {
+        Class cls = NSClassFromString(cn);
+        if (!cls) { out[cn] = @"NOT_LOADED"; continue; }
+        const char *img = class_getImageName(cls);
+        out[cn] = @{
+            @"image": img ? [NSString stringWithUTF8String:img] : [NSNull null],
+            @"class_methods(filtered)": TVNCFilterAuth(TVNCClassMethods(cls)),
+            @"instance_methods(filtered)": TVNCFilterAuth(TVNCInstanceMethods(cls)),
+        };
+    }
+    TVNCHttpResponse *r = [[TVNCHttpResponse alloc] init];
+    r.statusCode = 200;
+    r.contentType = @"application/json";
+    r.body = [NSJSONSerialization dataWithJSONObject:out options:NSJSONWritingPrettyPrinted error:nil];
+    return r;
+}
 
 - (TVNCHttpResponse *)handleAppleSignIn:(NSDictionary *)query body:(NSData *)body {
     // 1) 鉴权

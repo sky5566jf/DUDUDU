@@ -707,6 +707,7 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/alert", @"block": ^TVNCHttpResponse *{ return [self handleAlert:query]; }},
         @{@"path": @"/api/appstore/signin", @"block": ^TVNCHttpResponse *{ return [self handleAppleSignIn:query body:body]; }},
         @{@"path": @"/api/appstore/signout", @"block": ^TVNCHttpResponse *{ return [self handleAppleSignOut:query]; }},
+        @{@"path": @"/api/appleaccount/probe", @"block": ^TVNCHttpResponse *{ return [self handleAppleAccountProbe:query]; }},   // TEMP DIAG 4.48: iOS13 私有 API 反射
         @{@"path": @"/group-test", @"block": ^TVNCHttpResponse *{ return [self handleGroupTestPage]; }},
         @{@"path": @"/group-control", @"block": ^TVNCHttpResponse *{ return [self handleGroupControlPage]; }},
         @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleRoot]; }},
