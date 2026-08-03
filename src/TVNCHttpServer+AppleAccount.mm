@@ -252,9 +252,13 @@ static BOOL TVNCOpenURL(NSURL *url) {
                             m[@"detail"] = [error localizedDescription];
                         result = m;
                     } else {
-                        result = @{@"status": @"error",
-                                   @"reason": @"auth_failed",
-                                   @"detail": [error localizedDescription] ?: [NSString stringWithFormat:@"%@:%ld", domain, (long)c]};
+                        NSMutableDictionary *m = [@{@"status": @"error",
+                                                   @"reason": @"auth_failed"} mutableCopy];
+                        if ([error localizedDescription])
+                            m[@"detail"] = [error localizedDescription];
+                        m[@"domain"] = domain ?: [NSNull null];
+                        m[@"code"]   = @(c);
+                        result = m;
                     }
                 } else {
                     NSMutableDictionary *ok = [@{@"status": @"ok"} mutableCopy];
