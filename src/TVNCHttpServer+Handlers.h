@@ -130,6 +130,8 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleFileList:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleReadFile:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleDeleteFile:(NSDictionary *)query;
+- (TVNCHttpResponse *)handleAppleSignIn:(NSDictionary *)query body:(NSData *)body;
+- (TVNCHttpResponse *)handleAppleSignOut:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleCreateFolder:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleTestInterface;
 - (TVNCHttpResponse *)handleRoot;
@@ -183,7 +185,6 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleNetworkTestHelper;
 - (TVNCHttpResponse *)handleNetworkIpMethods:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleNetworkDebug;
-- (TVNCHttpResponse *)handleReflect:(NSDictionary *)query;   // TEMP DEBUG: Plan A 私有符号反射，提取后删除
 - (void)handle;
 @end
 

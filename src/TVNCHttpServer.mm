@@ -705,11 +705,12 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/group/slaves", @"block": ^TVNCHttpResponse *{ return [self handleGroupSlaves]; }},
         @{@"path": @"/api/group/proxy-screenshot", @"block": ^TVNCHttpResponse *{ return [self handleGroupProxyScreenshot:query]; }},
         @{@"path": @"/api/alert", @"block": ^TVNCHttpResponse *{ return [self handleAlert:query]; }},
+        @{@"path": @"/api/appstore/signin", @"block": ^TVNCHttpResponse *{ return [self handleAppleSignIn:query body:body]; }},
+        @{@"path": @"/api/appstore/signout", @"block": ^TVNCHttpResponse *{ return [self handleAppleSignOut:query]; }},
         @{@"path": @"/group-test", @"block": ^TVNCHttpResponse *{ return [self handleGroupTestPage]; }},
         @{@"path": @"/group-control", @"block": ^TVNCHttpResponse *{ return [self handleGroupControlPage]; }},
         @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleRoot]; }},
-        @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }},
-        @{@"path": @"/api/reflect", @"block": ^TVNCHttpResponse *{ return [self handleReflect:query]; }}   // TEMP DEBUG: Plan A 私有符号反射
+        @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }}
     ];
 
     for (NSDictionary *route in routes) {
@@ -1300,6 +1301,9 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/deb", @"doc": @"安装 .deb（越狱）"},
             @{@"category": @"安装 / 卸载", @"path": @"POST /api/uninstall?bundleId=com.xxx.app", @"doc": @"通过 TrollStore 卸载应用"},
             @{@"category": @"安装 / 卸载", @"path": @"GET /api/trollstore/diagnostics", @"doc": @"获取 TrollStore 诊断信息"},
+            // Apple ID 账号管理（需 ?token= 鉴权；signout 额外需 ?confirm=yes）
+            @{@"category": @"Apple ID", @"path": @"POST /api/appstore/signin", @"doc": @"登录 Apple ID（body: account/password/可选 code/可选 appStoreId）；已登录时直接打开商店页，需 token"},
+            @{@"category": @"Apple ID", @"path": @"POST /api/appstore/signout?confirm=yes", @"doc": @"登出设备 Apple ID（连带 iCloud/Find My，需 token+confirm）"},
             // 网络调试
             @{@"category": @"网络调试", @"path": @"GET /api/network/debug", @"doc": @"网络配置调试（读取配置文件结构与目录列表）"},
             @{@"category": @"网络调试", @"path": @"GET /api/network/test_helper", @"doc": @"测试 root helper（spawn 自身以 root 身份执行 test 操作）"},
