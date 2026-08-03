@@ -39,6 +39,7 @@
 
 @protocol TVNCAKAuthContext <NSObject>
 - (void)setUsername:(NSString *)username;
+- (void)setPassword:(NSString *)password;            // iOS14+；iOS13 走 _setPassword: 回退（performSelector）
 - (void)setShouldPreventInteractiveAuth:(BOOL)prevent;
 - (void)setFirstTimeLogin:(BOOL)firstTime;
 - (void)setVerificationCode:(NSString *)code;       // 2FA 验证码（部分版本存在）
