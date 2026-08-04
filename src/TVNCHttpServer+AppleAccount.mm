@@ -239,6 +239,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
                 [ctx setVerificationCode:code];
 
             void (^comp)(id, NSError *) = ^(id response, NSError *error) {
+                fprintf(stderr, "[TVNC-AK] completion fired on %s error=%s\n", [[[NSThread currentThread] description] UTF8String], error ? [[error description] UTF8String] : "nil"); fflush(stderr);
                 if (error) {
                     NSInteger c = [error code];
                     NSString *domain = [error domain];
@@ -275,6 +276,7 @@ static BOOL TVNCOpenURL(NSURL *url) {
                 dispatch_semaphore_signal(sem);
             };
 
+                        fprintf(stderr, "[TVNC-AK] -> authenticateWithContext (preventInteractive=1 firstTimeLogin=1)\n"); fflush(stderr);
             [ctrl authenticateWithContext:ctx completion:comp];
 
             // run loop 保活，直至回调 signal
@@ -292,8 +294,17 @@ static BOOL TVNCOpenURL(NSURL *url) {
         }
     });
 
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
-    if (!result) result = @{@"status": @"error", @"reason": @"timeout"};
+    // 主线程也须转 run loop：AuthKit 可能把 completion 派发到主队列，
+    // 若主线程纯阻塞 wait 会导致 completion 永不执行（伪超时）。
+    NSDate *akDeadline = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (dispatch_semaphore_wait(sem, DISPATCH_TIME_NOW) != 0) {
+        if ([akDeadline timeIntervalSinceNow] <= 0) break;
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:akDeadline];
+    }
+    if (!result) {
+        fprintf(stderr, "[TVNC-AK] TIMEOUT: completion never fired within 30s\n"); fflush(stderr);
+        result = @{@"status": @"error", @"reason": @"timeout"};
+    }
     return TVNCErr(200, result);
 }
 
