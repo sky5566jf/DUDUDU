@@ -231,8 +231,11 @@ static BOOL TVNCOpenURL(NSURL *url) {
                     [ctx performSelector:setPw withObject:password];
                 }
             }
-            if ([ctx respondsToSelector:@selector(setShouldPreventInteractiveAuth:)])
-                [ctx setShouldPreventInteractiveAuth:YES];
+            // [4.56] 去掉 setShouldPreventInteractiveAuth:YES：最后一击实验，彻底排除
+            // "preventInteractive 让 akd 死等 UI 确认" 的假设。保留 firstTimeLogin=NO 默认行为。
+            // 若仍 30s 超时，则 100% 确认根因是 daemon 缺 UI 上下文（需改架构走 App 登录）。
+            // if ([ctx respondsToSelector:@selector(setShouldPreventInteractiveAuth:)])
+            //     [ctx setShouldPreventInteractiveAuth:YES];
             // [4.55] 不再设 firstTimeLogin=YES：daemon 无 UI 上下文，首登向导会触发需要用户确认/UI 的死路，
             // 导致 akd 的 authenticateWithContext:completion: completion 永不回调（实测 4.54 30s 超时）。
             // 去掉后走“已有 Apple ID 登录”路径，避免 UI 向导挂起。
