@@ -233,8 +233,11 @@ static BOOL TVNCOpenURL(NSURL *url) {
             }
             if ([ctx respondsToSelector:@selector(setShouldPreventInteractiveAuth:)])
                 [ctx setShouldPreventInteractiveAuth:YES];
-            if ([ctx respondsToSelector:@selector(setFirstTimeLogin:)])
-                [ctx setFirstTimeLogin:YES];
+            // [4.55] 不再设 firstTimeLogin=YES：daemon 无 UI 上下文，首登向导会触发需要用户确认/UI 的死路，
+            // 导致 akd 的 authenticateWithContext:completion: completion 永不回调（实测 4.54 30s 超时）。
+            // 去掉后走“已有 Apple ID 登录”路径，避免 UI 向导挂起。
+            // if ([ctx respondsToSelector:@selector(setFirstTimeLogin:)])
+            //     [ctx setFirstTimeLogin:YES];
             if (code && [ctx respondsToSelector:@selector(setVerificationCode:)])
                 [ctx setVerificationCode:code];
 
