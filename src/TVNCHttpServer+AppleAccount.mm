@@ -23,7 +23,7 @@
 // ── token 校验（占位默认值，部署时必须改）──────────────────────────────
 // 建议用足够随机的字符串，并通过构建变量 / 配置文件注入，不要硬编码进仓库。
 #ifndef TVNC_APPSTORE_API_TOKEN
-#define TVNC_APPSTORE_API_TOKEN @"tvnc-appstore-change-me"
+#define TVNC_APPSTORE_API_TOKEN @"uhoFjAhjfuwzouWiv1ezYEVk8XTgrNglEdSaxkuM0s4"
 #endif
 
 // ── 私有 API 非正式声明（仅给编译器方法签名，运行时不链接）──────────────
