@@ -245,22 +245,6 @@
 	<true/>
 	<key>com.apple.private.security.storage.appleaccountd</key>
 	<true/>
-	<!-- Apple ID 登录所需：允许与 accountsd / akd 走 XPC 通信 -->
-	<key>com.apple.private.accounts</key>
-	<true/>
-	<key>com.apple.private.accounts.allaccounts</key>
-	<true/>
-	<!-- 连接 akd 的 com.apple.ak.auth.xpc 所需的客户端 entitlement（iOS13.6 Settings/AppStore 同款；4.52 仅 private.authkit 仍 4097，补 client.private/internal 后打通）-->
-	<key>com.apple.authkit.client.private</key>
-	<true/>
-	<key>com.apple.authkit.client.internal</key>
-	<true/>
-	<key>com.apple.accounts.appleaccount.fullaccess</key>
-	<true/>
-	<key>com.apple.accounts.appleidauthentication.defaultaccess</key>
-	<true/>
-	<key>com.apple.private.authkit</key>
-	<true/>
 	<key>com.apple.private.security.storage.automation-mode</key>
 	<true/>
 	<key>com.apple.private.security.storage.chronod</key>

@@ -1246,7 +1246,39 @@ static BOOL tvncIsAllASCII(NSString *text) {
     NSString *originalText = [UIPasteboard generalPasteboard].string;
     
     // 设置要输入的文本到剪贴板
-    [UIPasteboard generalPasteboard].string = text;
+    UIPasteboard *pb = [UIPasteboard generalPasteboard];
+    pb.string = text;
+    
+    // iOS 16+ 跨 App 粘贴会弹出"允许粘贴"隐私提示。
+    // 尝试把剪贴板来源伪装成当前前台 App，让系统认为目标 App 在读取自己的剪贴板，从而绕过弹窗。
+    // 依赖 UIPasteboard 私有 API；若当前系统版本/权限不满足，@try 保证不影响原有剪贴板+Cmd+V 流程。
+    NSString *frontmostBID = [self getFrontmostAppBundleID];
+    if (frontmostBID.length) {
+        @try {
+            SEL setOriginatorSel = NSSelectorFromString(@"setOriginatorBundleID:");
+            SEL setPrivateOriginatorSel = NSSelectorFromString(@"_setOriginatorBundleID:");
+            if ([pb respondsToSelector:setOriginatorSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [(id)pb performSelector:setOriginatorSel withObject:frontmostBID];
+#pragma clang diagnostic pop
+                TVLog(@"Set pasteboard originatorBundleID to frontmost app: %@", frontmostBID);
+            } else if ([pb respondsToSelector:setPrivateOriginatorSel]) {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+                [(id)pb performSelector:setPrivateOriginatorSel withObject:frontmostBID];
+#pragma clang diagnostic pop
+                TVLog(@"Set pasteboard _originatorBundleID to frontmost app: %@", frontmostBID);
+            } else {
+                [pb setValue:frontmostBID forKey:@"_originatingBundleID"];
+                TVLog(@"Set pasteboard _originatingBundleID to frontmost app: %@", frontmostBID);
+            }
+        } @catch (NSException *e) {
+            TVLog(@"Failed to spoof pasteboard originatingBundleID: %@", e);
+        }
+    } else {
+        TVLog(@"Could not get frontmost app bundle ID, skipping pasteboard originator spoof");
+    }
     
     // 使用 HID 事件发送 Command+V 粘贴
     BOOL success = [self sendPasteKeyCombination];

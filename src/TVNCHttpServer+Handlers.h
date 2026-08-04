@@ -130,9 +130,6 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleFileList:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleReadFile:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleDeleteFile:(NSDictionary *)query;
-- (TVNCHttpResponse *)handleAppleSignIn:(NSDictionary *)query body:(NSData *)body;
-- (TVNCHttpResponse *)handleAppleSignOut:(NSDictionary *)query;
-- (TVNCHttpResponse *)handleAppleAccountProbe:(NSDictionary *)query;   // TEMP DIAG 4.48
 - (TVNCHttpResponse *)handleCreateFolder:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleTestInterface;
 - (TVNCHttpResponse *)handleRoot;

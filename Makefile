@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 4.56
+export PACKAGE_VERSION := 4.57
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -32,7 +32,6 @@ trollvncserver_FILES += src/TVNCHttpServer.mm
 trollvncserver_FILES += src/TVNCHttpServer+Screenshot.mm
 trollvncserver_FILES += src/TVNCHttpServer+File.mm
 trollvncserver_FILES += src/TVNCHttpServer+Group.mm
-trollvncserver_FILES += src/TVNCHttpServer+AppleAccount.mm
 trollvncserver_FILES += src/TVNCHttpServer+System.mm
 trollvncserver_FILES += src/TVNCApiManager.mm
 trollvncserver_FILES += quality/TVNCInputStrategy.c   # 纯 C 输入级联策略（已单测验证，作为真实决策引擎链入）
