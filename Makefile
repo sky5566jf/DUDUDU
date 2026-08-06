@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 4.57
+export PACKAGE_VERSION := 4.58
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -38,8 +38,10 @@ trollvncserver_FILES += quality/TVNCInputStrategy.c   # 纯 C 输入级联策略
 trollvncserver_FILES += quality/TVNCTextClassifier.c   # 纯 C 文本特征分类（已单测，运行时 tvncIsAllASCII 委托）
 trollvncserver_FILES += quality/TVNCRouteSafety.c      # 纯 C 路由安全分类表（已单测，启动时自检）
 
-# v3.40: Dropped iOS < 13.4 support. Removed fishhook and weak symbol shim.
-# ___darwin_check_fd_set_overflow is natively available on iOS 13.4+.
+# iOS < 13.4 compatibility: fishhook + weak symbol shim for ___darwin_check_fd_set_overflow.
+# Scoped strictly to iOS < 13.4 (see _tvnc_init_fd_set_shim in trollvncserver.mm);
+# on 13.4+ the system provides the real symbol and nothing is touched.
+trollvncserver_FILES += src/fishhook.c
 
 trollvncserver_CFLAGS += -fobjc-arc
 trollvncserver_CFLAGS += -Wno-unknown-warning-option
@@ -70,6 +72,7 @@ else
 trollvncserver_CFLAGS += -Iinclude
 trollvncserver_CFLAGS += -Iquality   # 让 src/*.mm 能 #include "TVNCInputStrategy.h"
 trollvncserver_LDFLAGS += -Llib
+trollvncserver_LDFLAGS += -Wl,-u,_rebind_symbols   # 强制保留 fishhook 的 _rebind_symbols，防止被 strip/LTO 优化掉
 endif
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)

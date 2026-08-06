@@ -53,6 +53,65 @@
 #import <unistd.h>
 #import <vector>
 
+// ---------------------------------------------------------------------------
+// iOS < 13.4 compatibility shim for ___darwin_check_fd_set_overflow
+//
+// ROOT CAUSE: libvncserver.a is built with SDK 13.4+, whose FD_SET macro calls
+// ___darwin_check_fd_set_overflow() — a symbol INTRODUCED in iOS 13.4. On iOS
+// < 13.4 this symbol is absent from libSystem, so the first FD_SET inside
+// rfbInitSockets fails lazy binding and the process SIGABRTs at launch
+// (ports 5901/5801/8182 never come up).
+//
+// FIX — SCOPED STRICTLY TO iOS < 13.4, zero effect on 13.4+:
+//   1. A weak definition is a fallback the linker only uses when the system
+//      exports NO strong symbol (< 13.4). On 13.4+ libSystem's strong symbol wins.
+//   2. _tvnc_init_fd_set_shim() detects the OS at process start and ONLY on iOS < 13.4
+//      uses fishhook to rebind libvncserver's lazy reference to our replacement,
+//      so dyld never attempts the doomed lazy-bind to libSystem. On 13.4+ it
+//      returns early and leaves the system symbol completely untouched.
+// ---------------------------------------------------------------------------
+#include <sys/select.h>
+
+__attribute__((used))
+static int _tvnc_fd_set_overflow_replacement(int fd, const struct fd_set *fdsetp, int unused) {
+    (void)fdsetp;
+    (void)unused;
+    if (fd < 0 || fd >= FD_SETSIZE) {
+        abort(); // mirror the system's overflow contract for out-of-range fds
+    }
+    return 0;
+}
+
+extern "C" {
+__attribute__((weak, visibility("default")))
+int ___darwin_check_fd_set_overflow(int fd, const struct fd_set *fdsetp, int unused) {
+    return _tvnc_fd_set_overflow_replacement(fd, fdsetp, unused);
+}
+}
+
+#include "fishhook.h"
+
+// Pure-C version probe (no ObjC dependency) so it is safe in a constructor.
+static __attribute__((constructor)) void _tvnc_init_fd_set_shim(void) {
+    char buf[32] = {0};
+    size_t sz = sizeof(buf);
+    int major = 0, minor = 0;
+    if (sysctlbyname("kern.osproductversion", buf, &sz, NULL, 0) == 0) {
+        sscanf(buf, "%d.%d", &major, &minor);
+    }
+    // Scoped strictly to iOS < 13.4. On 13.4+ the system provides the real
+    // symbol; touching it there would be unsafe and pointless.
+    if (major > 13 || (major == 13 && minor >= 4)) {
+        return;
+    }
+    struct rebinding rebinds[1];
+    rebinds[0].name = "___darwin_check_fd_set_overflow";
+    rebinds[0].replacement = (void *)_tvnc_fd_set_overflow_replacement;
+    rebinds[0].replaced = NULL;
+    rebind_symbols(rebinds, 1);
+    fprintf(stderr, "[TVNC fd_set_shim] iOS %s (< 13.4) — rebound ___darwin_check_fd_set_overflow\n", buf);
+}
+
 #import "BulletinManager.h"
 #import "ClipboardManager.h"
 #import "Control.h"
@@ -5231,36 +5290,28 @@ static void setupRfbScreen(int argc, const char *argv[]) {
     gScreen->port = gPort;
 
     // ---------------------------------------------------------------------------
-    // iOS 13.3.1 compatibility: ___darwin_check_fd_set_overflow
+    // iOS < 13.4 compatibility (threshold aligned to ___darwin_check_fd_set_overflow,
+    // which Apple introduced in iOS 13.4). Everything in this block is scoped to
+    // iOS < 13.4; on 13.4+ we keep full functionality including IPv6 listening.
     //
-    // ROOT CAUSE (found in v3.17): libvncserver.a was compiled with Xcode 11.4+
-    // (SDK 13.4+). The FD_SET macro in that SDK emits a call to
-    // ___darwin_check_fd_set_overflow(), which was introduced in iOS 13.4.
-    // On iOS 13.3.1, this symbol does NOT exist in libSystem.B.dylib.
-    // When rfbInitSockets calls FD_SET for the first time, dyld_stub_binder
-    // fails to find the symbol and aborts with SIGABRT.
+    // The actual crash fix for the missing symbol lives at the TOP of this file
+    // (_tvnc_init_fd_set_shim + weak ___darwin_check_fd_set_overflow): on iOS < 13.4
+    // fishhook rebinds libvncserver's lazy reference before rfbInitSockets runs, so
+    // dyld never attempts the doomed lazy-bind to libSystem. On 13.4+ the system
+    // symbol is used and this whole block is a no-op.
     //
-    // FIX: We provide a weak implementation of ___darwin_check_fd_set_overflow
-    // at the top of this file. Since libvncserver.a is statically linked into
-    // the same Mach-O as our code, dyld will find our weak export when resolving
-    // the lazy symbol pointer. On iOS 13.4+, the system's strong symbol in
-    // libSystem.B.dylib takes precedence over our weak one.
-    //
-    // ADDITIONAL PROTECTION: On iOS < 13.6, we also pre-call network symbols
-    // (getaddrinfo, socket, bind, etc.) and disable IPv6 listening. This is
-    // not strictly necessary now that the weak symbol fix is in place, but
-    // provides defense-in-depth in case there are other missing symbols we
-    // haven't identified.
+    // The pre-binding + IPv6-disable below is defense-in-depth for the same < 13.4
+    // window (guards against any other symbols missing on old iOS).
     // ---------------------------------------------------------------------------
     BOOL shouldDisableVncIPv6 = NO;
-    if (@available(iOS 13.6, *)) {
-        // iOS 13.6+ — all symbols work fine, keep IPv6
+    if (@available(iOS 13.4, *)) {
+        // iOS 13.4+ — all symbols (incl. ___darwin_check_fd_set_overflow) present, keep IPv6
         shouldDisableVncIPv6 = NO;
     } else {
-        // iOS < 13.6 — pre-bind network symbols as defense-in-depth.
-        // The primary fix is the weak ___darwin_check_fd_set_overflow symbol
-        // above, but we also pre-call these to ensure dyld has cached them.
-        TVLog(@"iOS < 13.6 detected: pre-binding network symbols (defense-in-depth)");
+        // iOS < 13.4 — pre-bind network symbols as defense-in-depth.
+        // The primary fix is the fishhook rebind of ___darwin_check_fd_set_overflow
+        // at the top of this file, but we also pre-call these to ensure dyld cached them.
+        TVLog(@"iOS < 13.4 detected: pre-binding network symbols (defense-in-depth)");
 
         // 1. getaddrinfo + freeaddrinfo + gai_strerror (IPv6 listen path)
         struct addrinfo hints, *res = NULL;
