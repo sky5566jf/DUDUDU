@@ -73,8 +73,14 @@
 //     underscores). Writing THREE underscores in source yields FOUR in the table,
 //     which does NOT match libvncserver's reference — that was the bug in v4.58/4.59
 //     (weak def + fishhook, which also ran too late to patch a load-time weak import).
-//   * Works on every iOS version. On >= 13.4 our implementation is functionally
-//     identical to the system's (validate fd, return 0), so it is safe there too.
+//   * Works on every iOS version. NOTE: because this is a STRONG def, on >= 13.4
+//     it OVERRIDES libSystem's own symbol (a strong def in the main executable
+//     wins over a dylib's). So this implementation IS the one actually called on
+//     13.4+ — it must therefore be benign (never abort). In 4.59 the def was weak,
+//     so libSystem's benign function was the one used there; promoting to strong in
+//     4.60 made our replacement active on 13.4+ and an `abort()` inside it crashed
+//     the RFB daemon whenever an fd >= FD_SETSIZE was FD_SET'd (regression: 5901/5801
+//     dead, 8182 alive).
 //   * No fishhook, no constructor, no runtime version probe required.
 // ---------------------------------------------------------------------------
 #include <sys/select.h>
@@ -82,9 +88,15 @@
 extern "C" int __darwin_check_fd_set_overflow(int fd, const void *fdsetp, int unused) {
     (void)fdsetp;
     (void)unused;
-    if (fd < 0 || fd >= FD_SETSIZE) {
-        abort(); // mirror the system's overflow contract for out-of-range fds
-    }
+    // Provide the symbol for iOS < 13.4 (where libSystem lacks it) and, because this
+    // is a STRONG def, also override the system function on >= 13.4. IMPORTANT: never
+    // abort here. An out-of-range fd simply isn't tracked by the fd_set (the FD_SET
+    // macro skips it) — this matches the system's benign contract. The v4.60 promotion
+    // from `weak` to `strong` inverted symbol-resolution priority, making THIS
+    // replacement the one actually called on 13.4+; the original `abort()` here crashed
+    // the whole RFB daemon whenever libvncserver FD_SET'd an fd >= FD_SETSIZE (e.g.
+    // >= 1024), killing ports 5901/5801 while the independent 8182 REST thread survived.
+    // Returning 0 unconditionally is safe on every iOS version.
     return 0;
 }
 
