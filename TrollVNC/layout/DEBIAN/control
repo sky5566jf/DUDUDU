@@ -1,6 +1,6 @@
 Package: com.82flex.trollvnc
 Name: TrollVNC
-Version: 1.0
+Version: 4.59
 Section: Tweaks
 Depends: firmware (>= 14.0), preferenceloader
 Architecture: iphoneos-arm
