@@ -76,11 +76,13 @@
 //   * Works on every iOS version. NOTE: because this is a STRONG def, on >= 13.4
 //     it OVERRIDES libSystem's own symbol (a strong def in the main executable
 //     wins over a dylib's). So this implementation IS the one actually called on
-//     13.4+ — it must therefore be benign (never abort). In 4.59 the def was weak,
-//     so libSystem's benign function was the one used there; promoting to strong in
-//     4.60 made our replacement active on 13.4+ and an `abort()` inside it crashed
-//     the RFB daemon whenever an fd >= FD_SETSIZE was FD_SET'd (regression: 5901/5801
-//     dead, 8182 alive).
+//     13.4+ — it MUST mirror Apple's contract exactly. In 4.59 the def was weak,
+//     so libSystem's correct function was used there. The v4.60 regression came
+//     from promoting to strong AND returning the WRONG VALUE (0) from this shim:
+//     FD_SET gates the bit-set on this return value, so a 0 made FD_SET a no-op
+//     on 13.4+ and silently killed 5901/5801 (8182 uses a different path, survived).
+//     The fix is the RETURN VALUE, not just removing abort(): return 1 for an
+//     in-range fd (FD_SET adds it), 0 only for overflow (FD_SET skips it).
 //   * No fishhook, no constructor, no runtime version probe required.
 // ---------------------------------------------------------------------------
 #include <sys/select.h>
@@ -88,16 +90,19 @@
 extern "C" int __darwin_check_fd_set_overflow(int fd, const void *fdsetp, int unused) {
     (void)fdsetp;
     (void)unused;
-    // Provide the symbol for iOS < 13.4 (where libSystem lacks it) and, because this
-    // is a STRONG def, also override the system function on >= 13.4. IMPORTANT: never
-    // abort here. An out-of-range fd simply isn't tracked by the fd_set (the FD_SET
-    // macro skips it) — this matches the system's benign contract. The v4.60 promotion
-    // from `weak` to `strong` inverted symbol-resolution priority, making THIS
-    // replacement the one actually called on 13.4+; the original `abort()` here crashed
-    // the whole RFB daemon whenever libvncserver FD_SET'd an fd >= FD_SETSIZE (e.g.
-    // >= 1024), killing ports 5901/5801 while the independent 8182 REST thread survived.
-    // Returning 0 unconditionally is safe on every iOS version.
-    return 0;
+    // CRITICAL: mirror Apple's libc contract EXACTLY.
+    //   __darwin_check_fd_set_overflow() returns:
+    //     1 (true)  if fd is within the fd_set capacity  -> FD_SET ADDS the fd
+    //     0 (false) if fd would overflow the set          -> FD_SET SKIPS the fd
+    // The FD_SET macro expands to `if (__darwin_check_fd_set_overflow(...)) { set bit }`,
+    // so returning 0 makes FD_SET a silent NO-OP: select() never sees any fd, the
+    // RFB/HTTP server (5901/5801) listens but never accepts/serves. That was the real
+    // v4.60 regression (the `return 0` was correct for "skip overflow" but WRONG as an
+    // unconditional return — it skipped EVERY fd). Never abort here either.
+    if (fd < 0 || fd >= FD_SETSIZE) {
+        return 0; // would overflow — FD_SET must skip it (benign, matches system)
+    }
+    return 1;     // in range — FD_SET adds it, select() can now report readiness
 }
 
 #import "BulletinManager.h"
