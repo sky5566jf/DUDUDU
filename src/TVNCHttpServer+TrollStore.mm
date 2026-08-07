@@ -167,10 +167,18 @@ static NSString *sTrollCachedHelperPath = nil;
     return nil;
 }
 
-#pragma mark - 流式下载 tipa/ipa 到临时文件（照搬 MatisuTrollStore）
+#pragma mark - 流式下载 tipa/ipa 到临时文件（照搬 MatisuTrollStore，并增强中文/非ASCII URL 容错）
 
 - (NSString *)trollDownloadToTemp:(NSString *)urlString error:(NSString **)errorOut {
+    // HTTP 框架取 query 参数时已完成 URL 解码，若原始链接含中文/空格等非 ASCII 字符，
+    // 解码后的串直接交给 NSURL URLWithString: 会返回 nil -> invalid_url。
+    // 这里在第一次构造失败时，对原始串做 percent-encode 兜底，确保中文文件名等场景可正常下载。
     NSURL *url = [NSURL URLWithString:urlString];
+    if (!url) {
+        NSString *encoded = [urlString stringByAddingPercentEncodingWithAllowedCharacters:
+                             [NSCharacterSet URLQueryAllowedCharacterSet]];
+        url = [NSURL URLWithString:encoded];
+    }
     if (!url) {
         if (errorOut) *errorOut = @"invalid_url";
         return nil;
