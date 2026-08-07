@@ -130,7 +130,7 @@
 |---|---|---|
 | GET | `/` | 健康检查（JSON：`status`/`version`/`port`/`endpoints`） |
 | GET | `/status` | 服务状态 + `trollstorehelper` 路径探测结果 |
-| GET | `/install?url=<下载地址>&launch=true` | 下载并**静默安装** tipa/ipa。`launch` 可选：`true` = 自动从 helper 输出识别 bundleId 后拉起；也可直接传 bundleId，或逗号分隔多个（间隔 10s）。`url` 支持百分号编码或原始中文——含中文/空格的文件名会自动 percent-encode 兜底（4.65 起无需调用方预先编码） |
+| GET | `/install?url=<下载地址>&launch=true` | 下载并**静默安装** tipa/ipa。`launch` 可选：`true` = 自动从 helper 输出识别 bundleId 后拉起；也可直接传 bundleId，或逗号分隔多个（间隔 10s）。`url` 支持百分号编码或原始中文——含中文/空格的文件名会自动 percent-encode 兜底（4.65 起无需调用方预先编码）。**兜底**：当 `trollstorehelper` 缺失或下载失败时，退回 `apple-magnifier://install?url=...` 由 TrollStore 接管（返回 `{"status":"ok","method":"SBSOpenSensitiveURL"|"SBSOpenURL"|...}`），与 MatisuTrollStore 行为一致（4.66 起） |
 | GET | `/uninstall?bundle_id=com.xxx.yyy` | **静默卸载**指定 App |
 | GET | `/launch?apps=com.a.b,com.c.d&interval=5` | 批量拉起 App。`interval` 间隔秒数，范围 1–60，默认 5 |
 | GET | `/ports` | 端口健康监控状态（监控列表 + 是否监听 + 上次拉起距今秒数） |

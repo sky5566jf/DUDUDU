@@ -345,6 +345,51 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
     return @"unexpected";
 }
 
+#pragma mark - openURL 兜底（三级 fallback，对齐 MatisuTrollStore）
+
+// 当 trollstorehelper 缺失或下载失败时，退回 apple-magnifier:// scheme 让 TrollStore 接管安装。
+// 三级顺序：SBSOpenSensitiveURLAndUnlockDevice → SBSOpenURL → 返回失败原因。
+- (NSString *)trollTriggerInstall:(NSString *)scheme {
+    NSURL *u = [NSURL URLWithString:scheme];
+    if (!u) return @"invalid_url";
+
+    void *sbsHandle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+    if (!sbsHandle) sbsHandle = dlopen("SpringBoardServices", RTLD_LAZY);
+    if (sbsHandle) {
+        typedef void (*SBSOpenSensitiveURLFunc)(CFURLRef url, int flags);
+        SBSOpenSensitiveURLFunc openSensitive = (SBSOpenSensitiveURLFunc)dlsym(sbsHandle, "SBSOpenSensitiveURLAndUnlockDevice");
+        if (openSensitive) {
+            @try {
+                openSensitive((__bridge CFURLRef)u, 1);
+                TVLog(@"[TrollStore] SBSOpenSensitiveURLAndUnlockDevice called: %@", scheme);
+                dlclose(sbsHandle);
+                return @"SBSOpenSensitiveURL";
+            } @catch (NSException *e) {
+                TVLog(@"[TrollStore] SBSOpenSensitiveURL exception: %@", e);
+            }
+        }
+
+        typedef void (*SBSOpenURLFunc)(CFURLRef url);
+        SBSOpenURLFunc openURLFunc = (SBSOpenURLFunc)dlsym(sbsHandle, "SBSOpenURL");
+        if (openURLFunc) {
+            @try {
+                openURLFunc((__bridge CFURLRef)u);
+                TVLog(@"[TrollStore] SBSOpenURL called: %@", scheme);
+                dlclose(sbsHandle);
+                return @"SBSOpenURL";
+            } @catch (NSException *e) {
+                TVLog(@"[TrollStore] SBSOpenURL exception: %@", e);
+            }
+        }
+        dlclose(sbsHandle);
+    } else {
+        const char *dlErr = dlerror();
+        TVLog(@"[TrollStore] dlopen SpringBoardServices failed: %s", dlErr ? dlErr : "(null)");
+        return [NSString stringWithFormat:@"dlopen_failed:%s", dlErr ? dlErr : "null"];
+    }
+    return @"sbs_unavailable";
+}
+
 #pragma mark - GET /install?url=&launch=
 
 - (TVNCHttpResponse *)handleTrollInstall:(NSDictionary *)query {
@@ -408,15 +453,19 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
                 statusStr, escUrl, exitCode, escOutput, launchJson];
             return [self trollJson:body statusCode:(exitCode == 0 ? 200 : 500)];
         }
-        TVLog(@"[TrollStore] download failed: %@", dlError);
+        TVLog(@"[TrollStore] download failed: %@, falling back to openURL", dlError);
+    } else {
+        TVLog(@"[TrollStore] trollstorehelper not found, falling back to openURL");
     }
 
-    // trollstorehelper 不可用 / 下载失败
-    NSString *reason = helperPath ? [NSString stringWithFormat:@"download_failed: %@", dlError ?: @"unknown"] : @"trollstorehelper not found";
+    // ── 路径2: openURL 兜底（对齐 MatisuTrollStore）──
+    NSString *scheme = [@"apple-magnifier://install?url=" stringByAppendingString:decoded];
+    NSString *method = [self trollTriggerInstall:scheme];
+    NSString *escUrl = [self trollJsonEscape:decoded];
+    NSString *escMethod = [self trollJsonEscape:method];
     NSString *body = [NSString stringWithFormat:
-        @"{\"status\":\"error\",\"url\":\"%@\",\"msg\":\"%@\"}",
-        [self trollJsonEscape:decoded], [self trollJsonEscape:reason]];
-    return [self trollJson:body statusCode:500];
+        @"{\"status\":\"ok\",\"url\":\"%@\",\"method\":\"%@\"}", escUrl, escMethod];
+    return [self trollJson:body statusCode:200];
 }
 
 #pragma mark - GET /uninstall?bundle_id=
