@@ -32,7 +32,6 @@ typedef enum {
 typedef struct {
     bool hasFirstResponder;     // 当前有 UIKit 文本输入焦点
     bool isAllASCII;            // 待输入文本是否纯 ASCII
-    bool appProcessAvailable;   // App 内 8184 输入服务可达（TrollVNC.app 存活）
     bool hasAXEntitlement;      // 当前进程持有辅助功能授权
     bool isDaemon;              // 当前是否无界面守护进程 (trollvncserver)
 } TVNCInputContext;

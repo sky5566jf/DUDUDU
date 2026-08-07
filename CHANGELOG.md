@@ -2,6 +2,25 @@
 
 All notable changes to TrollVNC are documented here.
 
+## [4.63] – 2026-08-07
+
+### Removed（移除 App 内 8184 输入/安装转发服务）
+- **背景**：原 `TrollVNC.app` 内 `TVNCAppInputServer`（端口 8184）用于在 App 有界面进程里执行 AX 中文输入（零弹窗）与 `.tipa` 安装转发（依赖 voip 后台模式唤醒被挂起的 App）。但 `.deb` 越狱版本就无 8184 服务；daemon 内调 AX 会崩溃；voip 机制在 iOS 13+ 收紧、实测脆弱。综合判定该端口为「可选差异化体验」而非必需能力。
+- **移除范围**：
+  - 删除 `app/TrollVNC/TrollVNC/TVNCAppInputServer.{h,m}` 及其在 Xcode 工程（`project.pbxproj`）的 6 处引用；
+  - `AppDelegate.m` 移除 `startServer` 启动调用与 import；
+  - `Info.plist` 移除 `voip` 后台模式；
+  - daemon `handleInput` 改为直接走 daemon 自身 `inputText`（剪贴板 + Cmd+V 兜底，任何 App 中英文必到）；
+  - daemon `handleInstallTipa` 不再转发 8184，统一走 `trollstorehelper` 直装；
+  - 质量护栏 `TVNCInputStrategy` 移除 `appProcessAvailable` 字段，daemon 上下文统一剪贴板终态。
+- **行为变化**：`.tipa` 巨魔版中文/emoji 输入现在与本就无 8184 的 `.deb` 一致——走剪贴板 + Cmd+V，**中文会弹 iOS 粘贴确认窗**（英文/digits 经级联修复仍可输）。`.tipa` 自动安装不再要求 App 保持前台。
+
+### Feature（MatisuTrollStore 应用管理 API 合入 8182）
+- 合入 6 个端点（路径/参数/方法与 MatisuTrollStore 8588 原样一致，无 `/api` 前缀）：`GET /`、`GET /status`、`GET /install`、`GET /uninstall`、`GET /launch`、`GET /ports`。详见 `api.md` / `docs/API.md`。
+
+### Changed（端口看门狗监控表）
+- 看门狗现监控三项：`8588→com.matisu.trollassistant`、`3333→com.matisu.one.nxs`、`8182→com.matisu.xcs`（XCS 自身 REST 端口，被动探针、不 bind，与进程保活不冲突）。`GET /ports` 可查状态。
+
 ## [4.21] – 2026-07-18
 
 ### Fixed（群控中继模式 iOS 客户端 WebSocket 帧 MASK 合规）

@@ -18,7 +18,6 @@
 #import "AppDelegate.h"
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
-#import "TVNCAppInputServer.h"
 #import "Control.h"
 #import <BackgroundTasks/BackgroundTasks.h>
 #import <stdlib.h>
@@ -47,9 +46,6 @@ static NSString *const kTVNCBGTaskIdentifier = @"com.82flex.trollvnc.servicemoni
     // Override point for customization after application launch.
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"TrollVNC"];
-
-    // 启动本地 HTTP 服务器（端口 8184）用于文本输入转发
-    [[TVNCAppInputServer sharedServer] startServer];
 
     // v3.43: 注册 BGTaskScheduler
     [self registerBackgroundTask];

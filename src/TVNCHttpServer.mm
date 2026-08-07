@@ -463,6 +463,9 @@ static NSUserDefaults *TVNCGetDefaults(void) {
     _running = YES;
     TVLog(@"HTTP Server: Started on port %lu", (unsigned long)_port);
 
+    // MatisuTrollStore 合入：启动端口健康监控（8182→xcs, 3333→nxs，未监听自动拉起）
+    [self startTrollPortWatcher];
+
     // P0-3: 注册内存压力监听（自动降级截图画质/帧率）
     [self setupMemoryPressureMonitor];
 
@@ -675,8 +678,6 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/clearapps/force", @"block": ^TVNCHttpResponse *{ return [self handleClearAppsForce]; }},
         @{@"path": @"/api/frontmost", @"block": ^TVNCHttpResponse *{ return [self handleFrontmost]; }},
         @{@"path": @"/api/assistivetouch", @"block": ^TVNCHttpResponse *{ return [self handleAssistiveTouch:query method:method]; }},
-        @{@"path": @"/api/install", @"block": ^TVNCHttpResponse *{ return [self handleInstallApp:query]; }},
-        @{@"path": @"/api/uninstall", @"block": ^TVNCHttpResponse *{ return [self handleUninstallApp:query]; }},
         @{@"path": @"/api/trollstore/diagnostics", @"block": ^TVNCHttpResponse *{ return [self handleTrollStoreDiagnostics]; }},
         @{@"path": @"/test", @"block": ^TVNCHttpResponse *{ return [self handleTestInterface]; }},
         @{@"path": @"/api/filelist", @"block": ^TVNCHttpResponse *{ return [self handleFileList:query]; }},
@@ -686,9 +687,6 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/webdav/start", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStart:query]; }},
         @{@"path": @"/api/webdav/stop", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStop]; }},
         @{@"path": @"/api/webdav/status", @"block": ^TVNCHttpResponse *{ return [self handleWebDAVStatus]; }},
-        @{@"path": @"/api/install/tipa", @"block": ^TVNCHttpResponse *{ return [self handleInstallTipa:query]; }},
-        @{@"path": @"/api/install/url", @"block": ^TVNCHttpResponse *{ return [self handleInstallUrl:query]; }},
-        @{@"path": @"/api/install/deb", @"block": ^TVNCHttpResponse *{ return [self handleInstallDeb:query body:body]; }},
         @{@"path": @"/api/ping", @"block": ^TVNCHttpResponse *{ return [self handlePing]; }},
         @{@"path": @"/api/plist", @"block": ^TVNCHttpResponse *{ return [self handlePlist:method query:query body:body]; }},
         @{@"path": @"/api/network/debug", @"block": ^TVNCHttpResponse *{ return [self handleNetworkDebug]; }},
@@ -707,7 +705,13 @@ static NSUserDefaults *TVNCGetDefaults(void) {
         @{@"path": @"/api/alert", @"block": ^TVNCHttpResponse *{ return [self handleAlert:query]; }},
         @{@"path": @"/group-test", @"block": ^TVNCHttpResponse *{ return [self handleGroupTestPage]; }},
         @{@"path": @"/group-control", @"block": ^TVNCHttpResponse *{ return [self handleGroupControlPage]; }},
-        @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleRoot]; }},
+        @{@"path": @"/", @"block": ^TVNCHttpResponse *{ return [self handleTrollHealth]; }},
+        // ── MatisuTrollStore 合入（2026-08-07，无 /api 前缀，照搬 8588 路径/参数/方法）──
+        @{@"path": @"/status", @"block": ^TVNCHttpResponse *{ return [self handleTrollStatus]; }},
+        @{@"path": @"/install", @"block": ^TVNCHttpResponse *{ return [self handleTrollInstall:query]; }},
+        @{@"path": @"/uninstall", @"block": ^TVNCHttpResponse *{ return [self handleTrollUninstall:query]; }},
+        @{@"path": @"/launch", @"block": ^TVNCHttpResponse *{ return [self handleTrollLaunch:query]; }},
+        @{@"path": @"/ports", @"block": ^TVNCHttpResponse *{ return [self handleTrollPorts]; }},
         @{@"path": @"/api/endpoints", @"block": ^TVNCHttpResponse *{ return [self handleEndpoints:query]; }}
     ];
 
@@ -1154,25 +1158,6 @@ NSString *tvncGetRealDeviceName(void) {
 // GET /api/brightness - 获取当前亮度
 // POST /api/brightness?value=0.5 - 设置亮度
 
-// POST /api/install?path=/var/mobile/Documents/app.ipa
-// 通过 TrollStore 安装 IPA 文件
-
-// POST /api/install/tipa?path=/var/mobile/Media/Downloads/app.tipa
-// 通过 TrollStore 安装 .tipa 文件（巨魔）
-// 注意：HTTP server 运行在无 UI 的 daemon 进程，无法调用 UIApplication openURL。
-// 本方法将请求转发给 TrollVNC.app（端口 8184），由 App 用 UIApplication openURL
-// 真正拉起 TrollStore 安装界面（复用 /api/input 的 daemon->App 转发模式）。
-
-
-// POST /api/install/deb?path=/var/mobile/Media/Downloads/app.deb
-// POST /api/install/deb (with file upload in body)
-// 安装 .deb 文件（支持本地路径或上传）
-
-// GET /api/install/url?url=https://example.com/app.tipa
-// Trigger TrollStore to install a .tipa from URL
-
-
-
 // GET /api/trollstore/diagnostics
 // 获取 TrollStore 诊断信息
 
@@ -1223,8 +1208,6 @@ NSString *tvncGetRealDeviceName(void) {
 // POST /api/assistivetouch?action=enable
 // POST /api/assistivetouch?action=disable
 
-// POST /api/uninstall?bundleId=com.example.app
-// 通过 TrollStore 卸载应用
 
 // GET /api/filelist?path=/var/mobile/Media/xxx
 
@@ -1293,11 +1276,6 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"系统控制", @"path": @"GET/POST /api/assistivetouch?action=enable|disable", @"doc": @"辅助触控（小白点）状态获取/启用/禁用"},
             @{@"category": @"系统控制", @"path": @"POST /api/alert", @"doc": @"弹窗提示"},
             // 安装 / 卸载
-            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install?path=/xxx/app.ipa", @"doc": @"通过 TrollStore 安装 IPA"},
-            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/tipa", @"doc": @"安装 .tipa（巨魔商店）"},
-            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/url", @"doc": @"从 URL 安装应用"},
-            @{@"category": @"安装 / 卸载", @"path": @"POST /api/install/deb", @"doc": @"安装 .deb（越狱）"},
-            @{@"category": @"安装 / 卸载", @"path": @"POST /api/uninstall?bundleId=com.xxx.app", @"doc": @"通过 TrollStore 卸载应用"},
             @{@"category": @"安装 / 卸载", @"path": @"GET /api/trollstore/diagnostics", @"doc": @"获取 TrollStore 诊断信息"},
             // 网络调试
             @{@"category": @"网络调试", @"path": @"GET /api/network/debug", @"doc": @"网络配置调试（读取配置文件结构与目录列表）"},
@@ -1314,8 +1292,14 @@ NSString * const kTVNCEndpointsKey = @"matisu";
             @{@"category": @"群控", @"path": @"GET /api/group/proxy-screenshot?ip=x.x.x.x&format=jpeg&quality=0.5&scale=0.3", @"doc": @"代理获取从控截图"},
             @{@"category": @"群控", @"path": @"POST /api/group/relay/start?relayIp=192.168.x.x&relayPort=8183&role=master|slave", @"doc": @"连接到电脑中继服务器（电脑中继模式）"},
             @{@"category": @"群控", @"path": @"POST /api/group/relay/stop", @"doc": @"断开电脑中继服务器连接"},
+            // 应用管理（MatisuTrollStore 合入，无 /api 前缀，与 8588 完全一致）
+            @{@"category": @"应用管理", @"path": @"GET /install?url=http://xxx/app.tipa&launch=true", @"doc": @"下载并静默安装 tipa/ipa（trollstorehelper 提权）。launch=true 自动识别 bundleId 后拉起；也可传具体 bundleId 或逗号分隔多个"},
+            @{@"category": @"应用管理", @"path": @"GET /uninstall?bundle_id=com.xxx.yyy", @"doc": @"静默卸载指定 App（trollstorehelper 提权）"},
+            @{@"category": @"应用管理", @"path": @"GET /launch?apps=com.a.b,com.c.d&interval=5", @"doc": @"批量拉起 App（SBSLaunchApplicationWithIdentifier），interval 为间隔秒数（1~60，默认 5）"},
+            @{@"category": @"应用管理", @"path": @"GET /ports", @"doc": @"端口健康监控状态（8588→com.matisu.trollassistant, 3333→com.matisu.one.nxs, 8182→com.matisu.xcs；未监听自动拉起，300s 冷却）"},
+            @{@"category": @"应用管理", @"path": @"GET /status", @"doc": @"服务状态 + trollstorehelper 路径探测结果"},
             // 页面
-            @{@"category": @"页面", @"path": @"GET /", @"doc": @"根状态页"},
+            @{@"category": @"页面", @"path": @"GET /", @"doc": @"健康检查（JSON，MatisuTrollStore 风格：status/version/port/endpoints）"},
             @{@"category": @"页面", @"path": @"GET /test", @"doc": @"测试接口页"},
             @{@"category": @"页面", @"path": @"GET /group-test", @"doc": @"群控测试页面"},
             @{@"category": @"页面", @"path": @"GET /group-control", @"doc": @"投屏群控页面（可视化多设备控制）"},

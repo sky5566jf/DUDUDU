@@ -34,8 +34,14 @@ int main(void) {
     CHECK(TVNCRouteIsSensitive(&info), "input 是敏感操作");
     CHECK(TVNCRouteLookup("POST", "/api/reboot", &info) && TVNCRouteIsSensitive(&info),
           "reboot 是敏感写");
-    CHECK(TVNCRouteLookup("POST", "/api/install", &info) && TVNCRouteIsSensitive(&info),
-          "install 是敏感写");
+    // MatisuTrollStore 合入（4.63）：/install|/uninstall|/launch 虽为 GET，但属写+敏感
+    // （trollstorehelper 提权静默装/卸/拉起，高危）。旧的 POST /api/install 已在 4.62 删除。
+    CHECK(TVNCRouteLookup("GET", "/install", &info) && TVNCRouteIsWrite(&info) && TVNCRouteIsSensitive(&info),
+          "install 是敏感写（GET 但属写+敏感）");
+    CHECK(TVNCRouteLookup("GET", "/uninstall", &info) && TVNCRouteIsWrite(&info) && TVNCRouteIsSensitive(&info),
+          "uninstall 是敏感写");
+    CHECK(TVNCRouteLookup("GET", "/launch", &info) && TVNCRouteIsWrite(&info) && TVNCRouteIsSensitive(&info),
+          "launch 是敏感写");
 
     // ---- clipboard 按 method 分流：GET 只读 / POST 写 ----
     CHECK(TVNCRouteLookup("GET", "/api/clipboard", &info) && TVNCRouteIsReadOnly(&info),

@@ -20,7 +20,6 @@ static TVNCInputContext ctx_default(void) {
     TVNCInputContext c;
     c.hasFirstResponder = false;
     c.isAllASCII = true;
-    c.appProcessAvailable = false;
     c.hasAXEntitlement = false;
     c.isDaemon = false;
     return c;
@@ -34,7 +33,6 @@ int main(void) {
         TVNCInputContext c = ctx_default();
         c.isDaemon = true;
         c.hasAXEntitlement = true;           // 即便“有授权”也禁用
-        c.appProcessAvailable = true;
         c.hasFirstResponder = true;
         CHECK(TVNCSelectPrimaryInput(&c) != kTVNCInputAX,
               "daemon 下不得选择 AX（v4.07 崩溃根因）");
@@ -45,13 +43,10 @@ int main(void) {
     // ---- 不变式 2：输入转发端口 8183 不安全（防 v4.08 冲突回归）----
     CHECK(TVNCIsPortSafeForInputForwarding(8183) == false,
           "8183 被 daemon Group WS 占用，不可用于输入转发");
-    CHECK(TVNCIsPortSafeForInputForwarding(8184) == true,
-          "8184 为 App 输入转发端口，安全");
 
     // ---- 不变式 3：v4.10 终态——有 App 服务 + 第一响应者走第一响应者 ----
     {
         TVNCInputContext c = ctx_default();
-        c.appProcessAvailable = true;
         c.hasFirstResponder = true;
         CHECK(TVNCSelectPrimaryInput(&c) == kTVNCInputFirstResponder,
               "有 App 服务且有焦点时应选第一响应者");
@@ -61,7 +56,6 @@ int main(void) {
     {
         TVNCInputContext c = ctx_default();
         c.isDaemon = true;
-        c.appProcessAvailable = false;
         c.hasFirstResponder = false;
         CHECK(TVNCSelectPrimaryInput(&c) == kTVNCInputClipboard,
               "daemon 无 App 服务时应剪贴板兜底");
@@ -70,7 +64,6 @@ int main(void) {
     // ---- 不变式 5：App 进程 + 有 AX 授权时优先 AX（零弹窗通道）----
     {
         TVNCInputContext c = ctx_default();
-        c.appProcessAvailable = true;
         c.hasAXEntitlement = true;
         c.hasFirstResponder = false;
         CHECK(TVNCSelectPrimaryInput(&c) == kTVNCInputAX,

@@ -30,6 +30,17 @@ static const TVNCRouteEntry g_routes[] = {
     {"GET", "/api/network/ip_methods",     TVNC_ROUTE_READONLY},
     {"GET", "/api/network/test_helper",    TVNC_ROUTE_READONLY},
 
+    // ---- MatisuTrollStore 合入路由（无 /api 前缀，照搬 8588）：只读部分 ----
+    {"GET", "/",                           TVNC_ROUTE_READONLY},
+    {"GET", "/status",                     TVNC_ROUTE_READONLY},
+    {"GET", "/ports",                      TVNC_ROUTE_READONLY},
+
+    // ---- MatisuTrollStore 合入路由：method 为 GET 但属写操作 + 高危敏感 ----
+    // 与 8588 完全一致地保留 GET，方便旧脚本换 IP 直接复用。
+    {"GET", "/install",                    TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
+    {"GET", "/uninstall",                  TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
+    {"GET", "/launch",                     TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
+
     // ---- 写操作 + 敏感（POST）----
     {"POST", "/api/input",             TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/key",               TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
@@ -45,11 +56,6 @@ static const TVNCRouteEntry g_routes[] = {
     {"POST", "/api/screen/unlock",     TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/home",              TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/assistivetouch",    TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
-    {"POST", "/api/install",           TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
-    {"POST", "/api/install/tipa",      TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
-    {"POST", "/api/install/url",       TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
-    {"POST", "/api/install/deb",       TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
-    {"POST", "/api/uninstall",         TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/clearapps/smart",   TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/clearapps/force",   TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},
     {"POST", "/api/deletefile",        TVNC_ROUTE_WRITE | TVNC_ROUTE_SENSITIVE},

@@ -1145,7 +1145,6 @@ static BOOL tvncIsAllASCII(NSString *text) {
     ctx.isAllASCII          = tvncIsAllASCII(text);
     ctx.isDaemon            = ([UIApplication sharedApplication] == nil); // daemon 无 UIKit 应用环境
     ctx.hasAXEntitlement    = NO;   // daemon 无 AX 授权；即便持有也绝不可用于输入（v4.07 根因）
-    ctx.appProcessAvailable = NO;   // daemon 内 8184 App 输入服务不可达（仅 .tipa 提供）
     return ctx;
 }
 
@@ -1193,7 +1192,7 @@ static BOOL tvncIsAllASCII(NSString *text) {
     // WKWebView / React Native / Flutter / 密码框等控件上会「假成功」（不抛异常却没把字符
     // 送进前台 App），导致部分 App 英文/数字静默丢失（v4.08/v4.09 均复现）。
     // 现统一走剪贴板，牺牲「英文零弹窗」换取「所有 App 必到」。中文/英文/数字全部可靠。
-    // 若日后需英文零弹窗，须走主 App(TrollVNC.app) 8184 的 AX 通道（第三方 App AX 受限）
+    // 若日后需零弹窗输入，须走进程内注入(TVNCInjector，注入前台目标 App 自身进程执行输入)。
     // 或进程内注入(TVNCInjector，注入前台目标 App 自身进程执行输入)。
     TVLog(@"inputText: firstResponder failed, fallback to clipboard paste (reliable for all apps)");
     if ([self inputTextViaClipboard:text]) {
@@ -1903,58 +1902,6 @@ static BOOL tvncIsAllASCII(NSString *text) {
     return nil;
 }
 
-// 检查 TrollStore 是否可用
-- (BOOL)isTrollStoreAvailable {
-    // 方法1：检查 helper 路径（向后兼容 TrollStore 1.x）
-    if ([self trollStoreHelperPath] != nil) {
-        return YES;
-    }
-
-    // 方法2：检查 trollstore 二进制（TrollStore 2.x）
-    const char *trollstorePaths[] = {
-        "/var/jb/usr/bin/trollstore",
-        "/usr/bin/trollstore",
-        NULL
-    };
-    for (int i = 0; trollstorePaths[i] != NULL; i++) {
-        if (access(trollstorePaths[i], X_OK) == 0) {
-            TVLog(@"TrollStore available: found trollstore at %s", trollstorePaths[i]);
-            return YES;
-        }
-    }
-
-    // 方法3：检查 TrollStore.app 是否存在
-    NSArray *appPaths = @[
-        @"/Applications/TrollStore.app",
-        @"/var/jb/Applications/TrollStore.app",
-        @"/var/containers/Bundle/Application/com.opa334.TrollStore/TrollStore.app"
-    ];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *path in appPaths) {
-        if ([fm fileExistsAtPath:path]) {
-            TVLog(@"TrollStore available: found %@", path);
-            return YES;
-        }
-    }
-
-    // 方法4：canOpenURL: 兜底（需要 Info.plist 声明 LSApplicationQueriesSchemes）
-    __block BOOL canOpen = NO;
-    void (^checkBlock)(void) = ^{
-        canOpen = [[UIApplication sharedApplication] canOpenURL:[NSURL URLWithString:@"trollstore://"]];
-    };
-
-    if ([NSThread isMainThread]) {
-        checkBlock();
-    } else {
-        dispatch_sync(dispatch_get_main_queue(), checkBlock);
-    }
-
-    if (canOpen) {
-        TVLog(@"TrollStore available via trollstore:// URL scheme");
-    }
-
-    return canOpen;
-}
 
 // 获取 TrollStore 诊断信息
 - (NSDictionary *)getTrollStoreDiagnostics {
@@ -2005,176 +1952,7 @@ static BOOL tvncIsAllASCII(NSString *text) {
     return diagnostics;
 }
 
-// 通过 TrollStore 安装 IPA
-- (BOOL)installAppWithIPAPath:(NSString *)ipaPath error:(NSError **)error {
-    if (!ipaPath || ipaPath.length == 0) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2001
-                                    userInfo:@{NSLocalizedDescriptionKey : @"IPA path is empty"}];
-        }
-        return NO;
-    }
-    
-    // 检查 IPA 文件是否存在
-    if (access([ipaPath UTF8String], F_OK) != 0) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2002
-                                    userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"IPA file not found: %@", ipaPath]}];
-        }
-        return NO;
-    }
-    
-    // 检查文件是否可读
-    if (access([ipaPath UTF8String], R_OK) != 0) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2002
-                                    userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"IPA file not readable: %@", ipaPath]}];
-        }
-        return NO;
-    }
-    
-    // 获取 TrollStore 帮助程序路径
-    NSString *helperPath = [self trollStoreHelperPath];
-    if (!helperPath) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2003
-                                    userInfo:@{NSLocalizedDescriptionKey : @"TrollStore helper not found. Is TrollStore installed?"}];
-        }
-        return NO;
-    }
-    
-    TVLog(@"Installing IPA using TrollStore: %@", ipaPath);
-    TVLog(@"TrollStore helper: %@", helperPath);
-    
-    // 使用 system() 函数执行命令，更兼容 iOS
-    // trollstorehelper 的参数格式: install <ipa_path>
-    NSString *command = [NSString stringWithFormat:@"\"%@\" install \"%@\" 2>&1", helperPath, ipaPath];
-    TVLog(@"Executing command: %@", command);
-    
-    // 使用 popen 执行命令并获取输出
-    FILE *fp = popen([command UTF8String], "r");
-    if (fp == NULL) {
-        TVLog(@"Failed to execute install command: %s", strerror(errno));
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2004
-                                    userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Failed to execute install command: %s", strerror(errno)]}];
-        }
-        return NO;
-    }
-    
-    // 读取输出
-    char buffer[4096];
-    NSMutableString *output = [NSMutableString string];
-    while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-        [output appendString:[NSString stringWithUTF8String:buffer]];
-    }
-    
-    int status = pclose(fp);
-    int exitCode = WEXITSTATUS(status);
-    
-    TVLog(@"TrollStore install output: %@", output);
-    TVLog(@"TrollStore install exit code: %d", exitCode);
-    
-    if (exitCode == 0) {
-        TVLog(@"IPA installed successfully: %@", ipaPath);
-        return YES;
-    } else {
-        NSString *errMsg = output.length > 0 ? output : @"Installation failed";
-        TVLog(@"Installation failed: %@", errMsg);
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2004
-                                    userInfo:@{NSLocalizedDescriptionKey : errMsg}];
-        }
-        return NO;
-    }
-}
 
-// 通过 TrollStore 卸载应用
-- (BOOL)uninstallAppWithBundleId:(NSString *)bundleId error:(NSError **)error {
-    if (!bundleId || bundleId.length == 0) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2006
-                                    userInfo:@{NSLocalizedDescriptionKey : @"Bundle ID is empty"}];
-        }
-        return NO;
-    }
-    
-    // 获取 TrollStore 帮助程序路径
-    NSString *helperPath = [self trollStoreHelperPath];
-    if (!helperPath) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2003
-                                    userInfo:@{NSLocalizedDescriptionKey : @"TrollStore helper not found. Is TrollStore installed?"}];
-        }
-        return NO;
-    }
-    
-    TVLog(@"Uninstalling app using TrollStore: %@", bundleId);
-    
-    // 构建命令: trollstorehelper uninstall <bundle_id>
-    // 使用 POSIX popen 执行命令（iOS 不支持 NSTask）
-    NSString *command = [NSString stringWithFormat:@"\"%@\" uninstall \"%@\" 2>&1", helperPath, bundleId];
-    TVLog(@"Executing command: %@", command);
-    
-    @try {
-        FILE *fp = popen([command UTF8String], "r");
-        if (fp == NULL) {
-            TVLog(@"Failed to execute uninstall command");
-            if (error) {
-                *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                            code:2007
-                                        userInfo:@{NSLocalizedDescriptionKey : @"Failed to execute uninstall command"}];
-            }
-            return NO;
-        }
-        
-        // 读取输出
-        char buffer[1024];
-        NSMutableString *output = [NSMutableString string];
-        while (fgets(buffer, sizeof(buffer), fp) != NULL) {
-            [output appendString:[NSString stringWithUTF8String:buffer]];
-        }
-        
-        int status = pclose(fp);
-        int exitCode = WEXITSTATUS(status);
-        
-        TVLog(@"TrollStore uninstall output: %@", output);
-        TVLog(@"TrollStore uninstall exit code: %d", exitCode);
-        
-        if (exitCode == 0) {
-            TVLog(@"App uninstalled successfully: %@", bundleId);
-            return YES;
-        } else {
-            if (error) {
-                NSString *errMsg = output.length > 0 ? output : @"Uninstallation failed";
-                *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                            code:2007
-                                        userInfo:@{NSLocalizedDescriptionKey : errMsg}];
-            }
-            return NO;
-        }
-    } @catch (NSException *exception) {
-        TVLog(@"Failed to uninstall app: %@", exception.reason);
-        if (error) {
-            *error = [NSError errorWithDomain:@"TVNCApiManager"
-                                        code:2008
-                                    userInfo:@{NSLocalizedDescriptionKey : 
-                                        [NSString stringWithFormat:@"Exception: %@", exception.reason]}];
-        }
-        return NO;
-    }
-}
 
 #pragma mark - 系统重启/注销 API
 

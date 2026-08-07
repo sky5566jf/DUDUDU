@@ -1,8 +1,11 @@
 # MatisuXCS HTTP API 文档
 
-> **版本**: v3.6  
+> **版本**: v4.63  
 > **默认端口**: 8182  
 > **Base URL**: `http://{设备IP}:8182`
+>
+> **v4.63 新增**：合入 MatisuTrollStore（原 8588）的 6 个端点 —— `/`、`/status`、`/install`、`/uninstall`、`/launch`、`/ports`，
+> 路径 / 参数 / 方法 / 响应结构与 8588 **完全一致**（无 `/api` 前缀），详见 [8. 应用安装/卸载](#8-应用安装卸载)。
 
 ---
 
@@ -681,107 +684,182 @@ WebDAV 标准协议操作（`PROPFIND`、`GET`、`PUT`、`DELETE`、`MKCOL` 等�
 
 ## 8. 应用安装/卸载
 
-### POST /api/install
+> **v4.63 变更**：本章的 6 个健康检查 / 安装 / 卸载 / 拉起端点从 **MatisuTrollStore（M巨魔助手，原 8588 服务）** 整体合入，
+> **路径 / 参数名 / HTTP 方法 / 响应字段与 8588 完全一致，且不带 `/api` 前缀**。
+> 旧脚本只需把 `http://IP:8588/xxx` 改成 `http://IP:8182/xxx` 即可直接复用。
+>
+> - 实现文件：`src/TVNCHttpServer+TrollStore.mm`
+> - 提权方式：`trollstorehelper` + `posix_spawnattr_set_persona_np(persona=99)`
+> - 拉起方式：`SBSLaunchApplicationWithIdentifier`（SpringBoardServices 私有 API）
 
-通过 TrollStore 安装 IPA 文件。
+### GET /
 
-**参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 是 | IPA 文件本地路径 |
+健康检查（MatisuTrollStore 风格 JSON，已替换原先的 HTML 欢迎页）。
 
 **响应**:
 
 ```json
-{"success": true, "message": "App installed successfully", "path": "/var/mobile/Media/app.ipa"}
+{
+  "status": "MatisuXCS API",
+  "version": "4.63",
+  "port": 8182,
+  "endpoints": ["/install", "/uninstall", "/status", "/launch", "/ports"]
+}
 ```
 
 ---
 
-### POST /api/install/tipa
+### GET /status
 
-通过 TrollStore 安装 .tipa 文件（巨魔包）。
-
-**参数**:
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 是 | .tipa 文件本地路径 |
+服务状态 + `trollstorehelper` 路径探测结果。
 
 **响应**:
 
 ```json
-{"success": true, "message": "TrollStore install requested", "path": "/var/mobile/Media/app.tipa"}
+{
+  "status": "ok",
+  "version": "4.63",
+  "port": 8182,
+  "supervisor": { "pid": 1234, "running": true },
+  "trollstorehelper": "/var/containers/Bundle/Application/xxx/TrollStore.app/trollstorehelper"
+}
 ```
 
-> 通过 `trollstore://install?file=` URL Scheme 触发 TrollStore 安装界面。
+未找到 helper 时 `trollstorehelper` 为 `"not_found"`。
 
 ---
 
-### POST /api/install/url
+### GET /install
 
-通过 URL 触发 TrollStore 安装远程 .tipa 文件。
+下载并**静默安装** tipa / ipa。
 
 **参数**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| url | string | 是 | 远程 .tipa 文件的下载 URL |
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `url` | ✅ | 安装包下载地址（http/https，支持 `.tipa` / `.ipa`） |
+| `launch` | ❌ | `true` = 安装后自动从 helper 输出识别 bundleId 并拉起；也可直接传 bundleId；多个用逗号分隔（相邻两个间隔 10s） |
+
+**行为**：流式下载到 `/tmp/matisu_install_<ts>.<ext>` → `trollstorehelper install <path>` → 删除临时文件 → 若指定 `launch` 则等待 2s（等 installd 注册完成）后拉起。
 
 **响应**:
 
 ```json
-{"success": true, "message": "TrollStore install requested", "url": "https://example.com/app.tipa"}
+{
+  "status": "ok",
+  "url": "http://192.69.0.2/MatisuXCS_4.63.tipa",
+  "method": "trollstorehelper",
+  "exitCode": 0,
+  "output": "...helper 输出...",
+  "launch": [{ "bundleId": "com.matisu.xcs", "result": "exitCode:0|ret=0" }]
+}
 ```
 
-> 通过 `trollstore://install?url=` URL Scheme 触发 TrollStore 下载并安装。
+失败时 `status` = `error`，HTTP 500，`msg` 说明原因（`trollstorehelper not found` / `download_failed: xxx` / `download_empty`）。
+
+**示例**:
+
+```bash
+curl "http://192.69.0.42:8182/install?url=http://192.69.0.2/app.tipa&launch=true"
+curl "http://192.69.0.42:8182/install?url=http://x/app.ipa&launch=com.a.b,com.c.d"
+```
 
 ---
 
-### POST /api/install/deb
+### GET /uninstall
 
-安装 .deb 包。
+**静默卸载**指定 App。
 
 **参数**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| path | string | 否 | .deb 文件本地路径；若不传则使用 Body 上传 |
-
-**Body**（可选）: .deb 文件二进制数据（不传 path 参数时生效）
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `bundle_id` | ✅ | 目标 App 的 bundle identifier |
 
 **响应**:
 
 ```json
-{"success": true, "message": "DEB package installed successfully, uicache triggered", "path": "/var/mobile/Media/app.deb"}
+{
+  "status": "ok",
+  "bundleId": "com.xxx.yyy",
+  "method": "trollstorehelper",
+  "exitCode": 0,
+  "output": "..."
+}
 ```
 
-> 安装成功后自动执行 `uicache -a` 刷新图标缓存，2 秒后自动 Respring。
+**示例**:
+
+```bash
+curl "http://192.69.0.42:8182/uninstall?bundle_id=com.xxx.yyy"
+```
 
 ---
 
-### POST /api/uninstall
+### GET /launch
 
-通过 TrollStore 卸载应用。
+批量拉起已安装 App（每个 App 内部带 2 次重试，重试间隔 3s）。
 
 **参数**:
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| bundleId | string | 是 | 应用 Bundle ID，如 `com.example.app` |
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `apps`（别名 `bundle_ids`） | ✅ | 逗号分隔的 bundle id 列表 |
+| `interval` | ❌ | 相邻两个 App 之间的间隔秒数，范围 1–60，默认 5 |
 
 **响应**:
 
 ```json
-{"success": true, "message": "App uninstalled successfully", "bundleId": "com.example.app"}
+{
+  "status": "ok",
+  "interval": 5,
+  "launches": [
+    { "bundleId": "com.matisu.xcs", "result": "exitCode:0|ret=0" },
+    { "bundleId": "com.matisu.one.nxs", "result": "exitCode:0|ret=0" }
+  ]
+}
+```
+
+**示例**:
+
+```bash
+curl "http://192.69.0.42:8182/launch?apps=com.matisu.xcs,com.matisu.one.nxs&interval=8"
+```
+
+---
+
+### GET /ports
+
+端口健康监控状态。监控器随 8182 HTTP 服务自动启动。
+
+| 监控端口 | 对应 App | 行为 |
+|---|---|---|
+| 8588 | `com.matisu.trollassistant` | 每 60s 探测；不通则 3s 后二次确认，仍不通则拉起 |
+| 3333 | `com.matisu.one.nxs` | 同上 |
+| 8182 | `com.matisu.xcs` | 同上（XCS 自身 REST 端口；看门狗与 8182 同生灭，仅作冗余探针） |
+
+同一端口拉起后有 **300s 冷却**；端口恢复监听后冷却记录自动清除。
+
+**响应**:
+
+```json
+{
+  "status": "ok",
+  "interval": 60,
+  "cooldown": 300,
+  "ports": [
+    { "port": 8588, "bundle": "com.matisu.trollassistant", "listening": true, "lastLaunchAgoSec": null },
+    { "port": 3333, "bundle": "com.matisu.one.nxs", "listening": false, "lastLaunchAgoSec": 42 },
+    { "port": 8182, "bundle": "com.matisu.xcs", "listening": true, "lastLaunchAgoSec": null }
+  ]
+}
 ```
 
 ---
 
 ### GET /api/trollstore/diagnostics
 
-获取 TrollStore 诊断信息。
+获取 TrollStore 诊断信息（只读诊断，非安装接口）。
 
 **响应**:
 
@@ -1162,12 +1240,12 @@ curl -X POST "http://192.168.1.100:8182/api/alert?message=测试&title=警告"
 | POST | `/api/upload` | 上传文件 |
 | GET/POST | `/api/volume` | 获取/设置音量 |
 | GET/POST | `/api/brightness` | 获取/设置亮度 |
-| POST | `/api/install` | 安装 IPA（TrollStore） |
-| POST | `/api/install/tipa` | 安装 .tipa（TrollStore URL Scheme） |
-| POST | `/api/install/url` | 从 URL 安装（TrollStore URL Scheme） |
-| POST | `/api/install/deb` | 安装 .deb 包（dpkg） |
-| POST | `/api/uninstall` | 卸载应用（TrollStore） |
 | GET | `/api/trollstore/diagnostics` | 获取 TrollStore 诊断信息 |
+| GET | `/status` | 服务状态 + trollstorehelper 路径（MatisuTrollStore 合入） |
+| GET | `/install` | 下载并静默安装 tipa/ipa（`?url=&launch=`） |
+| GET | `/uninstall` | 静默卸载 App（`?bundle_id=`） |
+| GET | `/launch` | 批量拉起 App（`?apps=&interval=`） |
+| GET | `/ports` | 端口健康监控状态（8588/3333/8182） |
 | GET/POST | `/api/plist` | 读取/写入 plist 文件 |
 | POST | `/api/reboot` | 重启设备 |
 | POST | `/api/respring` | 注销设备（15s 后自动解锁） |
@@ -1193,7 +1271,7 @@ curl -X POST "http://192.168.1.100:8182/api/alert?message=测试&title=警告"
 | POST | `/api/group/disconnect` | 从控断开连接 |
 | GET | `/api/group/slaves` | 获取从控设备 IP 列表 |
 | GET | `/api/group/proxy-screenshot` | 代理获取从控截图 |
-| GET | `/` | API 文档页面（HTML） |
+| GET | `/` | 健康检查（JSON，MatisuTrollStore 风格） |
 | GET | `/test` | 服务测试接口 |
 | GET | `/group-test` | 群控测试页面 |
 | GET | `/group-control` | 群控管理台页面 |

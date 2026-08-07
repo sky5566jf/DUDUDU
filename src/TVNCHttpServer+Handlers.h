@@ -108,10 +108,6 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleKey:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleVolume:(NSDictionary *)query body:(NSData *)body;
 - (TVNCHttpResponse *)handleBrightness:(NSDictionary *)query body:(NSData *)body;
-- (TVNCHttpResponse *)handleInstallApp:(NSDictionary *)query;
-- (TVNCHttpResponse *)handleInstallTipa:(NSDictionary *)query;
-- (TVNCHttpResponse *)handleInstallUrl:(NSDictionary *)query;
-- (TVNCHttpResponse *)handleInstallDeb:(NSDictionary *)query body:(NSData *)body;
 - (TVNCHttpResponse *)handleTrollStoreDiagnostics;
 - (TVNCHttpResponse *)handlePlist:(NSString *)method query:(NSDictionary *)query body:(NSData *)body;
 - (TVNCHttpResponse *)handleReboot;
@@ -126,7 +122,6 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleClearAppsForce;
 - (TVNCHttpResponse *)handleFrontmost;
 - (TVNCHttpResponse *)handleAssistiveTouch:(NSDictionary *)query method:(NSString *)method;
-- (TVNCHttpResponse *)handleUninstallApp:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleFileList:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleReadFile:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleDeleteFile:(NSDictionary *)query;
@@ -177,6 +172,14 @@ extern NSString * const kTVNCEndpointsKey;
 - (TVNCHttpResponse *)handleGroupSlaves;
 - (TVNCHttpResponse *)handleGroupProxyScreenshot:(NSDictionary *)query;
 - (TVNCHttpResponse *)handleAlert:(NSDictionary *)query;
+// ── MatisuTrollStore 合入（2026-08-07）：无 /api 前缀，照搬 MatisuTrollStore 8588 的路径/参数/方法 ──
+- (TVNCHttpResponse *)handleTrollHealth;                       // GET /
+- (TVNCHttpResponse *)handleTrollStatus;                      // GET /status
+- (TVNCHttpResponse *)handleTrollInstall:(NSDictionary *)query; // GET /install?url=&launch=
+- (TVNCHttpResponse *)handleTrollUninstall:(NSDictionary *)query; // GET /uninstall?bundle_id=
+- (TVNCHttpResponse *)handleTrollLaunch:(NSDictionary *)query;  // GET /launch?apps=&interval=
+- (TVNCHttpResponse *)handleTrollPorts;                       // GET /ports
+- (void)startTrollPortWatcher;                                // 端口健康监控 GCD 定时器
 - (TVNCHttpResponse *)handleGroupTestPage;
 - (TVNCHttpResponse *)handleGroupControlPage;
 - (TVNCHttpResponse *)handlePing;
