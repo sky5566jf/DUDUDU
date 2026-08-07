@@ -548,7 +548,7 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
                               dispatch_time(DISPATCH_TIME_NOW, (int64_t)kTrollPortWatchInterval * (int64_t)NSEC_PER_SEC),
                               (uint64_t)kTrollPortWatchInterval * NSEC_PER_SEC,
                               (uint64_t)(kTrollPortWatchInterval / 2) * NSEC_PER_SEC);
-    __weak typeof(self) weakSelf = self;
+    __weak __typeof__(self) weakSelf = self;
     dispatch_source_set_event_handler(sTrollPortWatchTimer, ^{
         [weakSelf trollCheckWatchedPorts];
     });
