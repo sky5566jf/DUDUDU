@@ -3344,12 +3344,75 @@ NS_INLINE NSString *keysymToString(rfbKeySym ks) {
         return @"LEFTCOMMAND"; // Treat Super as Command in both schemes
     case XK_Super_R:
         return @"RIGHTCOMMAND";
+
+    // ===== Numpad / 小键盘：运算符与分隔符（NumLock 开启态）=====
+    // 必须走专有 Keypad HID usage，不能降级到主键盘 ASCII：
+    // 主键盘上 '+' 与 '*' 需要 Shift 组合，而服务端不会自行补 Shift
+    // （Shift 由 VNC 客户端单独下发），降级会导致 '+' 误输出 '='、'*' 误输出 '8'。
+    case XK_KP_Decimal:
+        return @"KEYPADPERIOD";
+    case XK_KP_Add:
+        return @"KEYPADPLUS";
+    case XK_KP_Subtract:
+        return @"KEYPADMINUS";
+    case XK_KP_Multiply:
+        return @"KEYPADMULTIPLY";
+    case XK_KP_Divide:
+        return @"KEYPADDIVIDE";
+    case XK_KP_Equal:
+        return @"KEYPADEQUAL";
+    case XK_KP_Separator:
+        return @"KEYPADCOMMA";
+    case XK_Num_Lock:
+        return @"NUMLOCK";
+
+    // ===== Numpad / 小键盘：NumLock 关闭态退化为导航键 =====
+    // noVNC 对 location==3 的按键下发这组 KP_ keysym，此前全部落入 default
+    // 返回 nil 而被静默丢弃，表现为「小键盘完全没反应」。
+    case XK_KP_Home:
+        return @"HOME";
+    case XK_KP_End:
+        return @"END";
+    case XK_KP_Left:
+        return @"LEFTARROW";
+    case XK_KP_Right:
+        return @"RIGHTARROW";
+    case XK_KP_Up:
+        return @"UPARROW";
+    case XK_KP_Down:
+        return @"DOWNARROW";
+    case XK_KP_Page_Up: // 同值别名 XK_KP_Prior
+        return @"PAGEUP";
+    case XK_KP_Page_Down: // 同值别名 XK_KP_Next
+        return @"PAGEDOWN";
+    case XK_KP_Insert:
+        return @"INSERT";
+    case XK_KP_Delete:
+        return @"FORWARDDELETE";
+    case XK_KP_Begin:
+        return @"KEYPAD5"; // 中心键，物理位置对应数字 5
+    case XK_KP_Space:
+        return @" ";
+    case XK_KP_Tab:
+        return @"TAB";
     default:
         break;
     }
     // Function keys XK_F1..XK_F24
     if (ks >= XK_F1 && ks <= XK_F24) {
         int idx = (int)(ks - XK_F1) + 1;
+        return [NSString stringWithFormat:@"F%d", idx];
+    }
+    // Numpad digits XK_KP_0..XK_KP_9 (NumLock on) -> dedicated Keypad HID usages.
+    // 查表返回常量字面量，避免热路径上的字符串格式化分配。
+    if (ks >= XK_KP_0 && ks <= XK_KP_9) {
+        static NSString *const kKeypadDigitNames[10] = {@"KEYPAD0", @"KEYPAD1", @"KEYPAD2", @"KEYPAD3", @"KEYPAD4",
+                                                        @"KEYPAD5", @"KEYPAD6", @"KEYPAD7", @"KEYPAD8", @"KEYPAD9"};
+        return kKeypadDigitNames[ks - XK_KP_0];
+    }
+    // Numpad PF1..PF4 (DEC-style keypad) -> F1..F4
+    if (ks >= XK_KP_F1 && ks <= XK_KP_F4) {
+        int idx = (int)(ks - XK_KP_F1) + 1;
         return [NSString stringWithFormat:@"F%d", idx];
     }
     return nil;

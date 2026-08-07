@@ -1457,24 +1457,29 @@ static BOOL tvncIsAllASCII(NSString *text) {
             @(0xF70E): @0x44, // F11
             @(0xF70F): @0x45, // F12
             
-            // ===== 小键盘 (macOS keycode) =====
+            // ===== 小键盘 (macOS keycode -> USB HID Keypad usage) =====
+            // 坑：HID Keypad 数字并非从 0 顺序递增 —— 1..9 是 0x59..0x61，0 单独排在末尾 0x62。
+            // 旧表误按「0x62 起顺序递增」编排，导致 1..9 与全部运算符错位到无关 usage：
+            //   Keypad1 打出 '.'(0x63)、Keypad5 打出 '='(0x67)、Keypad6..9 变 F13..F16、
+            //   '*' '+' '.' '-' 变 F17..F20、'/' 变 F23、'=' 变 Keypad1、Clear 变 '/'。
             @(82): @0x62,   // Keypad 0
-            @(83): @0x63,   // Keypad 1
-            @(84): @0x64,   // Keypad 2
-            @(85): @0x65,   // Keypad 3
-            @(86): @0x66,  // Keypad 4
-            @(87): @0x67,  // Keypad 5
-            @(88): @0x68,  // Keypad 6
-            @(89): @0x69,  // Keypad 7
-            @(91): @0x6A,  // Keypad 8
-            @(92): @0x6B,  // Keypad 9
-            @(67): @0x6C,   // Keypad *
-            @(69): @0x6D,   // Keypad +
-            @(65): @0x6E,   // Keypad .
-            @(78): @0x6F,   // Keypad -
-            @(75): @0x7C,  // Keypad /
-            @(81): @0x59,   // Keypad =
-            @(71): @0x54,   // Keypad Clear
+            @(83): @0x59,   // Keypad 1
+            @(84): @0x5A,   // Keypad 2
+            @(85): @0x5B,   // Keypad 3
+            @(86): @0x5C,   // Keypad 4
+            @(87): @0x5D,   // Keypad 5
+            @(88): @0x5E,   // Keypad 6
+            @(89): @0x5F,   // Keypad 7
+            @(91): @0x60,   // Keypad 8
+            @(92): @0x61,   // Keypad 9
+            @(67): @0x55,   // Keypad *
+            @(69): @0x57,   // Keypad +
+            @(65): @0x63,   // Keypad .
+            @(78): @0x56,   // Keypad -
+            @(75): @0x54,   // Keypad /
+            @(81): @0x67,   // Keypad =
+            @(76): @0x58,   // Keypad Enter（原表缺失）
+            @(71): @0x53,   // Keypad Clear / NumLock
             
             // ===== 修饰键 (单独按下) =====
             @(54): @0xE3,   // Right Command
@@ -1489,11 +1494,14 @@ static BOOL tvncIsAllASCII(NSString *text) {
             
             // ===== 其他特殊键 =====
             @(127): @0x2A,  // Forward Delete
-            @(50): @0x64,   // International1 (非英文键盘)
-            @(104): @0x65,  // International2
-            @(105): @0x66,  // International3
-            @(106): @0x67,  // International4
-            @(107): @0x68,  // International5
+            // 非英文键盘 International1-5 正确 usage 为 0x87..0x8B。
+            // 旧值 0x64..0x68 实为 Non-US\ / Application / Power / Keypad= / F13 —— 其中
+            // 0x66 = Keyboard Power 会触发关机菜单，属危险误映射，一并修正。
+            @(50): @0x87,   // International1 (非英文键盘)
+            @(104): @0x88,  // International2
+            @(105): @0x89,  // International3
+            @(106): @0x8A,  // International4
+            @(107): @0x8B,  // International5
             @(10): @0x2D,   // Insert (= + on some keyboards)
         };
     });

@@ -35,8 +35,21 @@
 | GET / POST | `/api/clipboard` | 获取 / 写入剪贴板（base64 编码） |
 | GET / POST | `/api/clipboard_text` | 获取 / 写入剪贴板（纯文本） |
 | POST | `/api/input` | 注入触摸 / 输入事件（body 描述坐标、类型等） |
-| GET | `/api/key?code=13\|8` | 按键（13 = 回车，8 = 退格） |
+| GET | `/api/key?code=13\|8` | 按键（见下方键码表） |
 | POST | `/api/swipe/back` | 左滑返回（iOS 边缘手势返回上一页） |
+
+### `/api/key` 键码表（macOS virtual keycode）
+
+| 分类 | 键码 |
+|---|---|
+| 基础 | 回车 13、退格 8、Tab 9、空格 32、ESC 27 |
+| 方向 | 上 126、下 125、左 123、右 124 |
+| 导航 | Home 115、End 119、PgUp 116、PgDn 121、Forward Delete 117 |
+| 小键盘数字 | 0=82、1=83、2=84、3=85、4=86、5=87、6=88、7=89、8=91、9=92 |
+| 小键盘符号 | `.`=65、`*`=67、`+`=69、Clear/NumLock=71、`/`=75、Enter=76、`-`=78、`=`=81 |
+| 功能键 | F1 122、F2 120、F3 99、F4 118、F5 96、F6 97、F7 98、F8 100、F9 101、F10 109、F11 103、F12 111 |
+
+> 小键盘走 USB HID **Keypad 专有 usage**（`+` `*` 无需 Shift 组合），与主键盘数字区相互独立。
 
 ## 📊 状态 / 设备
 

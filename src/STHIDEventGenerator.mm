@@ -1152,8 +1152,35 @@ static inline uint32_t hidUsageCodeForCharacter(NSString *key) {
         return kHIDUsage_KeyboardLeftAlt;
     if ([key isEqualToString:@"RIGHTALT"])
         return kHIDUsage_KeyboardRightAlt;
-    if ([key isEqualToString:@"NUMPADCOMMA"] || [key isEqualToString:@"COMMA"])
+    if ([key isEqualToString:@"NUMPADCOMMA"] || [key isEqualToString:@"COMMA"] ||
+        [key isEqualToString:@"KEYPADCOMMA"])
         return kHIDUsage_KeypadComma;
+
+    // ===== Numpad / 小键盘专有 usage（直接用 USB HID Page 0x07 裸 usage 值）=====
+    // 本项目 HID 头只导出 kHIDUsage_KeypadComma / KeypadNumLock 等极少数，
+    // 数字/运算符的 kHIDUsage_Keypad* 宏未声明，故此处写权威裸值，避免编译失败。
+    // 数字 1..9 = 0x59..0x61，0 = 0x62（0 不接在 9 之后，单独跳到 0x62）。
+    if ([key hasPrefix:@"KEYPAD"] && key.length == 7) {
+        unichar d = [key characterAtIndex:6];
+        if (d >= '1' && d <= '9') // Keypad1..9 → 0x59..0x61
+            return 0x59 + (d - '1');
+        if (d == '0') // Keypad0 → 0x62
+            return 0x62;
+    }
+    if ([key isEqualToString:@"KEYPADPERIOD"] || [key isEqualToString:@"KEYPADDOT"])
+        return 0x63; // Keypad .
+    if ([key isEqualToString:@"KEYPADPLUS"])
+        return 0x57; // Keypad +
+    if ([key isEqualToString:@"KEYPADMINUS"] || [key isEqualToString:@"KEYPADHYPHEN"])
+        return 0x56; // Keypad -
+    if ([key isEqualToString:@"KEYPADMULTIPLY"] || [key isEqualToString:@"KEYPADASTERISK"])
+        return 0x55; // Keypad *
+    if ([key isEqualToString:@"KEYPADDIVIDE"] || [key isEqualToString:@"KEYPADSLASH"])
+        return 0x54; // Keypad /
+    if ([key isEqualToString:@"KEYPADEQUAL"] || [key isEqualToString:@"KEYPADEQUALSIGN"])
+        return 0x67; // Keypad =
+    if ([key isEqualToString:@"KEYPADENTER"])
+        return 0x58; // Keypad Enter
     if ([key isEqualToString:@"TAB"])
         return kHIDUsage_KeyboardTab;
     if ([key isEqualToString:@"SPACE"])
