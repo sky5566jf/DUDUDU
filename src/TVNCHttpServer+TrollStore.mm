@@ -451,21 +451,40 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
             NSString *body = [NSString stringWithFormat:
                 @"{\"status\":\"%@\",\"url\":\"%@\",\"method\":\"trollstorehelper\",\"exitCode\":%d,\"output\":\"%@\",\"launch\":[%@]}",
                 statusStr, escUrl, exitCode, escOutput, launchJson];
-            return [self trollJson:body statusCode:(exitCode == 0 ? 200 : 500)];
+            if (exitCode == 0) {
+                return [self trollJson:body statusCode:200];
+            }
+            TVLog(@"[TrollStore] trollstorehelper exited %d (output: %@), falling back to openURL", exitCode, output);
         }
         TVLog(@"[TrollStore] download failed: %@, falling back to openURL", dlError);
     } else {
         TVLog(@"[TrollStore] trollstorehelper not found, falling back to openURL");
     }
 
-    // ── 路径2: openURL 兜底（对齐 MatisuTrollStore）──
-    NSString *scheme = [@"apple-magnifier://install?url=" stringByAppendingString:decoded];
+    // ── 路径2: openURL 兜底（对齐 MatisuTrollStore，并增强中文/非ASCII URL 容错）──
+    // 交给 TrollStore 自身（以 root 身份运行）处理安装，不依赖本 App 能否经 persona_np 提权到 root。
+    // 内联 url 先做 percent-encode，确保中文/空格文件名也能正确构造 scheme
+    //（MTS 用裸 decoded 在中文名场景会 invalid_url）。
+    NSString *encodedForScheme = [decoded stringByAddingPercentEncodingWithAllowedCharacters:
+                                   [NSCharacterSet URLQueryAllowedCharacterSet]];
+    NSString *scheme = [NSString stringWithFormat:@"apple-magnifier://install?url=%@", encodedForScheme];
     NSString *method = [self trollTriggerInstall:scheme];
+    if ([method isEqualToString:@"invalid_url"]) {
+        // 极端兜底：编码后仍无法构造 URL，退回原始（与 MTS 行为一致）
+        scheme = [NSString stringWithFormat:@"apple-magnifier://install?url=%@", decoded];
+        method = [self trollTriggerInstall:scheme];
+    }
+    BOOL delegated = ![method hasPrefix:@"dlopen_failed"]
+                     && ![method isEqualToString:@"sbs_unavailable"]
+                     && ![method isEqualToString:@"invalid_url"];
     NSString *escUrl = [self trollJsonEscape:decoded];
     NSString *escMethod = [self trollJsonEscape:method];
     NSString *body = [NSString stringWithFormat:
-        @"{\"status\":\"ok\",\"url\":\"%@\",\"method\":\"%@\"}", escUrl, escMethod];
-    return [self trollJson:body statusCode:200];
+        @"{\"status\":\"%@\",\"url\":\"%@\",\"method\":\"%@\",\"msg\":\"%@\"}",
+        delegated ? @"ok" : @"error",
+        escUrl, escMethod,
+        delegated ? @"delegated to TrollStore via apple-magnifier://" : escMethod];
+    return [self trollJson:body statusCode:(delegated ? 200 : 500)];
 }
 
 #pragma mark - GET /uninstall?bundle_id=
