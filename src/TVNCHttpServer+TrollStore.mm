@@ -40,6 +40,14 @@ static const int kTrollPortLaunchCooldown  = 300;  // 同一端口拉起冷却�
 - (void)trollCheckWatchedPorts;
 @end
 
+// LSApplicationWorkspace —— 后台守护进程也能打开 URL（不依赖 UIApplication）。
+// 对齐 MatisuTrollStore：当 SBS 符号不可用时（iOS 新版已移除），用 LSApplicationWorkspace openURL: 兜底，
+// 这是 daemon 场景下打开 apple-magnifier:// scheme 的正确方式（需 opensensitiveurl entitlement，本工程已具备）。
+@interface LSApplicationWorkspace : NSObject
++ (instancetype)defaultWorkspace;
+- (BOOL)openURL:(NSURL *)url;
+@end
+
 #pragma mark - 实现
 
 @implementation TVNCHttpServer (TrollStore)
@@ -385,9 +393,26 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
     } else {
         const char *dlErr = dlerror();
         TVLog(@"[TrollStore] dlopen SpringBoardServices failed: %s", dlErr ? dlErr : "(null)");
-        return [NSString stringWithFormat:@"dlopen_failed:%s", dlErr ? dlErr : "null"];
+        // 即便 SBS 无法 dlopen，仍继续尝试 LSApplicationWorkspace（独立框架，不依赖 SBS）
     }
-    return @"sbs_unavailable";
+
+    // ── 方法3: LSApplicationWorkspace openURL: ──
+    // daemon 无 UIApplication，SBS 符号在新 iOS 常缺失（.3 实测 SBSOpen* 均取不到 → sbs_unavailable）。
+    // LSA 来自 MobileCoreServices，是所有 iOS 都存在的后台打开 URL 的可靠兜底。
+    // 对齐 MatisuTrollStore 四级 fallback 的第三级（其 supervisor.entitlements 已授权 opensensitiveurl）。
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
+    Class cls = NSClassFromString(@"LSApplicationWorkspace");
+    if (cls) {
+        id ws = [cls performSelector:@selector(defaultWorkspace)];
+        BOOL ok = (BOOL)[ws performSelector:@selector(openURL:) withObject:u];
+        TVLog(@"[TrollStore] LSApplicationWorkspace openURL: result=%d, scheme=%@", ok, scheme);
+        return ok ? @"LSApplicationWorkspace" : @"LSApplicationWorkspace_failed";
+    }
+#pragma clang diagnostic pop
+
+    TVLog(@"[TrollStore] ALL methods failed for: %@", scheme);
+    return @"all_failed";
 }
 
 #pragma mark - GET /install?url=&launch=
@@ -474,9 +499,11 @@ static int tvnc_sbsLaunchApp(CFStringRef bid) {
         scheme = [NSString stringWithFormat:@"apple-magnifier://install?url=%@", decoded];
         method = [self trollTriggerInstall:scheme];
     }
-    BOOL delegated = ![method hasPrefix:@"dlopen_failed"]
-                     && ![method isEqualToString:@"sbs_unavailable"]
-                     && ![method isEqualToString:@"invalid_url"];
+    // 成功 = 任一级真正打开了 URL；其余（dlopen_failed / sbs_unavailable / invalid_url
+    // / LSApplicationWorkspace_failed / all_failed）均视为兜底失败。
+    BOOL delegated = [method isEqualToString:@"SBSOpenSensitiveURL"]
+                 || [method isEqualToString:@"SBSOpenURL"]
+                 || [method isEqualToString:@"LSApplicationWorkspace"];
     NSString *escUrl = [self trollJsonEscape:decoded];
     NSString *escMethod = [self trollJsonEscape:method];
     NSString *body = [NSString stringWithFormat:
